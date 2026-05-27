@@ -1,5 +1,14 @@
 import os
 import streamlit as st
+
+# LangSmith мониторинг
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_API_KEY"] = os.environ.get("LANGCHAIN_API_KEY", "")
+os.environ["LANGCHAIN_PROJECT"] = "nutritionist-agent"
+
+from langchain_groq import ChatGroq
+from langchain.schema import HumanMessage, AIMessage, SystemMessage
+import streamlit as st
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 
