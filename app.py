@@ -5,9 +5,9 @@ import streamlit as st
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_API_KEY"] = os.environ.get("LANGCHAIN_API_KEY", "")
 os.environ["LANGCHAIN_PROJECT"] = "nutritionist-agent"
+import streamlit as st
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
-import streamlit as st
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SYSTEM_PROMPT = """Ты — профессиональный нутрициолог-ассистент. 
 Помогаешь клиентам с вопросами питания, анализируешь рационы, 
