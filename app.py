@@ -1,11 +1,14 @@
 import os
 import streamlit as st
-# LangSmith мониторинг
+
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_API_KEY"] = os.environ.get("LANGCHAIN_API_KEY", "")
 os.environ["LANGCHAIN_PROJECT"] = "nutritionist-agent"
+
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain_core.callbacks import LangChainTracer
+
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SYSTEM_PROMPT = """Ты — профессиональный нутрициолог-ассистент. 
 Помогаешь клиентам с вопросами питания, анализируешь рационы, 
@@ -29,14 +32,11 @@ if prompt := st.chat_input("Ваш вопрос..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    llm = ChatGroq(
-        api_key=GROQ_API_KEY,
-        model="llama-3.3-70b-versatile"
-    )
+    llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile")
+    tracer = LangChainTracer(project_name="nutritionist-agent")
     all_messages = [SystemMessage(content=SYSTEM_PROMPT)] + st.session_state.messages
-    from langchain_core.callbacks import LangChainTracer
-tracer = LangChainTracer(project_name="nutritionist-agent")
-response = llm.invoke(all_messages, config={"callbacks": [tracer]})
+    response = llm.invoke(all_messages, config={"callbacks": [tracer]})
+
     st.session_state.messages.append(AIMessage(content=response.content))
     with st.chat_message("assistant"):
         st.write(response.content)
