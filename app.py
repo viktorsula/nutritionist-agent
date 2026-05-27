@@ -34,7 +34,9 @@ if prompt := st.chat_input("Ваш вопрос..."):
         model="llama-3.3-70b-versatile"
     )
     all_messages = [SystemMessage(content=SYSTEM_PROMPT)] + st.session_state.messages
-    response = llm.invoke(all_messages)
+    from langchain_core.callbacks import LangChainTracer
+tracer = LangChainTracer(project_name="nutritionist-agent")
+response = llm.invoke(all_messages, config={"callbacks": [tracer]})
 
     st.session_state.messages.append(AIMessage(content=response.content))
     with st.chat_message("assistant"):
