@@ -8,3 +8,4 @@ pypdf==4.1.0
 python-telegram-bot==20.7
 python-dotenv==1.0.1
 tavily-python==0.3.3
+langsmith==0.1.147
