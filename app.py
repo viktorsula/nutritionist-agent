@@ -32,11 +32,9 @@ if prompt := st.chat_input("Ваш вопрос..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile")
-    tracer = LangChainTracer(project_name="nutritionist-agent")
+    llm = ChatGroq(api_key=GROQ_API_KEY, model="llama-3.3-70b-versatile") 
     all_messages = [SystemMessage(content=SYSTEM_PROMPT)] + st.session_state.messages
-    response = llm.invoke(all_messages, config={"callbacks": [tracer]})
-
+    response = llm.invoke(all_messages)
     st.session_state.messages.append(AIMessage(content=response.content))
     with st.chat_message("assistant"):
         st.write(response.content)
