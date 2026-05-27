@@ -7,7 +7,7 @@ os.environ["LANGCHAIN_PROJECT"] = "nutritionist-agent"
 
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain_core.callbacks import LangChainTracer
+from langsmith import traceable
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SYSTEM_PROMPT = """Ты — профессиональный нутрициолог-ассистент. 
