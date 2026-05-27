@@ -37,7 +37,6 @@ if prompt := st.chat_input("Ваш вопрос..."):
     from langchain_core.callbacks import LangChainTracer
 tracer = LangChainTracer(project_name="nutritionist-agent")
 response = llm.invoke(all_messages, config={"callbacks": [tracer]})
-
     st.session_state.messages.append(AIMessage(content=response.content))
     with st.chat_message("assistant"):
         st.write(response.content)
