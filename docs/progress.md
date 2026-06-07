@@ -1,80 +1,56 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: июнь 2026 (День 2)
+Последнее обновление: июнь 2026
 
 ## Выполнено
 
 ### Инфраструктура
-- [x] Репозиторий создан на GitHub
-- [x] Среда разработки: GitHub Codespaces
-- [x] CLAUDE.md создан — контекст для ИИ
-- [x] docs/progress.md — журнал прогресса
+- [x] Репозиторий GitHub: viktorsula/nutritionist-agent
+- [x] Среда разработки: GitHub Codespaces → переход на Claude Code
+- [x] Деплой на Render: nutritionist-agent-gvxp.onrender.com
+- [x] Базовый app.py на Streamlit задеплоен
 - [x] .env.example — шаблон всех ключей
 - [x] .gitignore — защита секретов
-- [x] .env — реальные ключи Supabase заполнены
-- [x] Supabase проект создан: nutritionist-agent
+- [x] Supabase проект создан: nutritionist-agent (FREE tier)
 
-### База данных Supabase
-
-#### Блок 1: Пользователи и профили ✅
-- [x] users (роли: nutritionist/observer/client)
-- [x] clients (воронка + оплата + subscription_start/end_date)
-- [x] client_profiles (медицинский профиль)
-- [x] wellness_plans (Health Coaching план)
-- [x] RLS включён на всех таблицах
-
-#### Блок 2: Память агента ✅
-- [x] conversations (история диалогов, thread_id)
-- [x] client_events (лента событий: вес, сон, еда, алерты)
-- [x] Индексы для быстрого поиска
-- [x] RLS включён
+### База данных Supabase (Блоки 1-4)
+- [x] Блок 1: users, clients, client_profiles, wellness_plans
+- [x] Блок 2: conversations, client_events
+- [x] Блок 3: nutrition_plans (версионирование + триггеры), tasks
+- [x] Блок 4: notification_schedule, audit_logs, system_settings
+- [x] View: client_registry_view
+- [x] Security Advisor: 0 errors, 2 warnings (системные, не наши)
+- [x] docs/schema.sql актуализирован (v1.2)
 
 ## В процессе
 
-### База данных Supabase
-- [ ] Блок 3: nutrition_plans + tasks
-- [ ] Блок 4: notification_schedule + audit_logs + system_settings
-- [ ] Блок 5: client_documents_metadata + knowledge_base_metadata
-- [ ] Блок 6: pgvector (client_documents_embeddings + knowledge_base_embeddings)
-- [ ] Блок 7: client_registry_view
+### База данных
+- [ ] Блок 5: document_metadata
+- [ ] Блок 5: pgvector — включить расширение в Supabase
+- [ ] Блок 5: коллекции knowledge_base, client_documents
 
-### Этапы разработки
-- [ ] Этап 1: requirements.txt обновить под новый стек
+### Код (Этапы по ТЗ)
+- [ ] Этап 2: database/client.py, models.py, queries.py
 - [ ] Этап 3: business_rules/
-- [ ] Этап 4: utils/
-- [ ] Этап 5: agents/
-- [ ] Этап 6: telegram/
-- [ ] Этап 7: app.py (обновить)
-- [ ] Этап 8: monitoring/
+- [ ] Этап 4: utils/llm.py, vision.py, helpers.py
+- [ ] Этап 5: agents/router.py + client/ + nutritionist/
+- [ ] Этап 6: telegram/bot.py
+- [ ] Этап 7: app.py (обновить под новую архитектуру)
+- [ ] Этап 8: monitoring/langfuse.py
 
-## Ключевые решения принятые в День 2
+## Ключевые решения принятые в ходе разработки
+- wellness_plans добавлен как отдельная таблица (не было в исходном ТЗ)
+- supplements_json — отдельное поле в nutrition_plans (не внутри plan_json)
+- Индивидуальные пороги алертов в client_profiles (переопределяют system_settings)
+- created_by = 'nutritionist' only — агент не назначает задачи и планы
+- 5 типов алертов: weight_increase, food_incompatible, food_forbidden,
+  no_response, bad_wellbeing (с обязательной причиной)
+- Триггеры: SECURITY INVOKER + SET search_path (прошли Security Advisor)
 
-### Архитектура
-- Нутрициолог = единственный источник назначений
-- Агент = советник и аналитик (предлагает нутрициологу)
-- Клиент общается как ему удобно (фото/текст/голос)
-
-### База знаний
-- Два физически разных хранилища (клиент ≠ библиотека)
-- Два типа веб-доступа (curated/open web)
-- Агент активно ходит на сайты добавленные нутрициологом
-
-### Данные о питании
-- Фото → Gemini Vision → уточнение если нужно
-- Текст → агент уточняет состав и способ приготовления
-- Все данные: calories, protein, fat, carbs, interval_from_last_h
-
-### Wellness план
-- Отдельная таблица (не часть nutrition_plans)
-- Блоки: sleep, physical_activity, recovery, stress_management
-- Клиент видит полностью, только нутрициолог создаёт
-
-## Следующий шаг (День 3)
-Блок 3 БД: обсудить и выполнить nutrition_plans + tasks
-Вопрос для обсуждения: структура плана питания
-(свободный текст / структурированный JSON / гибридный)
-
-## Открытые вопросы
-- Telegram: нужен новый бот или используем существующий?
-- nutrition_plans: формат хранения плана (обсудить в День 3)
+## Следующий шаг
+Блок 5 БД в Supabase:
+1. Включить расширение pgvector
+2. Создать таблицу document_metadata
+3. Создать коллекции knowledge_base и client_documents
+Затем: database/client.py — первый файл кода
