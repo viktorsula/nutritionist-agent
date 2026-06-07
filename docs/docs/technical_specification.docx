@@ -1,0 +1,759 @@
+ТЕХНИЧЕСКОЕ ЗАДАНИЕ
+Агент-ассистент нутрициолога v1.2
+Версия: 1.2 — ФинальнаяДата: Июнь 2026-06-04Статус: Готово к разработке в Claude Code
+
+1. НАЗНАЧЕНИЕ СИСТЕМЫ
+Агент-ассистент нутрициолога — ИИ-система, автоматизирующая рутинную работу нутрициолога: сбор данных о клиентах, ежедневный мониторинг, составление рационов, аналитику показателей здоровья и коммуникацию с клиентами через Telegram и веб-интерфейс.
+Ключевая ценность: Нутрициолог освобождается от рутины и концентрируется на профессиональных решениях. Клиент получает персонального ИИ-ассистента, работающего 24/7.
+
+2. РОЛИ И ПРАВА ДОСТУПА
+2.1 Роли
+Роль
+Определение
+Нутрициолог
+Владелец системы. Один пользователь в v1.0. Полный доступ ко всем данным и функциям.
+Клиент
+Пациент нутрициолога. Доступ только к своему профилю, истории и данным.
+Архитектура таблицы users изначально поддерживает расширение: второй нутрициолог, администратор — без изменения структуры БД.
+2.2 Права доступа
+Нутрициолог — полный доступ:
+•	Все профили клиентов и история
+•	База знаний (загрузка, редактирование, удаление)
+•	Управление реестром клиентов и их статусами
+•	Создание/редактирование планов питания
+•	Аналитика по всей базе клиентов
+•	Управление оплатой, доступом, задачами клиентов
+•	Настройка расписания уведомлений для каждого клиента
+•	Управление системными настройками (system_settings)
+•	Все уведомления и алерты
+Клиент — ограниченный доступ:
+•	Только свой профиль и история
+•	Только свой рацион и план
+•	Загрузка своих документов
+•	Свои задачи (просмотр и отметка выполнения)
+•	Настройки уведомлений (вкл/откл, время)
+•	При payment_status: inactive → "Ваш доступ временно ограничен. Обратитесь к нутрициологу."
+
+3. РЕГИСТРАЦИЯ И ОНБОРДИНГ КЛИЕНТА
+1. Нутрициолог создаёт аккаунт клиента
+   (имя, email/телефон, статус оплаты, часовой пояс)
+        ↓
+2. Система отправляет приглашение
+   (email или Telegram со ссылкой)
+        ↓
+3. Клиент регистрируется
+   (пароль или вход через Telegram)
+   client_status → "onboarding"
+        ↓
+4. Клиент заполняет первичную анкету
+   (возраст, вес, рост, цели, ограничения,
+    аллергии, хронические заболевания,
+    образ жизни, часовой пояс)
+        ↓
+5. Нутрициолог проверяет анкету
+   → дополняет заметками
+   → устанавливает план питания
+   → назначает первые задачи
+   → настраивает расписание уведомлений
+   client_status → "active"
+        ↓
+6. Клиент получает полный доступ
+Загрузка документов:
+•	Нутрициолог — через веб-интерфейс
+•	Клиент — через Telegram или веб
+
+4. АРХИТЕКТУРА СИСТЕМЫ
+[Telegram]                    [Web / Streamlit]
+     ↓                               ↓
+     └───────────────────────────────┘
+                     ↓
+          [Входной маршрутизатор]
+          Определяет роль по токену:
+          Нутрициолог или Клиент?
+                     ↓
+        ┌────────────┴────────────┐
+        ↓                        ↓
+  [ВЕТКА КЛИЕНТА]       [ВЕТКА НУТРИЦИОЛОГА]
+        ↓                        ↓
+  [Business Rules]       [Business Rules]
+  ├── access_rules        ├── access_rules
+  ├── medical_rules       └── notification_rules
+  ├── payment_rules
+  └── notification_rules
+        ↓                        ↓
+  [Классификатор]        [Оркестратор LangGraph]
+  запроса клиента             ↓          ↓
+        ↓               [Аналитика] [Управление
+  [Оркестратор                      клиентами]
+   LangGraph]
+   ↓      ↓      ↓      ↓
+[Агент  [Агент [Агент [Агент
+анализа] рацио- днев-  состава
+         на]   ника]  блюд/фото]
+        ↓
+  [Контекст запроса]
+  ├── Профиль клиента (Supabase)       ← всегда
+  ├── Заметки нутрициолога (Supabase)  ← всегда
+  ├── Активный план питания (Supabase) ← всегда
+  ├── Активные задачи клиента          ← всегда
+  ├── История разговоров               ← динамически
+  ├── Knowledge base (pgvector)        ← по запросу
+  └── Поиск в интернете                ← по запросу
+        ↓
+  [LLM — Groq / Claude Sonnet / Gemini Flash]
+        ↓
+     [Ответ]
+
+Параллельно независимо:
+[n8n] → уведомления по индивидуальному расписанию → Telegram
+
+5. BUSINESS RULES — ОТДЕЛЬНЫЙ МОДУЛЬ
+Детерминированный слой между LangGraph и LLM. Критические ситуации обрабатываются кодом — без рассуждений модели.
+business_rules/
+├── access_rules.py        ← статус оплаты, заморозка доступа
+├── payment_rules.py       ← проверка активности подписки
+├── medical_rules.py       ← критические значения анализов,
+│                             аллергии, беременность, диабет
+│                             severity: low/medium/high/critical
+└── notification_rules.py  ← расписание, часовые пояса, on/off
+Примеры срабатывания:
+# medical_rules.py — пороги берутся из system_settings
+thresholds = get_system_settings()["alert_thresholds"]
+
+if glucose > thresholds["glucose_critical"]:     # например, 15
+    log_alert(client_id, severity="critical")
+    notify_nutritionist(client_id, severity="critical")
+    return emergency_message()   # LLM не вызывается
+
+if glucose > thresholds["glucose_high"]:         # например, 10
+    log_alert(client_id, severity="high")
+    notify_nutritionist(client_id, severity="high")
+    # LLM вызывается, но с предупреждением
+
+if ingredient in client.allergies:
+    log_alert(client_id, severity="medium")
+    return allergy_warning()     # LLM не вызывается
+
+# access_rules.py
+if client.payment_status == "inactive":
+    return payment_required_message()   # LLM не вызывается
+
+if client.access_status == "frozen":
+    return access_frozen_message()      # LLM не вызывается
+
+6. ФУНКЦИИ АГЕНТА
+6.1 Ветка клиента
+6.1.1 Ежедневный диалог
+•	Утреннее приветствие и сбор самочувствия (по расписанию)
+•	Напоминание о плане питания на день
+•	Вечерний сбор обратной связи
+•	Напоминания о задачах на сегодня
+•	Напоминания о приёме воды и добавок (если в плане)
+6.1.2 Помощь с питанием
+•	Ответы на вопросы по рациону, плану, целям
+•	Составление меню с учётом ограничений и целей
+•	Счётчик калорий по фото тарелки — анализ КБЖУ блюда
+•	Анализ фото холодильника — предложение рецептов
+•	Проверка каждого предложенного продукта через Business Rules
+6.1.3 Управление задачами (клиент)
+•	Просмотр своих активных задач
+•	Отметка задачи как выполненной
+•	Отправка подтверждения (фото, текст) по задаче
+6.1.4 Работа с документами
+•	Приём текста, голосовых (→ Whisper), PDF, фото
+•	Сохранение в три уровня: Storage + PostgreSQL + pgvector
+•	Ответы на вопросы по своим анализам
+6.1.5 Настройки уведомлений
+•	Вкл/откл утренних уведомлений
+•	Вкл/откл вечерних уведомлений
+•	Изменение времени (с учётом часового пояса)
+6.1.6 Границы — чего агент НЕ делает:
+•	Не ставит диагнозы
+•	Не назначает препараты, БАДы, лечение
+•	Не отвечает на вопросы вне питания и личного профиля
+•	Не даёт информацию о других клиентах
+•	При критических показателях — только экстренное сообщение + нутрициолог
+6.2 Ветка нутрициолога
+6.2.1 Мониторинг клиентов
+•	Сводка по клиенту за любой период
+•	Еженедельный автоматический отчёт
+•	Алерты по severity: critical/high — немедленно, medium/low — в сводке
+6.2.2 Аналитика
+•	Анализ показателей и динамики клиента
+•	Поиск корреляций, паттернов и возможных закономерностей (выводы являются гипотезами и требуют экспертной оценки нутрициолога)
+•	Аналитика по всей базе (воронка по client_status, динамика)
+•	Сравнение текущего состояния с начальным
+6.2.3 Управление клиентами
+•	Создание/редактирование профиля
+•	Управление client_status (lead → onboarding → active → paused → completed → archived)
+•	Создание и редактирование планов питания
+•	Назначение задач клиентам
+•	Загрузка документов клиента
+•	Управление оплатой и доступом
+•	Настройка расписания уведомлений (с учётом часового пояса)
+6.2.4 Системные настройки
+•	Управление system_settings через интерфейс (без правки кода)
+
+7. СЦЕНАРИИ ИСПОЛЬЗОВАНИЯ (USE CASES)
+UC-1: Утренний диалог
+n8n в индивидуальное время клиента (timezone) → агент: приветствие → Business Rules: проверка доступа и оплаты → самочувствие → план на день → напоминание активных задач
+UC-2: Счётчик калорий по фото
+Клиент фотографирует тарелку → Gemini Flash: распознаёт блюдо → Business Rules: проверка аллергий → КБЖУ → сравнение с дневной нормой → запись в client_events
+UC-3: Анализ фото холодильника
+Клиент фото холодильника → распознавание продуктов → Business Rules: фильтр аллергенов → 2-3 варианта блюд с рецептами и КБЖУ
+UC-4: Критический показатель
+Клиент: "Сахар 18, что делать?" → Business Rules: glucose > critical_threshold → severity="critical" → экстренное сообщение клиенту + немедленный алерт нутрициологу. LLM не вызывается.
+UC-5: Задача клиенту
+Нутрициолог: "Поставь Марине задачу — взвеситься в пятницу утром" → создаётся tasks запись → пятница утром n8n напоминает Марине → Марина отправляет результат → агент фиксирует в client_events
+UC-6: Голосовое сообщение
+Голосовое → Whisper транскрибирует → классификатор → агент дневника фиксирует → client_event с severity если тревожно → уведомление нутрициологу
+UC-7: Нутрициолог — сводка
+"Как дела у Марины за неделю?" → профиль + client_events + разговоры → структурированный отчёт: вес, самочувствие, КБЖУ, задачи, алерты
+UC-8: Изменение плана
+"Убери глютен у Марины с сегодня" → новая версия nutrition_plans (is_active=true, старая=false, effective_to=сегодня) → audit_log → client_event "plan_updated" → следующий диалог учитывает изменение
+UC-9: Воронка клиентов
+Нутрициолог: "Покажи статистику по базе" → агент читает client_registry_view → "Всего: 87. Active: 52, Paused: 11, Lead: 14, Completed: 8, Archived: 2"
+UC-10: Изменение порога алерта
+Нутрициолог через интерфейс меняет glucose_critical с 15 на 13 → обновляется system_settings → Business Rules автоматически применяет новый порог
+UC-11: Загрузка анализов
+PDF → Storage (файл) + PostgreSQL document_metadata + pgvector (эмбеддинги чанков) → client_event "document_uploaded" → уведомление нутрициологу
+
+8. ЯЗЫКИ ОБЩЕНИЯ
+Язык
+Код
+Русский
+ru
+Английский
+en
+Арабский
+ar
+Урду
+ur
+Клиент выбирает язык при регистрации. Можно изменить в настройках. Агент общается с клиентом на выбранном языке. Интерфейс нутрициолога — русский (v1.0).
+
+9. ТЕХНИЧЕСКИЙ СТЕК
+Уровень
+Инструмент
+Цена
+Обоснование
+Интерфейс (веб)
+Streamlit
+—
+Часть Render
+Мессенджер
+Telegram (python-telegram-bot)
+Бесплатно
+Основной канал клиента
+Авторизация
+Supabase Auth
+Бесплатно
+JWT, единая авторизация
+Автоматизация
+n8n cloud
+Бесплатно / ~$20/мес
+Индивидуальные расписания, timezone
+Business Rules
+Python модули
+Бесплатно
+Детерминированная логика
+Логика агента
+LangGraph
+Бесплатно
+Граф оркестрации
+LLM (диалог)
+Groq / llama-3.3-70b
+Бесплатно
+Быстрые ежедневные запросы
+LLM (аналитика)
+Claude Sonnet
+~$3/M токенов
+Глубокий анализ
+LLM (фото/vision)
+Gemini 1.5 Flash
+Бесплатно (1500 req/день)
+Фото блюд, холодильник
+Голос → текст
+OpenAI Whisper API
+$0.006/мин
+Транскрипция
+БД (всё)
+Supabase
+$0 → $25/мес
+PostgreSQL + pgvector + Storage
+Мониторинг
+LangFuse
+Бесплатно
+Трейсинг агента
+Деплой
+Render (paid)
+$7/мес
+Стабильный хостинг
+Версионирование
+GitHub
+Бесплатно
+CI/CD
+Бюджет на старте (до 20 клиентов): ~$15-20/мес При 100 активных клиентах: ~$100-150/мес
+
+10. СТРУКТУРА БАЗЫ ДАННЫХ (Supabase)
+PostgreSQL — полная схема таблиц
+-- Пользователи системы (единый источник для Auth)
+users
+├── id (UUID, PK)
+├── auth_id (FK → Supabase Auth)
+├── role (nutritionist / client)
+├── email
+└── created_at
+
+-- Профили клиентов
+clients
+├── id (UUID, PK)
+├── user_id (FK → users)
+├── name
+├── telegram_id
+├── language (ru/en/ar/ur)
+├── timezone (IANA: "Asia/Dubai")
+├── payment_status (active / inactive)
+├── access_status (active / frozen)
+├── client_status
+│   ├── lead
+│   ├── onboarding
+│   ├── active
+│   ├── paused
+│   ├── completed
+│   └── archived
+└── nutritionist_notes
+
+-- Медицинские профили
+client_profiles
+├── client_id (FK → clients)
+├── age, weight, height, gender
+├── goals
+├── restrictions
+├── allergies (array)
+├── chronic_conditions
+└── onboarding_completed_at
+
+-- Планы питания (с версионированием)
+nutrition_plans
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── version (int, автоинкремент)
+├── title ("Базовый план", "Без глютена от 10.06")
+├── created_by (nutritionist / agent)
+├── created_at
+├── effective_from (date)
+├── effective_to (date, NULL = действует сейчас)
+├── is_active (boolean)
+└── plan_json
+
+-- История разговоров
+conversations
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── timestamp
+├── channel (telegram / web)
+├── conversation_type (client_dialog / nutritionist_note / system)
+├── role (client / nutritionist / agent)
+├── thread_id (группировка по сессии)
+├── message_text
+└── metadata_json
+    -- {"model": "groq", "tokens": 800,
+    --  "alert": false, "sentiment": "neutral"}
+
+-- Журнал событий клиента
+client_events
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── event_type
+│   -- document_uploaded, plan_updated, complaint,
+│   -- weight_logged, alert_triggered, payment_changed,
+│   -- task_completed, calories_logged, status_changed
+├── severity (low / medium / high / critical / NULL)
+├── event_date
+├── payload_json
+└── created_at
+
+-- Задачи клиентов
+tasks
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── title ("Взвеситься в пятницу утром")
+├── description
+├── due_date
+├── status (pending / completed / overdue / cancelled)
+├── created_by (nutritionist / agent)
+└── created_at
+
+-- Расписание уведомлений
+notification_schedule
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── notification_type (morning / evening / reminder)
+├── scheduled_time (локальное время клиента)
+├── timezone (IANA)
+├── is_active (boolean)
+└── updated_at
+
+-- Аудит всех действий
+audit_logs
+├── id (UUID, PK)
+├── actor_type (nutritionist / client / agent / system)
+├── actor_id
+├── action
+│   -- update_allergy, change_plan, freeze_access,
+│   -- update_threshold, assign_task, change_status
+├── entity_type (client / plan / task / schedule / settings)
+├── entity_id
+├── old_value (JSON)
+├── new_value (JSON)
+└── timestamp
+
+-- Метаданные документов
+document_metadata
+├── id (UUID, PK)
+├── client_id (FK → clients)
+├── file_name, file_type
+├── storage_path (Supabase Storage URL)
+├── uploaded_by (client / nutritionist)
+├── uploaded_at
+└── processing_status (pending / processed / failed)
+
+-- Системные настройки
+system_settings
+├── id (UUID, PK)
+├── key (строка: "alert_thresholds", "default_language")
+├── value (JSON)
+├── updated_by
+└── updated_at
+
+-- Примеры записей system_settings:
+-- key: "alert_thresholds"
+-- value: {
+--   "glucose_critical": 15,
+--   "glucose_high": 10,
+--   "pressure_critical": 180,
+--   "bmi_critical_low": 16
+-- }
+--
+-- key: "nutritionist_telegram_id"
+-- value: {"chat_id": "123456789"}
+--
+-- key: "feature_flags"
+-- value: {"voice_enabled": true, "vision_enabled": true}
+SQL View (реестр клиентов)
+CREATE VIEW client_registry_view AS
+SELECT
+  c.id,
+  c.name,
+  c.email,
+  c.telegram_id,
+  c.language,
+  c.timezone,
+  c.client_status,
+  c.payment_status,
+  c.access_status,
+  cp.goals,
+  cp.weight,
+  np.version        AS plan_version,
+  np.title          AS plan_title,
+  np.effective_from AS plan_from,
+  c.created_at,
+  last_event.event_date AS last_contact,
+  active_tasks.count    AS open_tasks
+FROM clients c
+JOIN client_profiles cp
+  ON c.id = cp.client_id
+LEFT JOIN nutrition_plans np
+  ON c.id = np.client_id AND np.is_active = true
+LEFT JOIN (
+  SELECT client_id, MAX(event_date) AS event_date
+  FROM client_events
+  GROUP BY client_id
+) last_event ON c.id = last_event.client_id
+LEFT JOIN (
+  SELECT client_id, COUNT(*) AS count
+  FROM tasks
+  WHERE status = 'pending'
+  GROUP BY client_id
+) active_tasks ON c.id = active_tasks.client_id;
+Supabase Storage
+/documents/
+├── /client_{id}/    ← анализы клиента
+└── /knowledge/      ← библиотека нутрициолога
+pgvector — коллекции
+knowledge_base       ← профессиональная библиотека нутрициолога
+client_documents     ← эмбеддинги чанков PDF клиентов
+Правило трёх уровней для каждого PDF:
+1.	Supabase Storage → бинарный файл
+2.	PostgreSQL (document_metadata) → метаданные
+3.	pgvector (client_documents) → эмбеддинги чанков
+
+11. n8n АВТОМАТИЗАЦИЯ
+Принцип персональных уведомлений
+Каждый клиент имеет персональное расписание в notification_schedule. n8n проверяет таблицу каждые 5 минут, конвертирует время с учётом часового пояса клиента.
+Workflow: Персональные уведомления
+├── Триггер: каждые 5 минут
+├── Code Node: читает notification_schedule
+│   WHERE scheduled_time = NOW() в timezone клиента
+│   AND is_active = true
+│   AND clients.access_status = 'active'
+│   AND clients.payment_status = 'active'
+├── For Each клиент:
+│   ├── morning / evening → инициировать диалог
+│   └── reminder → отправить напоминание о задаче
+Все workflows
+Workflow
+Триггер
+Действие
+Персональные уведомления
+Каждые 5 мин
+Рассылка по индивидуальному расписанию (timezone-aware)
+Еженедельный отчёт
+Пн 09:00 (timezone нутрициолога)
+Сводка по всем active-клиентам → Telegram нутрициолога
+Тревожный алерт
+Webhook от Business Rules
+Немедленный алерт нутрициологу с severity
+Просроченные задачи
+Ежедневно 10:00
+Список overdue tasks → Telegram нутрициолога
+Напоминание об оплате
+Ежедневно 10:00
+Клиенты с inactive оплатой → Telegram нутрициолога
+Настройки уведомлений клиента
+Изменяются клиентом или нутрициологом:
+•	Время утреннего сообщения (по умолчанию 08:00 по timezone клиента)
+•	Время вечернего сообщения (по умолчанию 21:00 по timezone клиента)
+•	Вкл/откл утренних уведомлений
+•	Вкл/откл вечерних уведомлений
+Все изменения → audit_logs.
+
+12. КЛЮЧЕВЫЕ ФУНКЦИИ КОДА
+# --- LLM ---
+call_llm(provider, model, messages, task_type)
+# task_type: "dialog"→Groq, "analysis"→Claude Sonnet, "vision"→Gemini
+
+# --- Business Rules ---
+check_access(client_id)           → allow | block
+check_payment(client_id)          → active | restricted
+check_medical_alerts(data, client_id) → safe | (severity, message)
+check_allergies(ingredients, client_id) → safe | warning
+
+# --- Системные настройки ---
+get_system_settings(key)          → value
+update_system_settings(key, value, actor_id)
+
+# --- Память ---
+save_conversation(client_id, message, role, thread_id, metadata)
+summarize_conversation(client_id, last_n)
+load_episode_memory(client_id, last_n=10)
+
+# --- Профили и планы ---
+load_client_profile(client_id)
+update_client_profile(client_id, updates)
+create_nutrition_plan(client_id, title, plan_json, effective_from, created_by)
+get_active_plan(client_id)
+
+# --- Задачи ---
+create_task(client_id, title, description, due_date, created_by)
+complete_task(task_id, confirmation_payload)
+get_pending_tasks(client_id)
+
+# --- События и алерты ---
+log_client_event(client_id, event_type, payload, severity=None)
+trigger_alert(client_id, severity, message)
+
+# --- Документы (три уровня) ---
+upload_document(client_id, file)  → Storage + metadata + embeddings
+search_client_documents(client_id, query)
+
+# --- База знаний ---
+add_to_knowledge_base(text, metadata)
+search_knowledge_base(query, client_id=None)
+
+# --- Уведомления ---
+get_notifications_due_now()
+update_notification_schedule(client_id, type, time, timezone, is_active)
+
+# --- Аудит ---
+write_audit_log(actor_type, actor_id, action, entity_type, entity_id,
+                old_value, new_value)
+
+# --- Утилиты ---
+safe_json_parse(text)
+transcribe_voice(audio_file)      → Whisper API
+analyze_image(image, prompt)      → Gemini Flash
+convert_to_local_time(utc_time, timezone)
+
+13. БЕЗОПАСНОСТЬ И ПРИВАТНОСТЬ
+•	Все данные в Supabase (UAE регион предпочтителен)
+•	Авторизация через Supabase Auth (JWT)
+•	Row Level Security (RLS) в Supabase — клиент физически не может получить данные другого клиента на уровне БД
+•	Каждый клиент привязан к своему Telegram chat_id
+•	API ключи — только в переменных окружения Render, никогда в коде
+•	Медицинские данные не передаются третьим сторонам
+•	Полный аудит всех изменений в audit_logs
+
+14. ГРАНИЦА MVP v1.0
+Включено в MVP:
+•	Таблица users + интеграция с Supabase Auth
+•	Регистрация клиента нутрициологом + анкета
+•	client_status: lead → onboarding → active
+•	Ветка клиента: ежедневный диалог, питание текстом, задачи
+•	Счётчик калорий по фото тарелки (Gemini Vision)
+•	Ветка нутрициолога: сводка, план, задачи, реестр
+•	Telegram + веб (Streamlit) параллельно
+•	Business Rules: доступ, оплата, базовые медицинские проверки с severity
+•	Персональное расписание уведомлений (timezone-aware)
+•	Версионирование планов с title и датами
+•	client_events + tasks + audit_logs + system_settings
+•	Языки: русский + английский
+•	LangFuse мониторинг
+•	Расширенная аналитика по всей базе
+Следующая итерация (v1.1):
+•	Голосовые сообщения (Whisper)
+•	Анализ фото холодильника
+•	Арабский и Урду
+Вне скоупа агента:
+•	Автоматический биллинг
+•	Видеозвонки
+•	Интеграция с медицинскими приборами
+
+15. СТЕК РАЗРАБОТКИ
+•	Среда: Claude Code
+•	Репозиторий: GitHub viktorsula/nutritionist-agent
+•	Деплой: Render (автодеплой при push в main)
+•	Мониторинг: LangFuse cloud
+
+Версия 1.2 — Июнь 2025 Финальное ТЗ — передаётся в разработку
+
+
+
+
+
+
+
+
+
+
+
+Полная структура проекта с очерёдностью
+
+
+nutritionist-agent/
+│
+│  ── ЭТАП 1: ФУНДАМЕНТ ──────────────────────────────
+│
+├── .env.example                    [1] Первым — шаблон переменных
+│                                       Связи: используется ВСЕМИ модулями
+│
+├── requirements.txt                [2] Зависимости Python
+│                                       Связи: нужен для pip install
+│
+├── Dockerfile                      [3] Обновить под новую структуру
+│                                       Связи: Render читает этот файл
+│
+│  ── ЭТАП 2: БАЗА ДАННЫХ ────────────────────────────
+│
+├── database/
+│   ├── __init__.py                 [4] Делает папку модулем Python
+│   ├── client.py                   [5] Подключение к Supabase
+│   │                                   Связи: импортируется всеми кто работает с БД
+│   ├── schema.sql                  [6] SQL для создания всех таблиц в Supabase
+│   │                                   Связи: выполняется вручную в Supabase Dashboard
+│   ├── models.py                   [7] Структуры данных (dataclasses)
+│   │                                   Связи: используется queries.py и агентами
+│   └── queries.py                  [8] Все функции из раздела 12 ТЗ
+│                                       (load_client_profile, save_conversation и т.д.)
+│                                       Связи: импортируется агентами и business_rules
+│
+│  ── ЭТАП 3: BUSINESS RULES ─────────────────────────
+│
+├── business_rules/
+│   ├── __init__.py                 [9]
+│   ├── access_rules.py             [10] check_access(), check_payment()
+│   │                                    Связи: импортирует queries.py → читает БД
+│   ├── medical_rules.py            [11] check_medical_alerts(), check_allergies()
+│   │                                    Связи: импортирует queries.py + system_settings
+│   ├── payment_rules.py            [12] проверка статуса подписки
+│   │                                    Связи: импортирует queries.py
+│   └── notification_rules.py       [13] расписание, timezone, on/off
+│                                        Связи: импортирует queries.py
+│
+│  ── ЭТАП 4: УТИЛИТЫ ────────────────────────────────
+│
+├── utils/
+│   ├── __init__.py                 [14]
+│   ├── llm.py                      [15] call_llm(provider, model, messages, task_type)
+│   │                                    Groq / Claude Sonnet / Gemini Flash
+│   │                                    Связи: импортируется агентами
+│   ├── voice.py                    [16] transcribe_voice() → Whisper API
+│   │                                    Связи: импортируется router.py
+│   ├── vision.py                   [17] analyze_image() → Gemini Flash
+│   │                                    Связи: импортируется агентами клиента
+│   └── helpers.py                  [18] safe_json_parse(), convert_to_local_time()
+│                                        Связи: импортируется везде
+│
+│  ── ЭТАП 5: АГЕНТЫ ─────────────────────────────────
+│
+├── agents/
+│   ├── __init__.py                 [19]
+│   ├── router.py                   [20] Входной маршрутизатор
+│   │                                    Определяет роль по токену
+│   │                                    Связи: вызывает business_rules ПЕРВЫМ
+│   │                                    затем направляет в client или nutritionist
+│   │
+│   ├── client/
+│   │   ├── __init__.py             [21]
+│   │   ├── orchestrator.py         [22] LangGraph граф для клиента
+│   │   │                                Связи: router → orchestrator → агенты ниже
+│   │   ├── dialog_agent.py         [23] ежедневный диалог, самочувствие
+│   │   ├── nutrition_agent.py      [24] рацион, меню, калории
+│   │   ├── diary_agent.py          [25] дневник питания, фиксация событий
+│   │   └── vision_agent.py         [26] фото тарелки, фото холодильника
+│   │
+│   └── nutritionist/
+│       ├── __init__.py             [27]
+│       ├── orchestrator.py         [28] LangGraph граф для нутрициолога
+│       ├── analytics_agent.py      [29] сводки, динамика, корреляции
+│       └── management_agent.py     [30] клиенты, планы, задачи, реестр
+│
+│  ── ЭТАП 6: КАНАЛЫ ВХОДА ───────────────────────────
+│
+├── telegram/
+│   ├── __init__.py                 [31]
+│   └── bot.py                      [32] python-telegram-bot
+│                                        Связи: вызывает router.py
+│
+│  ── ЭТАП 7: ВЕБ ИНТЕРФЕЙС ──────────────────────────
+│
+├── app.py                          [33] Streamlit — точка входа
+│                                        Связи: вызывает router.py
+│
+│  ── ЭТАП 8: МОНИТОРИНГ ─────────────────────────────
+│
+└── monitoring/
+    ├── __init__.py                 [34]
+    └── langfuse.py                 [35] трейсинг всех вызовов LLM
+                                         Связи: импортируется в llm.py
+
+
+Схема потока данных (как всё связано)
+
+
+Telegram / Streamlit
+        ↓
+    router.py [20]
+        ↓
+  business_rules [10-13]  ← queries.py [8] ← database/client.py [5]
+        ↓
+  orchestrator.py [22/28]
+        ↓
+    агенты [23-30]
+        ↓
+    llm.py [15] → Groq / Claude / Gemini
+        ↓
+    queries.py [8] → сохранить в Supabase
+        ↓
+      ответ
+

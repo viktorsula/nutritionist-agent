@@ -165,6 +165,10 @@ nutritionist-agent/
 5. Триггеры версионирования с SECURITY INVOKER + SET search_path —
    прошли Security Advisor Supabase без ошибок
 6. `bad_wellbeing` алерт включает обязательную причину в payload_json
+## Документация
+- `docs/schema.sql` — актуальная схема БД
+- `docs/progress.md` — журнал прогресса  
+- `docs/technical_specification.docx` — полное ТЗ v1.2
 
 ## Владелец проекта
 Виктор Сула, Дубай.
