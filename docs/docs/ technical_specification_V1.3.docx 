@@ -1,0 +1,390 @@
+ТЕХНИЧЕСКОЕ ЗАДАНИЕ
+Агент-ассистент нутрициолога
+Версия 1.3 — Актуализированная
+Июнь 2026
+Статус: В разработке — База данных готова (Блоки 1–4)
+
+1. НАЗНАЧЕНИЕ СИСТЕМЫ
+Агент-ассистент нутрициолога — ИИ-система, автоматизирующая рутинную работу нутрициолога: сбор данных о клиентах, ежедневный мониторинг, составление рационов, аналитику показателей здоровья и коммуникацию с клиентами через Telegram и веб-интерфейс.
+
+Ключевая ценность: нутрициолог освобождается от рутины и концентрируется на профессиональных решениях. Клиент получает персонального ИИ-ассистента, работающего 24/7.
+
+2. РОЛИ И ПРАВА ДОСТУПА
+2.1 Роли
+Роль
+Определение
+Нутрициолог
+Владелец системы. Один пользователь в v1.0. Полный доступ ко всем данным и функциям.
+Клиент
+Пациент нутрициолога. Доступ только к своему профилю, истории и данным.
+
+Архитектура таблицы users поддерживает расширение: второй нутрициолог, администратор — без изменения структуры БД.
+
+2.2 Ключевой принцип (зафиксирован в ходе разработки)
+Роль
+Функция
+Нутрициолог
+Единственный источник назначений (планы, задачи, пороги алертов)
+Агент
+Аналитик и советник для нутрициолога
+Клиент
+Исполнитель и информатор
+
+3. АРХИТЕКТУРА СИСТЕМЫ
+Входящее сообщение → router.py → business_rules (детерминированный слой) → LangGraph агент → LLM → ответ → сохранить в Supabase.
+
+Уровень
+Описание
+Входные каналы
+Telegram Bot, Streamlit веб-интерфейс
+Маршрутизатор
+router.py — определяет роль по токену
+Business Rules
+Детерминированный слой, обрабатывает критические ситуации ДО вызова LLM
+Оркестратор
+LangGraph — граф оркестрации агентов
+LLM провайдеры
+Groq (диалог), Claude Sonnet (аналитика), Gemini Flash (фото/vision)
+База данных
+Supabase (PostgreSQL + pgvector + Storage)
+Уведомления
+n8n cloud — timezone-aware расписания
+
+4. БАЗА ДАННЫХ
+4.1 Статус реализации
+База данных полностью создана в Supabase. Security Advisor: 0 errors, 2 warnings (системные).
+
+4.2 Таблицы (11 таблиц + 1 view)
+Блок
+Таблица
+Назначение
+Статус
+Блок 1
+users
+Пользователи системы, интеграция с Supabase Auth
+✅
+Блок 1
+clients
+Профили клиентов, статусы, доступ
+✅
+Блок 1
+client_profiles
+Медданные, аллергии, цели, индивидуальные пороги алертов
+✅
+Блок 1
+wellness_plans
+Планы ЗОЖ: сон, активность, восстановление, стресс
+✅
+Блок 2
+conversations
+История диалогов (telegram/web)
+✅
+Блок 2
+client_events
+Журнал событий с severity (low/medium/high/critical)
+✅
+Блок 3
+nutrition_plans
+Планы питания + БАДы (supplements_json), версионирование
+✅
+Блок 3
+tasks
+Задачи клиентам, связь с plan_id
+✅
+Блок 4
+notification_schedule
+Персональное расписание, timezone-aware
+✅
+Блок 4
+audit_logs
+Полный аудит всех действий
+✅
+Блок 4
+system_settings
+Настройки и пороги алертов (без правки кода)
+✅
+View
+client_registry_view
+Реестр клиентов с агрегацией
+✅
+Блок 5
+document_metadata
+Метаданные документов
+⏳
+Блок 5
+knowledge_base
+pgvector — библиотека нутрициолога
+⏳
+Блок 5
+client_documents
+pgvector — эмбеддинги PDF клиентов
+⏳
+
+4.3 Ключевые решения по структуре БД
+•	wellness_plans выделена отдельно от nutrition_plans: «как жить» vs «что есть»
+•	supplements_json — отдельное поле в nutrition_plans (не внутри plan_json)
+•	Индивидуальные пороги алертов в client_profiles переопределяют глобальные из system_settings
+•	created_by = 'nutritionist' only в plans и tasks — агент не назначает, только советует
+•	Триггеры версионирования: SECURITY INVOKER + SET search_path — прошли Security Advisor
+•	EXCLUDE constraint — гарантирует только один активный план на клиента на уровне БД
+
+5. СИСТЕМА АЛЕРТОВ
+5 типов алертов. Все пороги настраиваются нутрициологом: глобально в system_settings, индивидуально в client_profiles.
+
+Тип алерта
+Триггер
+Источник данных
+Настройка
+weight_increase
+Вес > порог за день
+measurements
+порог кг в профиле клиента
+food_incompatible
+Несочетаемые продукты
+knowledge_base (pgvector)
+вкл/откл
+food_forbidden
+Запрещённый продукт
+nutrition_plans (ограничения)
+список в плане
+no_response
+Нет ответа N часов
+conversations
+часы в профиле клиента
+bad_wellbeing
+«Нехорошо» + причина на чек-ин
+client_events
+вкл/откл
+
+bad_wellbeing: ответ клиента обязательно включает причину. Пример payload: {"answer": "нехорошо", "reason": "болит голова", "checkin_time": "08:15"}
+
+6. BUSINESS RULES
+Детерминированный слой между входом и LLM. Критические ситуации обрабатываются кодом — без рассуждений модели.
+
+Модуль
+Функции
+Связи
+access_rules.py
+check_access(), check_payment()
+queries.py → БД
+medical_rules.py
+check_medical_alerts(), check_allergies()
+queries.py + system_settings
+payment_rules.py
+Проверка статуса подписки
+queries.py → clients
+notification_rules.py
+Расписание, timezone, on/off
+notification_schedule
+
+7. ТЕХНИЧЕСКИЙ СТЕК
+Уровень
+Инструмент
+Версия/Модель
+Назначение
+Веб-интерфейс
+Streamlit
+—
+Интерфейс нутрициолога
+Мессенджер
+python-telegram-bot
+20.x
+Основной канал клиента
+Агент
+LangGraph
+—
+Оркестрация агентов
+LLM диалог
+Groq / llama-3.3-70b
+—
+Быстрые ежедневные запросы (бесплатно)
+LLM аналитика
+Claude Sonnet
+4.6
+Глубокий анализ (~$3/M токенов)
+LLM vision
+Gemini Flash
+1.5
+Фото блюд, холодильник (бесплатно)
+Голос
+OpenAI Whisper
+—
+Транскрипция (v1.1, $0.006/мин)
+БД
+Supabase
+FREE → $25
+PostgreSQL + pgvector + Storage
+Уведомления
+n8n cloud
+—
+Timezone-aware расписания
+Мониторинг
+LangFuse
+—
+Трейсинг LLM вызовов
+Деплой
+Render
+$7/мес
+Стабильный хостинг
+Версионирование
+GitHub
+—
+CI/CD, хранение кода
+
+8. СРЕДА РАЗРАБОТКИ
+Инструмент
+Назначение
+Статус
+GitHub Codespaces
+Основная среда разработки
+✅ Настроена
+Claude Code (Sonnet 4.6)
+ИИ-ассистент разработки в терминале
+✅ Подключён
+Supabase MCP
+Подключение Claude Code к БД
+⚠️ Частичное
+GitHub Secrets
+Безопасное хранение SUPABASE_URL, SUPABASE_SERVICE_KEY
+✅ Настроены
+
+Правила работы Claude Code (зафиксированы в CLAUDE.md):
+•	Показывать план перед каждым действием, ждать подтверждения
+•	Общаться только на русском языке
+•	НИКОГДА не использовать load_dotenv()
+•	НИКОГДА не хардкодить ключи — только os.environ.get()
+•	Объяснять что делает и почему
+
+9. СТРУКТУРА ПРОЕКТА
+Файл/Папка
+Назначение
+Статус
+.env / .env.example
+Переменные окружения
+✅
+requirements.txt
+Python зависимости
+⚠️ Требует обновления (pgvector, openai, langgraph)
+Dockerfile
+Контейнеризация для Render
+✅
+app.py
+Streamlit — точка входа веб
+⚠️ Требует обновления под новую архитектуру
+CLAUDE.md
+Контекст и правила для Claude Code
+✅ Актуализирован
+docs/schema.sql
+Полная схема БД v1.3
+✅ Актуализирован
+docs/progress.md
+Журнал прогресса
+✅
+docs/technical_specification.docx
+Данный документ
+✅
+database/client.py
+Подключение к Supabase
+✅
+database/models.py
+Dataclass-модели всех таблиц
+✅
+database/queries.py
+Функции работы с БД
+✅
+business_rules/
+Детерминированные правила
+⏳
+utils/llm.py
+Мультипровайдерный LLM клиент
+⏳
+utils/vision.py
+Gemini Flash для фото
+⏳
+agents/router.py
+Входной маршрутизатор
+⏳
+agents/client/
+Агенты ветки клиента
+⏳
+agents/nutritionist/
+Агенты ветки нутрициолога
+⏳
+telegram/bot.py
+Telegram Bot
+⏳
+monitoring/langfuse.py
+Трейсинг LLM
+⏳
+
+10. ПЛАН РАЗРАБОТКИ — СЛЕДУЮЩИЕ ШАГИ
+Приоритет
+Задача
+Описание
+1
+Блок 5 БД
+Включить pgvector в Supabase, создать document_metadata, knowledge_base, client_documents
+2
+requirements.txt
+Добавить: supabase, langgraph, langchain, pgvector, openai, langfuse, python-telegram-bot
+3
+business_rules/
+access_rules.py, medical_rules.py, payment_rules.py, notification_rules.py
+4
+utils/
+llm.py (мультипровайдер), vision.py (Gemini), helpers.py
+5
+agents/router.py
+Входной маршрутизатор, определение роли по токену
+6
+agents/client/
+dialog_agent, nutrition_agent, diary_agent, vision_agent
+7
+agents/nutritionist/
+analytics_agent, management_agent
+8
+telegram/bot.py
+Интеграция с Telegram
+9
+app.py
+Обновить Streamlit под новую архитектуру
+10
+monitoring/
+LangFuse трейсинг
+
+11. БЕЗОПАСНОСТЬ
+•	Все данные в Supabase (предпочтителен UAE регион)
+•	Авторизация через Supabase Auth (JWT)
+¥	Row Level Security (RLS) — клиент физически не может получить данные другого клиента
+•	API ключи — только в переменных окружения (Codespaces Secrets, Render), никогда в коде
+•	Медицинские данные не передаются третьим сторонам
+•	Полный аудит всех изменений в audit_logs
+¥	Claude Code: запрет load_dotenv(), запрет хардкода ключей — зафиксировано в CLAUDE.md
+
+12. ГРАНИЦА MVP v1.0
+Включено:
+•	Таблица users + интеграция с Supabase Auth
+•	Регистрация клиента нутрициологом + анкета
+¥	client_status: lead → onboarding → active
+•	Ветка клиента: ежедневный диалог, питание текстом, задачи
+•	Счётчик калорий по фото тарелки (Gemini Vision)
+•	Ветка нутрициолога: сводка, план, задачи, реестр
+•	Telegram + веб (Streamlit) параллельно
+•	Business Rules: доступ, оплата, 5 типов алертов
+•	Персональное расписание уведомлений (timezone-aware)
+•	Версионирование планов питания и wellness-планов
+¥	client_events + tasks + audit_logs + system_settings
+•	Языки: русский + английский
+•	LangFuse мониторинг
+
+Следующая итерация (v1.1):
+•	Голосовые сообщения (Whisper)
+•	Анализ фото холодильника
+•	Арабский и Урду
+
+Вне скоупа:
+•	Автоматический биллинг
+•	Видеозвонки
+•	Интеграция с медицинскими приборами
+
+Версия 1.3 | Июнь 2026 | Виктор Сула, Дубай

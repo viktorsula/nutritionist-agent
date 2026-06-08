@@ -62,13 +62,14 @@ class WellnessPlan:
 class Conversation:
     id: Optional[UUID] = None
     client_id: Optional[UUID] = None
-    timestamp: Optional[datetime] = None
+    message_timestamp: Optional[datetime] = None
     channel: Optional[str] = None
     conversation_type: Optional[str] = None
     role: Optional[str] = None
     thread_id: Optional[str] = None
     message_text: Optional[str] = None
     metadata_json: Dict[str, Any] = field(default_factory=dict)
+    created_at: Optional[datetime] = None
 
 
 @dataclass
@@ -130,7 +131,7 @@ class AuditLog:
     entity_id: Optional[UUID] = None
     old_value: Dict[str, Any] = field(default_factory=dict)
     new_value: Dict[str, Any] = field(default_factory=dict)
-    timestamp: Optional[datetime] = None
+    action_timestamp: Optional[datetime] = None
 
 
 @dataclass

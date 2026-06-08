@@ -43,11 +43,12 @@ llm.py → Groq / Claude / Gemini
 - **Агент** = аналитик и советник для нутрициолога
 - **Клиент** = исполнитель и информатор
 
-## База данных Supabase
-Проект: nutritionist-agent (FREE tier)
-Все таблицы созданы и готовы. Схема: docs/schema.sql
+## База данных Supabase ✅ ГОТОВА (v1.3)
+Проект: nutritionist-agent (FREE tier)  
+Security Advisor: **0 errors, 0 warnings**  
+Схема: `docs/schema.sql` (актуализирована 8 июня 2026)
 
-### Таблицы (11):
+### Таблицы (14):
 **Блок 1 — Пользователи и профили:**
 - `users` — единый источник для Supabase Auth (role: nutritionist/client)
 - `clients` — профили клиентов (статусы: client_status, payment_status, access_status)
@@ -55,7 +56,7 @@ llm.py → Groq / Claude / Gemini
 - `wellness_plans` — планы ЗОЖ: сон, активность, восстановление, стресс
 
 **Блок 2 — Коммуникация:**
-- `conversations` — история диалогов (channel: telegram/web)
+- `conversations` — история диалогов (channel: telegram/web), поле: message_timestamp
 - `client_events` — журнал событий с severity (low/medium/high/critical)
 
 **Блок 3 — Рабочие инструменты:**
@@ -64,19 +65,25 @@ llm.py → Groq / Claude / Gemini
 
 **Блок 4 — Инфраструктура:**
 - `notification_schedule` — персональное расписание (timezone-aware)
-- `audit_logs` — полный аудит всех действий
+- `audit_logs` — полный аудит всех действий, поле: action_timestamp
 - `system_settings` — настройки и пороги алертов (без правки кода)
 
-**Блок 5 — Документы (следующий этап):**
-- `document_metadata` — НЕ создана, следующий этап
-- pgvector: `knowledge_base`, `client_documents` — НЕ созданы
+**Блок 5 — Документы и pgvector:**
+- `document_metadata` — метаданные документов (источники, тип, привязка к клиенту)
+- `knowledge_base` — база знаний, чанки с эмбеддингами (pgvector, vector(1536))
+- `client_documents` — документы клиентов, чанки с эмбеддингами (pgvector, vector(1536))
 
-### View:
-- `client_registry_view` — реестр клиентов с агрегацией
+### View (1):
+- `client_registry_view` — реестр клиентов с агрегацией (SECURITY INVOKER)
 
-### Триггеры:
+### Триггеры (2):
 - `trg_plan_version` — автоинкремент версии плана по клиенту
 - `trg_deactivate_old_plans` — деактивация старого плана при создании нового
+
+### Индексы:
+- `idx_knowledge_base_embedding` — ivfflat для векторного поиска (cosine)
+- `idx_client_documents_embedding` — ivfflat для векторного поиска (cosine)
+- + стандартные индексы для conversations, client_events, tasks, audit_logs
 
 ## Система алертов (5 типов)
 Все пороги настраиваются нутрициологом — глобально в system_settings,
@@ -84,11 +91,11 @@ llm.py → Groq / Claude / Gemini
 
 | Алерт | Триггер | Источник |
 |-------|---------|----------|
-| `weight_increase` | Вес > порог за день | measurements |
-| `food_incompatible` | Несочетаемые продукты | knowledge_base |
-| `food_forbidden` | Запрещённый продукт | nutrition_plans |
-| `no_response` | Нет ответа N часов | conversations |
-| `bad_wellbeing` | "нехорошо" + причина на чек-ин | client_events |
+| `weight_increase` | Вес > порог за день | client_events (event_type: 'weight_logged') |
+| `food_incompatible` | Несочетаемые продукты | knowledge_base (pgvector поиск) |
+| `food_forbidden` | Запрещённый продукт | nutrition_plans (restrictions) |
+| `no_response` | Нет ответа N часов | conversations (message_timestamp) |
+| `bad_wellbeing` | "нехорошо" + причина на чек-ин | client_events (severity + payload_json) |
 
 ## Business Rules (детерминированный слой)
 Обрабатывают критические ситуации ДО вызова LLM:
@@ -136,22 +143,27 @@ nutritionist-agent/
 └── docs/
 ├── schema.sql            ← актуальная схема БД
 └── progress.md
-## Текущий статус
+## Текущий статус (8 июня 2026)
 - [x] Репозиторий и деплой на Render
-- [x] База данных Supabase — Блоки 1-4 (11 таблиц)
-- [x] schema.sql актуализирован
-- [ ] Блок 5: document_metadata + pgvector
-- [ ] database/: client.py, models.py, queries.py
-- [ ] business_rules/
-- [ ] utils/
-- [ ] agents/
+- [x] База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА (14 таблиц + VIEW + триггеры)
+- [x] schema.sql актуализирован (v1.3)
+- [x] Блок 5: document_metadata + pgvector + knowledge_base + client_documents
+- [x] **database/client.py** — подключение к Supabase готово
+- [x] **database/models.py** — 14 моделей готовы
+- [x] **database/queries.py** — 42 функции реализованы (для business_rules, agents, n8n)
+- [ ] business_rules/ ← **СЛЕДУЮЩИЙ ШАГ**
+- [ ] utils/ (llm.py, vision.py, voice.py, helpers.py)
+- [ ] agents/ (router.py + оркестраторы + агенты)
 - [ ] telegram/bot.py
 - [ ] monitoring/langfuse.py
 
 ## Следующий шаг
-**Блок 5 БД:** document_metadata + включение pgvector в Supabase +
-создание коллекций knowledge_base и client_documents.
-Затем — переход к написанию кода: database/client.py первым.
+**Этап 3:** Создание business_rules/ — детерминированный слой (access_rules, medical_rules, payment_rules, notification_rules).
+
+Все функции queries.py готовы и задокументированы в:
+- `docs/queries_for_business_rules.md` (8 функций)
+- `docs/queries_for_agents.md` (14 функций)
+- `docs/queries_for_n8n.md` (8 функций)
 
 ## Важные решения (зафиксированы)
 1. `wellness_plans` отдельно от `nutrition_plans` —
