@@ -1,7 +1,7 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: 8 июня 2026
+Последнее обновление: 9 июня 2026
 
 ## Выполнено
 
@@ -27,17 +27,21 @@
 - [x] **docs/schema.sql** — актуализирован до v1.3
 - [x] **Миграция v1.2 → v1.3** — успешно выполнена (8 июня 2026)
 
-### Код Python — БАЗА ГОТОВА
+### Код Python
 - [x] **database/client.py** — подключение к Supabase готово
 - [x] **database/models.py** — все 14 моделей готовы, синхронизированы с БД v1.3
 - [x] **database/queries.py** — 42 функции реализованы (8 для business_rules, 14 для agents, 8 для n8n, 12 базовых)
+- [x] **business_rules/** — детерминированный слой готов ✅
+  - [x] access_rules.py — проверка доступа, 2 режима (full_program, ai_support)
+  - [x] medical_rules.py — 5 типов алертов + маршрутизация к нутрициологу
+  - [x] notification_rules.py — timezone-aware проверки расписания
 
 ## В процессе
 
 ### Код (Этапы по ТЗ v1.3)
 - [x] **Этап 2:** database/ — ЗАВЕРШЁН (client.py, models.py, queries.py готовы)
-- [ ] **Этап 3:** business_rules/ (access, medical, payment, notification) ← **СЛЕДУЮЩИЙ**
-- [ ] **Этап 4:** utils/ (llm.py, vision.py, voice.py, helpers.py)
+- [x] **Этап 3:** business_rules/ — ЗАВЕРШЁН ✅ (access_rules, medical_rules, notification_rules готовы, протестированы)
+- [ ] **Этап 4:** utils/ (llm.py, vision.py, voice.py, helpers.py) ← **СЛЕДУЮЩИЙ**
 - [ ] **Этап 5:** agents/ (router.py + client/ + nutritionist/)
 - [ ] **Этап 6:** telegram/bot.py
 - [ ] **Этап 7:** app.py (обновить под новую архитектуру)
@@ -55,4 +59,4 @@
 - **queries.py:** 42 функции охватывают все сценарии из ТЗ v1.3 (раздел 12)
 
 ## Следующий шаг
-**Этап 3:** Создание business_rules/ — детерминированный слой (access_rules, medical_rules, payment_rules, notification_rules)
+**Этап 4:** Создание utils/ — вспомогательные модули (llm.py для мультипровайдерного вызова LLM, vision.py, voice.py, helpers.py)

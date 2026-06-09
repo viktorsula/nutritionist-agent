@@ -143,7 +143,7 @@ nutritionist-agent/
 └── docs/
 ├── schema.sql            ← актуальная схема БД
 └── progress.md
-## Текущий статус (8 июня 2026)
+## Текущий статус (9 июня 2026)
 - [x] Репозиторий и деплой на Render
 - [x] База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА (14 таблиц + VIEW + триггеры)
 - [x] schema.sql актуализирован (v1.3)
@@ -151,19 +151,23 @@ nutritionist-agent/
 - [x] **database/client.py** — подключение к Supabase готово
 - [x] **database/models.py** — 14 моделей готовы
 - [x] **database/queries.py** — 42 функции реализованы (для business_rules, agents, n8n)
-- [ ] business_rules/ ← **СЛЕДУЮЩИЙ ШАГ**
-- [ ] utils/ (llm.py, vision.py, voice.py, helpers.py)
+- [x] **business_rules/** — ГОТОВО ✅
+  - [x] access_rules.py — проверка доступа (анкета, оплата, режимы)
+  - [x] medical_rules.py — 5 типов алертов + маршрутизация
+  - [x] notification_rules.py — проверка расписания (timezone-aware)
+- [ ] utils/ (llm.py, vision.py, voice.py, helpers.py) ← **СЛЕДУЮЩИЙ ШАГ**
 - [ ] agents/ (router.py + оркестраторы + агенты)
 - [ ] telegram/bot.py
 - [ ] monitoring/langfuse.py
 
 ## Следующий шаг
-**Этап 3:** Создание business_rules/ — детерминированный слой (access_rules, medical_rules, payment_rules, notification_rules).
+**Этап 4:** Создание utils/ — вспомогательные модули (llm.py, vision.py, voice.py, helpers.py).
 
-Все функции queries.py готовы и задокументированы в:
-- `docs/queries_for_business_rules.md` (8 функций)
-- `docs/queries_for_agents.md` (14 функций)
-- `docs/queries_for_n8n.md` (8 функций)
+business_rules/ готов и протестирован:
+- `access_rules.py` — 2 режима работы (full_program, ai_support)
+- `medical_rules.py` — 5 типов алертов + determine_routing() для маршрутизации
+- `notification_rules.py` — timezone-aware проверки расписания
+- Все импорты работают ✅
 
 ## Важные решения (зафиксированы)
 1. `wellness_plans` отдельно от `nutrition_plans` —
