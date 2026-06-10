@@ -144,6 +144,33 @@ def get_all_system_settings() -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def get_setting(key: str) -> Optional[Any]:
+    """
+    Получает значение настройки из system_settings.
+
+    Используется для:
+    - llm_config (конфигурация LLM моделей)
+    - alert_thresholds (пороги алертов)
+    - и других системных настроек
+
+    Args:
+        key: Ключ настройки (например, 'llm_config')
+
+    Returns:
+        Значение setting_value (может быть dict, list, str, int, bool)
+        или None если настройка не найдена
+
+    Example:
+        >>> llm_config = get_setting('llm_config')
+        >>> if llm_config and 'dialog' in llm_config:
+        >>>     print(llm_config['dialog'])
+    """
+    setting = get_system_setting(key)
+    if setting and isinstance(setting, dict):
+        return setting.get('setting_value')
+    return None
+
+
 def get_knowledge_base_chunks(document_id: str) -> List[Dict[str, Any]]:
     supabase = _service_client()
     response = (

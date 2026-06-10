@@ -143,25 +143,40 @@ nutritionist-agent/
 └── docs/
 ├── schema.sql            ← актуальная схема БД
 └── progress.md
-## Текущий статус (9 июня 2026)
+## Текущий статус (10 июня 2026)
 - [x] Репозиторий и деплой на Render
 - [x] База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА (14 таблиц + VIEW + триггеры)
 - [x] schema.sql актуализирован (v1.3)
 - [x] Блок 5: document_metadata + pgvector + knowledge_base + client_documents
 - [x] **database/client.py** — подключение к Supabase готово
 - [x] **database/models.py** — 14 моделей готовы
-- [x] **database/queries.py** — 42 функции реализованы (для business_rules, agents, n8n)
+- [x] **database/queries.py** — 43 функции реализованы (добавлена get_setting())
 - [x] **business_rules/** — ГОТОВО ✅
   - [x] access_rules.py — проверка доступа (анкета, оплата, режимы)
   - [x] medical_rules.py — 5 типов алертов + маршрутизация
   - [x] notification_rules.py — проверка расписания (timezone-aware)
-- [ ] utils/ (llm.py, vision.py, voice.py, helpers.py) ← **СЛЕДУЮЩИЙ ШАГ**
-- [ ] agents/ (router.py + оркестраторы + агенты)
-- [ ] telegram/bot.py
+- [x] **utils/** — ГОТОВО (базовые модули) ✅
+  - [x] llm.py — мультипровайдерный LLM клиент (Groq, Claude, Gemini)
+  - [x] helpers.py — вспомогательные функции (структура готова)
+  - [ ] vision.py, voice.py, web_access.py, knowledge.py ← Этап 6
+- [x] **prompts/** — ГОТОВО ✅
+  - [x] Система управления промптами (БД приоритет → файлы fallback)
+  - [x] client/dialog_system.md — промпт для диалога
+  - [x] nutritionist/analytics_system.md — промпт для аналитики
+- [x] **agents/** — ГОТОВО (базовая инфраструктура) ✅
+  - [x] router.py — входной маршрутизатор (роль → ветка)
+  - [x] client/orchestrator.py — LangGraph граф клиента
+  - [x] client/dialog_agent.py — работающий агент диалога
+  - [x] nutritionist/orchestrator.py — заглушка (TODO аналитика)
+  - [ ] vision_agent, nutrition_agent, diary_agent ← Этап 6
+  - [ ] analytics_agent, management_agent ← Этап 6
+- [ ] telegram/bot.py ← **СЛЕДУЮЩИЙ ШАГ** (Этап 7)
 - [ ] monitoring/langfuse.py
 
 ## Следующий шаг
-**Этап 4:** Создание utils/ — вспомогательные модули (llm.py, vision.py, voice.py, helpers.py).
+**Этап 6:** Расширение agents/ (vision_agent, nutrition_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
+**ИЛИ**  
+**Этап 7:** Telegram Bot (telegram/bot.py) — интеграция с agents/router.py для работающего MVP.
 
 business_rules/ готов и протестирован:
 - `access_rules.py` — 2 режима работы (full_program, ai_support)
