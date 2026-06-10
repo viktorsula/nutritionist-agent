@@ -1,7 +1,8 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: 10 июня 2026
+Последнее обновление: 10 июня 2026 (вечер)
+Сессия: Завершена, готов к Telegram Bot
 
 ## Выполнено
 
@@ -43,11 +44,20 @@
   - [x] client/dialog_system.md — промпт для диалога с клиентом
   - [x] nutritionist/analytics_system.md — промпт для аналитики
 - [x] **agents/** — базовая инфраструктура готова ✅
-  - [x] router.py — входной маршрутизатор (роль → ветка агентов)
+  - [x] router.py — входной маршрутизатор (роль → ветка агентов) + обработка observer
   - [x] client/state.py — ClientState TypedDict для LangGraph
   - [x] client/orchestrator.py — LangGraph граф (5 узлов: load_context → check_alerts → dialog_agent → format_response → save_to_db)
   - [x] client/dialog_agent.py — работающий агент диалога (использует Groq llama-3.3-70b)
   - [x] nutritionist/orchestrator.py — заглушка (направление к веб-интерфейсу)
+- [x] **app.py** — веб-интерфейс обновлён ✅
+  - [x] Интеграция с agents/router.py (вместо прямого ChatGroq)
+  - [x] Поддержка 3 ролей: client ✅, nutritionist ✅, observer (зарезервирован)
+  - [x] Ветка клиента: чат работает через dialog_agent
+  - [x] Ветка нутрициолога: заглушка с табами (Реестр, Аналитика, Настройки)
+- [x] **Миграции БД** — создана система миграций ✅
+  - [x] docs/migrations/001_add_observer_role.sql — добавить observer в users.role
+  - [x] docs/migrations/README.md — инструкции по применению
+  - [x] docs/schema.sql обновлён (v1.3.1 — observer включён)
 
 ## В процессе
 
@@ -56,9 +66,10 @@
 - [x] **Этап 3:** business_rules/ — ЗАВЕРШЁН ✅
 - [x] **Этап 4:** utils/ — ЗАВЕРШЁН (базовые модули) ✅
 - [x] **Этап 5:** agents/ + prompts/ — ЗАВЕРШЁН (базовая инфраструктура) ✅
+- [x] **Этап 7 (часть 1):** app.py — ЗАВЕРШЁН (веб-интерфейс интегрирован с agents/) ✅
+- [ ] **Этап 7 (часть 2):** telegram/bot.py — интеграция с router.py ← **СЛЕДУЮЩИЙ** (для работающего MVP)
 - [ ] **Этап 6:** Расширение agents/ (vision, nutrition, diary, analytics) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)
-- [ ] **Этап 7:** telegram/bot.py — интеграция с router.py ← **СЛЕДУЮЩИЙ** (для работающего MVP)
-- [ ] **Этап 8:** app.py (обновить веб-интерфейс под новую архитектуру)
+- [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
 - [ ] **Этап 9:** monitoring/langfuse.py
 
 ## Ключевые решения принятые в ходе разработки

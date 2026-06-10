@@ -180,19 +180,28 @@ nutritionist-agent/
   - [x] client/dialog_system.md — промпт для диалога
   - [x] nutritionist/analytics_system.md — промпт для аналитики
 - [x] **agents/** — ГОТОВО (базовая инфраструктура) ✅
-  - [x] router.py — входной маршрутизатор (роль → ветка)
+  - [x] router.py — входной маршрутизатор (роль → ветка) + observer
   - [x] client/orchestrator.py — LangGraph граф клиента
   - [x] client/dialog_agent.py — работающий агент диалога
   - [x] nutritionist/orchestrator.py — заглушка (TODO аналитика)
   - [ ] vision_agent, nutrition_agent, diary_agent ← Этап 6
   - [ ] analytics_agent, management_agent ← Этап 6
-- [ ] telegram/bot.py ← **СЛЕДУЮЩИЙ ШАГ** (Этап 7)
+- [x] **app.py** — ОБНОВЛЁН ✅
+  - [x] Интеграция с agents/router.py
+  - [x] Поддержка 3 ролей (client, nutritionist, observer)
+  - [x] Ветка клиента: чат через dialog_agent
+  - [x] Ветка нутрициолога: заглушка с табами
+- [ ] **telegram/bot.py** ← **СЛЕДУЮЩИЙ ШАГ** (Этап 7 продолжение)
 - [ ] monitoring/langfuse.py
 
 ## Следующий шаг
-**Этап 6:** Расширение agents/ (vision_agent, nutrition_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
-**ИЛИ**  
-**Этап 7:** Telegram Bot (telegram/bot.py) — интеграция с agents/router.py для работающего MVP.
+**Этап 7 (продолжение):** Telegram Bot (telegram/bot.py) — интеграция с agents/router.py для работающего MVP.
+
+## Важно перед продолжением
+⚠️ **Выполнить миграцию в Supabase:**
+- Файл: `docs/migrations/001_add_observer_role.sql`
+- Цель: Добавить роль 'observer' в users.role CHECK constraint
+- Статус: ⏳ Ожидает выполнения
 
 business_rules/ готов и протестирован:
 - `access_rules.py` — 2 режима работы (full_program, ai_support)
