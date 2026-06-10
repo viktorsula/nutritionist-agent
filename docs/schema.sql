@@ -15,7 +15,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     auth_id UUID UNIQUE,  -- связь с auth.users в Supabase
-    role TEXT NOT NULL CHECK (role IN ('nutritionist', 'client')),
+    role TEXT NOT NULL CHECK (role IN ('nutritionist', 'client', 'observer')),
     email TEXT UNIQUE,
     created_at TIMESTAMP DEFAULT NOW()
 );
