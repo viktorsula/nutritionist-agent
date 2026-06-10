@@ -191,11 +191,18 @@ nutritionist-agent/
   - [x] Поддержка 3 ролей (client, nutritionist, observer)
   - [x] Ветка клиента: чат через dialog_agent
   - [x] Ветка нутрициолога: заглушка с табами
-- [ ] **telegram/bot.py** ← **СЛЕДУЮЩИЙ ШАГ** (Этап 7 продолжение)
-- [ ] monitoring/langfuse.py
+- [x] **telegram/** — ГОТОВО (базовый функционал) ✅
+  - [x] bot.py — основной бот (python-telegram-bot)
+  - [x] commands.py — /start, /help, /status
+  - [x] handlers.py — текст (работает), фото/голос (TODO Этап 6)
+  - [x] test_bot.py — тесты команд и обработчиков
+  - [ ] vision_agent, voice.py интеграция ← Этап 6
+- [ ] monitoring/langfuse.py ← Этап 9
 
 ## Следующий шаг
-**Этап 7 (продолжение):** Telegram Bot (telegram/bot.py) — интеграция с agents/router.py для работающего MVP.
+**Этап 6:** Расширение agents/ (vision_agent, nutrition_agent, diary_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
+**ИЛИ**  
+**Этап 8:** app.py (полный интерфейс нутрициолога: реестр клиентов, аналитика, редактор промптов)
 
 ## Важно перед продолжением
 ⚠️ **Выполнить миграцию в Supabase:**

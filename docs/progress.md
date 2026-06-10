@@ -1,8 +1,8 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: 10 июня 2026 (вечер)
-Сессия: Завершена, готов к Telegram Bot
+Последнее обновление: 10 июня 2026 (поздний вечер)
+Сессия: Этап 7 завершён полностью (веб + Telegram)
 
 ## Выполнено
 
@@ -58,6 +58,12 @@
   - [x] docs/migrations/001_add_observer_role.sql — добавить observer в users.role
   - [x] docs/migrations/README.md — инструкции по применению
   - [x] docs/schema.sql обновлён (v1.3.1 — observer включён)
+- [x] **telegram/** — Telegram бот готов ✅
+  - [x] bot.py — основной бот (python-telegram-bot)
+  - [x] commands.py — /start, /help, /status (работают)
+  - [x] handlers.py — текст через route_message(), фото/голос (заглушки для Этапа 6)
+  - [x] test_bot.py — тесты команд и обработчиков
+  - [x] README.md — документация
 
 ## В процессе
 
@@ -67,8 +73,8 @@
 - [x] **Этап 4:** utils/ — ЗАВЕРШЁН (базовые модули) ✅
 - [x] **Этап 5:** agents/ + prompts/ — ЗАВЕРШЁН (базовая инфраструктура) ✅
 - [x] **Этап 7 (часть 1):** app.py — ЗАВЕРШЁН (веб-интерфейс интегрирован с agents/) ✅
-- [ ] **Этап 7 (часть 2):** telegram/bot.py — интеграция с router.py ← **СЛЕДУЮЩИЙ** (для работающего MVP)
-- [ ] **Этап 6:** Расширение agents/ (vision, nutrition, diary, analytics) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)
+- [x] **Этап 7 (часть 2):** telegram/bot.py — ЗАВЕРШЁН (базовый функционал) ✅
+- [ ] **Этап 6:** Расширение agents/ (vision, nutrition, diary, analytics) + utils/ (vision.py, voice.py, web_access.py, knowledge.py) ← **СЛЕДУЮЩИЙ**
 - [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
 - [ ] **Этап 9:** monitoring/langfuse.py
 
@@ -89,6 +95,12 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 7:** Telegram Bot (telegram/bot.py) — интеграция с agents/router.py для работающего MVP диалога с клиентами  
+**Этап 6:** Расширение агентов (vision_agent для фото еды, nutrition_agent для анализа рациона, diary_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
 **ИЛИ**  
-**Этап 6:** Расширение агентов (vision_agent для фото еды, nutrition_agent для анализа рациона) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)
+**Этап 8:** app.py (полный интерфейс нутрициолога: реестр клиентов, аналитика, редактор промптов)
+
+## Важно перед запуском
+⚠️ **Выполнить миграцию в Supabase:**
+- Файл: `docs/migrations/001_add_observer_role.sql`
+- Статус: ⏳ Ожидает выполнения
+- Без этой миграции роль observer не будет работать в БД
