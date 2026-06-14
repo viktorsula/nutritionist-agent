@@ -1,166 +1,78 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-**Обновлено:** 8 июня 2026, после завершения миграции БД v1.3 и реализации queries.py
+**Обновлено:** 14 июня 2026, после Этапа 6 Часть A (код агентов клиента + роутинг)
 
 ---
 
-## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ:
+## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
-**Начать разработку `business_rules/` — детерминированный слой между входом и LLM**
-
----
-
-## ✅ ТЕКУЩЕЕ СОСТОЯНИЕ (8 июня 2026):
-
-### **База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА:**
-- ✅ **14 таблиц** созданы и проверены:
-  - **Блок 1:** users, clients, client_profiles, wellness_plans
-  - **Блок 2:** conversations, client_events
-  - **Блок 3:** nutrition_plans, tasks
-  - **Блок 4:** notification_schedule, audit_logs, system_settings
-  - **Блок 5:** document_metadata, knowledge_base, client_documents
-- ✅ **VIEW:** client_registry_view (с SECURITY INVOKER)
-- ✅ **Триггеры:** trg_plan_version, trg_deactivate_old_plans
-- ✅ **Индексы:** включая ivfflat для pgvector (cosine distance)
-- ✅ **Security Advisor:** 0 errors, 0 warnings
-- ✅ **pgvector extension:** включён и работает
-
-### **Код Python — ГОТОВ:**
-- ✅ `database/client.py` — подключение к Supabase (service role + anon)
-- ✅ `database/models.py` — 14 dataclass моделей для всех таблиц
-- ✅ `database/queries.py` — **42 функции** готовы:
-  - 8 для business_rules
-  - 14 для agents
-  - 8 для n8n
-  - 12 базовых
-
-### **Документация — АКТУАЛЬНА:**
-- ✅ `docs/schema.sql` — схема v1.3
-- ✅ `CLAUDE.md` — обновлён под v1.3
-- ✅ `docs/progress.md` — миграция завершена
-- ✅ Справочники по queries.py созданы
+**Этап 6, Часть A — Шаг 3:** подключить Telegram (фото и голос) к графу оркестратора.
+Затем **Шаг 4** (тесты), потом **Часть B** (ветка нутрициолога).
 
 ---
 
-## 📋 ПЛАН НА СЛЕДУЮЩУЮ СЕССИЮ:
+## 📍 ГДЕ МЫ СЕЙЧАС
 
-### **ШАГ 1: Создать business_rules/ (приоритет)**
+Вся работа Этапа 6 — на ветке **`stage6-utils`** (НЕ влита в main, push мог быть сделан вручную).
 
-**Структура:**
-```
-business_rules/
-├── __init__.py
-├── access_rules.py      — check_access(), check_payment()
-├── medical_rules.py     — check_medical_alerts(), check_allergies()
-├── payment_rules.py     — проверка статуса подписки
-└── notification_rules.py — расписание, timezone, on/off
-```
+### ✅ Сделано (Часть A, ветка клиента):
+- **requirements.txt** — +openai; модернизирован LangGraph (langgraph>=1.0, langchain-core>=0.3)
+- **utils/** — knowledge.py (ada-002 + pgvector-поиск), vision.py (фото еды), voice.py (Whisper), web_access.py (Tavily + доверенные домены)
+- **migration 002** — RPC match_knowledge_base / match_client_documents
+- **agents/client/** — vision_agent, diary_agent, nutrition_agent, общий food_analysis.py
+- **orchestrator.py** — роутинг: ingest → load_context → route → [vision|diary|nutrition|dialog] → format → save
+- **prompts/client/** — vision_system.md, diary_system.md, nutrition_system.md
+- **Фиксы** — сохранение диалога (save_conversation), удалён check_alerts_node
 
-**Что реализовать:**
-1. **access_rules.py:**
-   - `check_access(client_id)` → allow | (block, reason)
-   - `check_payment(client_id)` → active | (restricted, reason)
-   - Использует: `get_client_by_id()`, `update_client_status()`
-
-2. **medical_rules.py:**
-   - `check_medical_alerts(data, client_id)` → safe | (severity, message)
-   - `check_allergies(ingredients, client_id)` → safe | warning
-   - Использует: `get_client_profile()`, `log_client_event()`, `get_system_setting()`
-
-3. **payment_rules.py:**
-   - `check_subscription_status(client_id)` → active | expired
-   - Использует: `get_client_by_id()`, `update_client()`
-
-4. **notification_rules.py:**
-   - `should_send_notification(client_id, notification_type)` → bool
-   - Использует: `get_notification_schedule()`
+### ⬜ Осталось в Части A:
+- **Шаг 3:** `telegram/handlers.py` — фото/голос → граф
+- **Шаг 4:** тесты + прогон
 
 ---
 
-### **ШАГ 2: Создать utils/llm.py (после business_rules)**
+## 📋 ПЛАН ШАГА 3 (Telegram)
 
-**Функция:**
-```python
-def call_llm(
-    provider: str,
-    model: str,
-    messages: List[Dict],
-    task_type: str
-) -> str:
-    """
-    Мультипровайдерный LLM клиент.
-    provider: 'groq' | 'anthropic' | 'google'
-    model: 'llama-3.3-70b' | 'claude-sonnet-4-6' | 'gemini-1.5-flash'
-    task_type: 'dialog' | 'analysis' | 'vision'
-    """
-```
+`telegram/handlers.py` сейчас: текст работает через `route_message()`, фото/голос — заглушки.
+Нужно:
+1. **Фото** (`handle_photo`): скачать файл из Telegram → `bytes` → передать в обработку с
+   `message_type='photo'`, `metadata={'image_bytes': <bytes>, 'mime_type': 'image/jpeg'}`,
+   подпись к фото → как `message` (caption).
+2. **Голос** (`handle_voice`): скачать `.ogg` → `bytes` → `message_type='voice'`,
+   `metadata={'audio_bytes': <bytes>, 'audio_name': 'voice.ogg'}`. Транскрипцию делает
+   сам оркестратор (узел `ingest`), здесь только передать байты.
+3. Проверить путь вызова: handlers → router.route_message → process_client_message (граф).
+
+**Контракт metadata (уже ожидается агентами/оркестратором):**
+- фото: `metadata['image_bytes']`, `metadata['mime_type']`
+- голос: `metadata['audio_bytes']`, `metadata['audio_name']`
 
 ---
 
-### **ШАГ 3: Начать agents/router.py**
+## ⚠️ ПЕРЕД РЕАЛЬНЫМ ЗАПУСКОМ (действия Виктора)
 
-**Входная точка:**
-- Определение роли по токену (nutritionist / client)
-- Вызов business_rules ПЕРВЫМ
-- Маршрутизация в нужный оркестратор
-
----
-
-## 📊 ГОТОВЫЕ ФУНКЦИИ queries.py ДЛЯ BUSINESS_RULES:
-
-```python
-# Уже реализованы и готовы к использованию:
-get_client_by_id(client_id)
-get_client_profile(client_id)
-update_client(client_id, updates)
-update_client_status(client_id, client_status, payment_status, access_status)
-log_client_event(client_id, event_type, severity, payload)
-get_client_events(client_id, severity, limit)
-get_notification_schedule(client_id)
-update_notification_schedule(client_id, notification_type, is_active, scheduled_time)
-get_system_setting(key)
-update_system_setting(key, value, updated_by)
-```
+1. `pip install -r requirements.txt` (новые: openai, tavily)
+2. Применить миграции в Supabase → SQL Editor:
+   - `docs/migrations/001_add_observer_role.sql` ⏳
+   - `docs/migrations/002_add_vector_search.sql` ⏳
+3. Ключи окружения: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `GOOGLE_API_KEY`
+4. (Позже) конфликт `streamlit 1.32.0 ↔ protobuf 5.29.6` — перед запуском веба
 
 ---
 
-## 🔧 ЧТО УЖЕ НЕ НУЖНО ДЕЛАТЬ:
+## 🔭 ДАЛЬШЕ (после Части A)
 
-- ❌ Миграция БД — завершена
-- ❌ Создание таблиц — все 14 готовы
-- ❌ models.py — все 14 моделей готовы
-- ❌ queries.py — 42 функции реализованы
-- ❌ Документация — обновлена
-
----
-
-## 📝 ВАЖНЫЕ ФАЙЛЫ ДЛЯ СПРАВКИ:
-
-- `docs/schema.sql` — актуальная схема БД v1.3
-- `docs/queries_for_business_rules.md` — описание 8 функций
-- `docs/queries_for_agents.md` — описание 14 функций
-- `docs/queries_for_n8n.md` — описание 8 функций
-- `docs/session_summary_2026-06-08.md` — полная сводка сессии
+**Часть B — ветка нутрициолога** (роль агента ШИРЕ советника — аналитик/контролёр/репортёр):
+- `analytics_agent.py` — произвольные запросы по базе, мониторинг следования плану,
+  выявление паттернов/связей (Claude), отчёты, эскалация проблем
+- `management_agent.py` — клиенты/планы/задачи/реестр, корректировки по команде врача,
+  пополнение trusted_sources по просьбе нутрициолога
 
 ---
 
-## 🎯 НАЧАТЬ С:
+## 📝 КЛЮЧЕВЫЕ ФАЙЛЫ ДЛЯ СПРАВКИ
 
-```bash
-# 1. Создать структуру
-mkdir -p business_rules
-touch business_rules/__init__.py
-touch business_rules/access_rules.py
-touch business_rules/medical_rules.py
-touch business_rules/payment_rules.py
-touch business_rules/notification_rules.py
-
-# 2. Начать с access_rules.py
-# Реализовать check_access() и check_payment()
-```
-
----
-
-**Статус:** База данных и queries.py полностью готовы. Можно начинать бизнес-логику.
-
-**Следующий файл для работы:** `business_rules/access_rules.py`
+- `docs/progress.md` — полный журнал
+- `agents/client/orchestrator.py` — граф и роутинг
+- `agents/client/food_analysis.py` — общий анализ против рациона
+- `docs/migrations/002_add_vector_search.sql` — RPC pgvector
+- ТЗ: `docs/docs/technical_specification.docx` (v1.2), `..._V1.3.docx` (читаются как UTF-8 текст)

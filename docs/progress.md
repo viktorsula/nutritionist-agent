@@ -1,8 +1,9 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: 10 июня 2026 (поздний вечер)
-Сессия: Этап 7 завершён полностью (веб + Telegram)
+Последнее обновление: 14 июня 2026
+Сессия: Этап 6 Часть A (ветка клиента) — агенты + utils + роутинг
+Ветка разработки: `stage6-utils` (не влита в main)
 
 ## Выполнено
 
@@ -48,7 +49,8 @@
   - [x] client/state.py — ClientState TypedDict для LangGraph
   - [x] client/orchestrator.py — LangGraph граф (5 узлов: load_context → check_alerts → dialog_agent → format_response → save_to_db)
   - [x] client/dialog_agent.py — работающий агент диалога (использует Groq llama-3.3-70b)
-  - [x] nutritionist/orchestrator.py — заглушка (направление к веб-интерфейсу)
+  - [x] nutritionist/orchestrator.py — заглушка (направление к
+   веб-интерфейсу)
 - [x] **app.py** — веб-интерфейс обновлён ✅
   - [x] Интеграция с agents/router.py (вместо прямого ChatGroq)
   - [x] Поддержка 3 ролей: client ✅, nutritionist ✅, observer (зарезервирован)
@@ -65,6 +67,28 @@
   - [x] test_bot.py — тесты команд и обработчиков
   - [x] README.md — документация
 
+### Этап 6 — Часть A (ветка клиента) — ✅ КОД ГОТОВ (на ветке stage6-utils)
+- [x] **requirements.txt** — +openai (ada-002 + Whisper); убраны chromadb/sentence-transformers;
+      модернизирован LangGraph (langgraph>=1.0, langchain-core>=0.3, сняты langchain*/langsmith-пины)
+- [x] **docs/migrations/002_add_vector_search.sql** — RPC match_knowledge_base / match_client_documents (cosine, pgvector)
+- [x] **database/queries.py** — обёртки search_knowledge_base / search_client_documents (supabase.rpc)
+- [x] **utils/knowledge.py** — get_embedding (OpenAI ada-002, 1536) + семантический поиск + сборка контекста
+- [x] **utils/vision.py** — analyze_image + analyze_food_plate (приоритет: состав/ингредиенты/форма; КБЖУ вторично) + extract_ingredient_names
+- [x] **utils/voice.py** — transcribe_voice (OpenAI Whisper)
+- [x] **utils/web_access.py** — web_search (Tavily) + include_domains (доверенные источники) + сборка контекста
+- [x] **agents/client/food_analysis.py** — общий анализ состава против рациона (DRY): analyze_against_plan / determine_food_routing / highest_severity
+- [x] **agents/client/vision_agent.py** — фото еды: 3 исхода, анализ против рациона, событие calories_logged, уведомление нутрициолога при отклонениях
+- [x] **agents/client/diary_agent.py** — дневник текстом: ветки meal/weight/wellbeing/other; события weight_logged/bad_wellbeing/calories_logged
+- [x] **agents/client/nutrition_agent.py** — вопросы о рационе (Claude); знания: knowledge_base + client_documents + доверенные веб-источники (system_settings.trusted_sources)
+- [x] **prompts/client/** — vision_system.md, diary_system.md, nutrition_system.md
+- [x] **agents/client/orchestrator.py** — роутинг: ingest(голос→текст) → load_context → route → [vision|diary|nutrition|dialog] → format_response → save_to_db; удалён check_alerts_node
+- [x] **Фиксы:** save_to_db (insert_conversation→save_conversation + _sanitize_metadata); поля state route/food_items
+
+### Этап 6 — Часть A — ОСТАЛОСЬ
+- [ ] **Шаг 3:** telegram/handlers.py — подключить фото/голос к графу
+      (контракт metadata: image_bytes+mime_type для фото; audio_bytes+audio_name для голоса)
+- [ ] **Шаг 4:** тесты (agents/test_agents.py) + финал прогона
+
 ## В процессе
 
 ### Код (Этапы по ТЗ v1.3)
@@ -74,7 +98,8 @@
 - [x] **Этап 5:** agents/ + prompts/ — ЗАВЕРШЁН (базовая инфраструктура) ✅
 - [x] **Этап 7 (часть 1):** app.py — ЗАВЕРШЁН (веб-интерфейс интегрирован с agents/) ✅
 - [x] **Этап 7 (часть 2):** telegram/bot.py — ЗАВЕРШЁН (базовый функционал) ✅
-- [ ] **Этап 6:** Расширение agents/ (vision, nutrition, diary, analytics) + utils/ (vision.py, voice.py, web_access.py, knowledge.py) ← **СЛЕДУЮЩИЙ**
+- [~] **Этап 6 Часть A (клиент):** vision/diary/nutrition агенты + utils + роутинг — КОД ГОТОВ, осталось Telegram (Шаг 3) + тесты (Шаг 4)
+- [ ] **Этап 6 Часть B (нутрициолог):** analytics_agent + management_agent (расширенная роль: аналитик/контролёр/отчёты/мониторинг/корректировки по команде врача)
 - [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
 - [ ] **Этап 9:** monitoring/langfuse.py
 
@@ -95,12 +120,23 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 6:** Расширение агентов (vision_agent для фото еды, nutrition_agent для анализа рациона, diary_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
-**ИЛИ**  
-**Этап 8:** app.py (полный интерфейс нутрициолога: реестр клиентов, аналитика, редактор промптов)
+**Этап 6 Часть A — Шаг 3:** telegram/handlers.py — подключить фото и голос к графу оркестратора
+(класть бинарь в metadata: image_bytes+mime_type / audio_bytes+audio_name).
+Затем **Шаг 4** (тесты), потом **Часть B** (analytics_agent + management_agent).
 
 ## Важно перед запуском
-⚠️ **Выполнить миграцию в Supabase:**
-- Файл: `docs/migrations/001_add_observer_role.sql`
-- Статус: ⏳ Ожидает выполнения
-- Без этой миграции роль observer не будет работать в БД
+⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)
+⚠️ **Выполнить миграции в Supabase (SQL Editor):**
+- `docs/migrations/001_add_observer_role.sql` — роль observer — ⏳ ожидает
+- `docs/migrations/002_add_vector_search.sql` — RPC векторного поиска — ⏳ ожидает
+⚠️ **Ключи окружения:** OPENAI_API_KEY (эмбеддинги+Whisper), TAVILY_API_KEY (веб-поиск), GOOGLE_API_KEY (vision)
+⚠️ **Пред­существующий конфликт:** streamlit 1.32.0 ↔ protobuf 5.29.6 — разобрать перед запуском веба
+
+## Ключевые решения Этапа 6 (14 июня 2026)
+- **Эмбеддинги:** OpenAI text-embedding-ada-002 (1536 = схема, миграция БД не нужна)
+- **Голос:** перенесён в Часть A (делаем сразу), Whisper через openai
+- **Vision приоритет:** состав/ингредиенты/форма приготовления первичны, КБЖУ вторично (для контроля рациона)
+- **DRY:** общий food_analysis.py для vision и diary
+- **Знания nutrition_agent:** knowledge_base + client_documents + доверенные веб-домены (system_settings.trusted_sources, редактирует нутрициолог/агент по его команде)
+- **Роутинг:** photo→vision (без LLM), текст→Groq-классификатор (diary|nutrition|dialog); check_alerts_node убран (алерты формируют агенты)
+- **LangGraph модернизирован:** код использует только StateGraph/END → апгрейд до langgraph 1.x безопасен

@@ -159,7 +159,9 @@ nutritionist-agent/
 └── docs/
 ├── schema.sql            ← актуальная схема БД
 └── progress.md
-## Текущий статус (10 июня 2026)
+## Текущий статус (14 июня 2026)
+> Этап 6 Часть A (ветка клиента) — код готов на ветке `stage6-utils` (не влита в main).
+> Осталось: Telegram фото/голос (Шаг 3) + тесты (Шаг 4), затем Часть B (нутрициолог).
 - [x] Репозиторий и деплой на Render
 - [x] База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА (14 таблиц + VIEW + триггеры)
 - [x] schema.sql актуализирован (v1.3)
@@ -171,21 +173,27 @@ nutritionist-agent/
   - [x] access_rules.py — проверка доступа (анкета, оплата, режимы)
   - [x] medical_rules.py — 5 типов алертов + маршрутизация
   - [x] notification_rules.py — проверка расписания (timezone-aware)
-- [x] **utils/** — ГОТОВО (базовые модули) ✅
+- [x] **utils/** — ГОТОВО ✅
   - [x] llm.py — мультипровайдерный LLM клиент (Groq, Claude, Gemini)
   - [x] helpers.py — вспомогательные функции (структура готова)
-  - [ ] vision.py, voice.py, web_access.py, knowledge.py ← Этап 6
+  - [x] knowledge.py — эмбеддинги ada-002 + pgvector-поиск (Этап 6)
+  - [x] vision.py — фото еды через Gemini Flash (Этап 6)
+  - [x] voice.py — Whisper (Этап 6)
+  - [x] web_access.py — Tavily + доверенные домены (Этап 6)
 - [x] **prompts/** — ГОТОВО ✅
   - [x] Система управления промптами (БД приоритет → файлы fallback)
   - [x] client/dialog_system.md — промпт для диалога
   - [x] nutritionist/analytics_system.md — промпт для аналитики
 - [x] **agents/** — ГОТОВО (базовая инфраструктура) ✅
   - [x] router.py — входной маршрутизатор (роль → ветка) + observer
-  - [x] client/orchestrator.py — LangGraph граф клиента
+  - [x] client/orchestrator.py — LangGraph граф + роутинг (ingest→load_context→route→[vision|diary|nutrition|dialog]→format→save)
   - [x] client/dialog_agent.py — работающий агент диалога
+  - [x] client/vision_agent.py — фото еды (Этап 6)
+  - [x] client/diary_agent.py — дневник текстом: еда/вес/самочувствие (Этап 6)
+  - [x] client/nutrition_agent.py — вопросы о рационе, Claude (Этап 6)
+  - [x] client/food_analysis.py — общий анализ состава против рациона (DRY)
   - [x] nutritionist/orchestrator.py — заглушка (TODO аналитика)
-  - [ ] vision_agent, nutrition_agent, diary_agent ← Этап 6
-  - [ ] analytics_agent, management_agent ← Этап 6
+  - [ ] analytics_agent, management_agent ← Этап 6 Часть B
 - [x] **app.py** — ОБНОВЛЁН ✅
   - [x] Интеграция с agents/router.py
   - [x] Поддержка 3 ролей (client, nutritionist, observer)
@@ -194,21 +202,20 @@ nutritionist-agent/
 - [x] **telegram/** — ГОТОВО (базовый функционал) ✅
   - [x] bot.py — основной бот (python-telegram-bot)
   - [x] commands.py — /start, /help, /status
-  - [x] handlers.py — текст (работает), фото/голос (TODO Этап 6)
+  - [x] handlers.py — текст (работает); фото/голос ← Шаг 3 (контракт metadata готов)
   - [x] test_bot.py — тесты команд и обработчиков
-  - [ ] vision_agent, voice.py интеграция ← Этап 6
 - [ ] monitoring/langfuse.py ← Этап 9
 
 ## Следующий шаг
-**Этап 6:** Расширение agents/ (vision_agent, nutrition_agent, diary_agent) + utils/ (vision.py, voice.py, web_access.py, knowledge.py)  
-**ИЛИ**  
-**Этап 8:** app.py (полный интерфейс нутрициолога: реестр клиентов, аналитика, редактор промптов)
+**Этап 6 Часть A — Шаг 3:** telegram/handlers.py — подключить фото/голос к графу
+(metadata: image_bytes+mime_type / audio_bytes+audio_name). Затем Шаг 4 (тесты) → Часть B.
 
 ## Важно перед продолжением
-⚠️ **Выполнить миграцию в Supabase:**
-- Файл: `docs/migrations/001_add_observer_role.sql`
-- Цель: Добавить роль 'observer' в users.role CHECK constraint
-- Статус: ⏳ Ожидает выполнения
+⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)
+⚠️ **Выполнить миграции в Supabase (SQL Editor):**
+- `docs/migrations/001_add_observer_role.sql` — роль observer — ⏳ ожидает
+- `docs/migrations/002_add_vector_search.sql` — RPC векторного поиска (Этап 6) — ⏳ ожидает
+⚠️ **Ключи окружения:** OPENAI_API_KEY, TAVILY_API_KEY, GOOGLE_API_KEY
 
 business_rules/ готов и протестирован:
 - `access_rules.py` — 2 режима работы (full_program, ai_support)
