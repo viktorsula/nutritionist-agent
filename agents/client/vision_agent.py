@@ -29,6 +29,7 @@ from utils.llm import call_llm
 from utils.vision import analyze_food_plate, extract_ingredient_names
 from prompts import load_prompt
 from .state import ClientState
+from .food_analysis import analyze_against_plan, determine_food_routing, highest_severity
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,12 @@ def vision_node(state: ClientState) -> ClientState:
     # 4. Исход: распознано → сохраняем состав и анализируем рацион
     state['food_items'] = ingredients
 
-    alerts = _analyze_against_plan(state, ingredients)
+    mode = state.get('access_info', {}).get('mode', 'full_program')
+    alerts = analyze_against_plan(state['client_id'], ingredients, mode)
     state['alerts'] = (state.get('alerts') or []) + alerts
 
     # Маршрутизация (уведомлять ли нутрициолога об отклонениях)
-    routing = _determine_routing(state['alerts'], state)
-    state['routing'] = routing
+    state['routing'] = determine_food_routing(state['alerts'], mode)
 
     # 5. Ответ клиенту (тёплый, через LLM; предупреждения добавит format_response)
     outcome = 'recognized_deviation' if alerts else 'recognized_ok'
@@ -122,64 +123,6 @@ def _get_image_from_state(state: ClientState) -> Tuple[Optional[bytes], str]:
         return None, mime_type
 
     return image_bytes, mime_type
-
-
-# ==========================================
-# АНАЛИЗ ПРОТИВ РАЦИОНА (business_rules)
-# ==========================================
-
-def _analyze_against_plan(state: ClientState, ingredients: List[str]) -> List[Dict[str, Any]]:
-    """
-    Сверяет распознанный состав с рационом клиента.
-
-    Проверяет: аллергены, запрещённые планом продукты, несочетаемые продукты.
-    Возвращает список алертов (пустой, если всё в порядке).
-    """
-    from business_rules.medical_rules import check_allergies, check_medical_alerts
-
-    client_id = state['client_id']
-    mode = state.get('access_info', {}).get('mode', 'full_program')
-
-    alerts: List[Dict[str, Any]] = []
-
-    try:
-        # Аллергены (critical) — отдельная проверка
-        allergy = check_allergies(client_id, ingredients)
-        if allergy.get('has_allergen'):
-            alerts.append({
-                'type': 'allergen',
-                'severity': allergy.get('severity', 'critical'),
-                'message': allergy.get('message', ''),
-                'details': {'allergens': allergy.get('allergens_found', [])},
-            })
-
-        # Запрещённые планом + несочетаемые (pgvector)
-        food_alerts = check_medical_alerts(
-            client_id=client_id,
-            food_items=ingredients,
-            mode=mode,
-        )
-        # Отфильтровываем не относящиеся к еде проверки (вес, no_response и т.п.)
-        for a in food_alerts:
-            if a.get('type') in ('food_forbidden', 'food_incompatible'):
-                alerts.append(a)
-
-    except Exception as e:
-        logger.error(f"Vision agent plan analysis error: {e}", exc_info=True)
-
-    return alerts
-
-
-def _determine_routing(alerts: List[Dict[str, Any]], state: ClientState) -> Dict[str, Any]:
-    """Определяет, уведомлять ли нутрициолога об отклонениях."""
-    from business_rules.medical_rules import determine_routing
-
-    mode = state.get('access_info', {}).get('mode', 'full_program')
-    try:
-        return determine_routing(alerts, mode)
-    except Exception as e:
-        logger.error(f"Vision agent routing error: {e}")
-        return {'route_to': 'llm', 'notify_nutritionist': False}
 
 
 # ==========================================
@@ -295,14 +238,8 @@ def _log_meal_event(
 ) -> None:
     """Сохраняет распознанный приём пищи в client_events (calories_logged)."""
     from database import queries
-    from business_rules.medical_rules import get_highest_severity
 
-    severity = None
-    if alerts:
-        try:
-            severity = get_highest_severity([a.get('severity', 'low') for a in alerts])
-        except Exception:
-            severity = 'medium'
+    severity = highest_severity(alerts)
 
     payload = {
         "dish_name": food_analysis.get('dish_name', ''),
