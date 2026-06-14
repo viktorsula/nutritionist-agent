@@ -4,29 +4,37 @@ Client Orchestrator — LangGraph граф для обработки сообщ�
 Граф:
 START
   ↓
-load_context (загрузить профиль, план, историю)
+ingest         (голос → текст через Whisper, если message_type == 'voice')
   ↓
-check_alerts (проверить алерты через medical_rules)
+load_context   (профиль, план, история)
   ↓
-dialog_agent (обработать сообщение)
+route          (определяет ветку: photo / diary / nutrition / dialog)
+  ↓ [conditional]
+  ├── photo      → vision_agent   (фото еды)
+  ├── diary      → diary_agent    (факт: еда/вес/самочувствие)
+  ├── nutrition  → nutrition_agent (вопрос о рационе/плане)
+  └── dialog     → dialog_agent   (общий разговор)
   ↓
-format_response (форматировать ответ с алертами)
+format_response (добавить алерты/уведомление)
   ↓
-save_to_db (сохранить в conversations + events)
+save_to_db     (conversations; события пишут сами агенты)
   ↓
 END
-
-TODO Этап 6: Добавить роутинг к разным агентам (vision, nutrition, diary)
 """
 
+import json
 import logging
 from typing import Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 
 from .state import ClientState, create_initial_state, extract_response
 from .dialog_agent import dialog_node
+from .vision_agent import vision_node
+from .diary_agent import diary_node
+from .nutrition_agent import nutrition_node
+from utils.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -103,31 +111,54 @@ def process_client_message(
 
 def create_client_graph():
     """
-    Создаёт LangGraph граф для клиента.
+    Создаёт LangGraph граф для клиента с роутингом к агентам.
 
-    Граф (MVP — простой):
-    load_context → check_alerts → dialog_agent → format_response → save_to_db → END
-
-    TODO Этап 6: Добавить роутинг к разным агентам
+    ingest → load_context → route → [vision|diary|nutrition|dialog]
+           → format_response → save_to_db → END
     """
     workflow = StateGraph(ClientState)
 
-    # Добавление узлов
+    # Узлы
+    workflow.add_node("ingest", ingest_node)
     workflow.add_node("load_context", load_context_node)
-    workflow.add_node("check_alerts", check_alerts_node)
-    workflow.add_node("dialog_agent", dialog_node)  # Импорт из dialog_agent.py
+    workflow.add_node("route", route_node)
+    workflow.add_node("vision_agent", vision_node)
+    workflow.add_node("diary_agent", diary_node)
+    workflow.add_node("nutrition_agent", nutrition_node)
+    workflow.add_node("dialog_agent", dialog_node)
     workflow.add_node("format_response", format_response_node)
     workflow.add_node("save_to_db", save_to_db_node)
 
-    # Рёбра (последовательные переходы для MVP)
-    workflow.set_entry_point("load_context")
-    workflow.add_edge("load_context", "check_alerts")
-    workflow.add_edge("check_alerts", "dialog_agent")
-    workflow.add_edge("dialog_agent", "format_response")
+    # Линейная часть до маршрутизации
+    workflow.set_entry_point("ingest")
+    workflow.add_edge("ingest", "load_context")
+    workflow.add_edge("load_context", "route")
+
+    # Условный роутинг к агентам (по state['route'])
+    workflow.add_conditional_edges(
+        "route",
+        _select_route,
+        {
+            "vision": "vision_agent",
+            "diary": "diary_agent",
+            "nutrition": "nutrition_agent",
+            "dialog": "dialog_agent",
+        },
+    )
+
+    # Все агенты сходятся в форматирование и сохранение
+    for agent in ("vision_agent", "diary_agent", "nutrition_agent", "dialog_agent"):
+        workflow.add_edge(agent, "format_response")
+
     workflow.add_edge("format_response", "save_to_db")
     workflow.add_edge("save_to_db", END)
 
     return workflow.compile()
+
+
+def _select_route(state: ClientState) -> str:
+    """Path-функция для add_conditional_edges: возвращает ветку из state['route']."""
+    return state.get('route', 'dialog')
 
 
 # ==========================================
@@ -187,49 +218,125 @@ def load_context_node(state: ClientState) -> ClientState:
     return state
 
 
-def check_alerts_node(state: ClientState) -> ClientState:
+def ingest_node(state: ClientState) -> ClientState:
     """
-    Узел 2: Проверка медицинских алертов.
+    Узел входа: если пришёл голос — распознаём его в текст (Whisper).
 
-    Вызывает business_rules.medical_rules для проверки:
-    - Аллергенов
-    - Запрещённых продуктов
-    - Резкого набора веса
-    - Долгого отсутствия ответов
+    Контракт голоса: message_type == 'voice', metadata['audio_bytes'] = bytes,
+    metadata['audio_name'] (опц.) — имя файла с расширением. После распознавания
+    сообщение становится обычным текстом и идёт в общий роутинг.
     """
-    from business_rules.medical_rules import check_medical_alerts, determine_routing
+    if state.get('message_type') != 'voice':
+        return state
 
-    client_id = state['client_id']
-    mode = state.get('access_info', {}).get('mode', 'full_program')
+    metadata = state.get('metadata') or {}
+    audio_bytes = metadata.get('audio_bytes')
+
+    if not audio_bytes:
+        # Голос заявлен, но аудио нет — оставляем как есть, route разрулит в dialog
+        return state
 
     try:
-        # Проверка алертов
-        # TODO: Извлечь продукты из сообщения (для MVP — пустой список)
-        food_items = []  # TODO Этап 6: Извлечение через NER или LLM
+        from utils.voice import transcribe_voice
 
-        alerts = check_medical_alerts(
-            client_id=client_id,
-            food_items=food_items,
-            mode=mode
+        text = transcribe_voice(
+            audio_bytes,
+            file_name=metadata.get('audio_name', 'voice.ogg'),
         )
-
-        state['alerts'] = alerts
-
-        # Определение маршрутизации
-        routing = determine_routing(alerts, mode)
-        state['routing'] = routing
-
-        logger.info(f"Checked alerts for client {client_id}: {len(alerts)} found")
+        if text:
+            state['message'] = text
+            state['message_type'] = 'text'  # дальше обрабатываем как текст
+            metadata['transcribed'] = True
+            state['metadata'] = metadata
+            logger.info(f"Transcribed voice for client {state['client_id']}: {len(text)} chars")
+        else:
+            state['message'] = state.get('message', '')
+            logger.info("Voice transcription returned empty text")
 
     except Exception as e:
-        logger.error(f"Error checking alerts: {e}")
-        state['alerts'] = []
-        state['routing'] = {
-            'route_to': 'llm',
-            'notify_nutritionist': False
-        }
+        logger.error(f"Voice transcription error: {e}")
+        # Не валим обработку — пойдём в dialog с исходным (возможно пустым) текстом
 
     return state
+
+
+def route_node(state: ClientState) -> ClientState:
+    """
+    Узел маршрутизации: определяет ветку обработки и кладёт её в state['route'].
+
+    - photo (есть изображение) → 'vision'
+    - текст → классификатор (Groq): 'diary' | 'nutrition' | 'dialog'
+    """
+    message_type = state.get('message_type', 'text')
+
+    # Фото → vision (без LLM)
+    if message_type == 'photo':
+        state['route'] = 'vision'
+        return state
+
+    # Текст → классификация интента
+    state['route'] = _classify_text(state.get('message', ''))
+    logger.info(f"Routed client {state['client_id']} to '{state['route']}'")
+    return state
+
+
+CLASSIFIER_PROMPT = """Ты — маршрутизатор сообщений клиента нутрициолога. Определи тип сообщения.
+
+Верни СТРОГО валидный JSON без markdown: {"route": "diary | nutrition | dialog"}
+
+- diary — клиент сообщает ФАКТ о себе: что поел/ест, свой вес, своё самочувствие.
+- nutrition — ВОПРОС про рацион, план, меню, продукты, его анализы, цель.
+- dialog — общий разговор, поддержка, благодарность, всё остальное.
+
+Только JSON, ничего больше."""
+
+
+def _classify_text(message: str) -> str:
+    """Грубая классификация текстового сообщения через дешёвый LLM (Groq)."""
+    message = (message or '').strip()
+    if not message:
+        return 'dialog'
+
+    try:
+        response = call_llm(
+            task_type='dialog',
+            messages=[
+                {"role": "system", "content": CLASSIFIER_PROMPT},
+                {"role": "user", "content": message},
+            ],
+        )
+        parsed = _safe_parse_json(response.get('content', ''))
+        route = (parsed or {}).get('route', 'dialog')
+        if route not in ('diary', 'nutrition', 'dialog'):
+            return 'dialog'
+        return route
+
+    except Exception as e:
+        logger.error(f"Classifier error: {e}")
+        return 'dialog'
+
+
+def _safe_parse_json(text: str):
+    """Извлекает JSON из ответа модели (со снятием markdown-обёртки)."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
 
 
 def format_response_node(state: ClientState) -> ClientState:

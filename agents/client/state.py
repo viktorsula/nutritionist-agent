@@ -98,6 +98,9 @@ class ClientState(TypedDict, total=False):
     # РЕЗУЛЬТАТЫ ПРОВЕРОК
     # ==========================================
 
+    route: str
+    """Выбранная оркестратором ветка: 'vision' | 'diary' | 'nutrition' | 'dialog'."""
+
     food_items: List[str]
     """
     Распознанные/упомянутые продукты (из vision_agent или из текста).
