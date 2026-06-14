@@ -18,7 +18,7 @@ TODO v1.1:
 
 import os
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Импорт SDK (устанавливается через requirements.txt)
 try:
@@ -37,6 +37,7 @@ def web_search(
     query: str,
     max_results: int = 5,
     search_depth: str = "basic",
+    include_domains: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Ищет информацию в интернете через Tavily.
@@ -45,6 +46,8 @@ def web_search(
         query: Поисковый запрос
         max_results: Сколько результатов вернуть
         search_depth: 'basic' (быстро) | 'advanced' (глубже)
+        include_domains: Ограничить поиск только этими доменами (первостепенные
+            источники из system_settings.trusted_sources). None/[] = без ограничения.
 
     Returns:
         Список результатов:
@@ -65,11 +68,15 @@ def web_search(
 
     try:
         client = TavilyClient(api_key=api_key)
-        response = client.search(
-            query=query,
-            max_results=max_results,
-            search_depth=search_depth,
-        )
+        search_kwargs: Dict[str, Any] = {
+            "query": query,
+            "max_results": max_results,
+            "search_depth": search_depth,
+        }
+        if include_domains:
+            search_kwargs["include_domains"] = include_domains
+
+        response = client.search(**search_kwargs)
 
         results = []
         for item in response.get("results", []):
