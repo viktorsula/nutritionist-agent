@@ -281,35 +281,35 @@ def save_to_db_node(state: ClientState) -> ClientState:
     assistant_message = state.get('final_message', '')
 
     try:
-        # Сохранение сообщения пользователя
-        queries.insert_conversation({
-            "client_id": client_id,
-            "role": "user",
-            "message": user_message,
-            "channel": channel,
-            "message_type": state.get('message_type', 'text'),
-            "metadata": state.get('metadata', {})
-        })
+        # Сохранение сообщения пользователя.
+        # Из metadata убираем бинарные вложения (фото/аудио), их нельзя писать в JSONB.
+        queries.save_conversation(
+            client_id=client_id,
+            role="user",
+            message_text=user_message,
+            channel=channel,
+            metadata={
+                "message_type": state.get('message_type', 'text'),
+                **_sanitize_metadata(state.get('metadata', {})),
+            },
+        )
 
         # Сохранение ответа ассистента
-        queries.insert_conversation({
-            "client_id": client_id,
-            "role": "assistant",
-            "message": assistant_message,
-            "channel": channel,
-            "message_type": "text",
-            "metadata": {
+        queries.save_conversation(
+            client_id=client_id,
+            role="assistant",
+            message_text=assistant_message,
+            channel=channel,
+            metadata={
                 "agent_used": state.get('agent_used'),
                 "llm_model": state.get('llm_model'),
                 "processing_time_ms": state.get('processing_time_ms'),
-                "alerts_count": len(state.get('alerts', []))
-            }
-        })
+                "alerts_count": len(state.get('alerts', [])),
+            },
+        )
 
-        # TODO: Сохранение событий в client_events (если есть)
-        # if state.get('alerts'):
-        #     for alert in state['alerts']:
-        #         queries.insert_client_event({...})
+        # Примечание: структурированные события (calories_logged и т.п.) пишет сам
+        # агент (например, vision_agent._log_meal_event), здесь — только диалог.
 
         logger.info(f"Saved conversation for client {client_id}")
 
@@ -317,3 +317,27 @@ def save_to_db_node(state: ClientState) -> ClientState:
         logger.error(f"Error saving to DB: {e}")
 
     return state
+
+
+def _sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Убирает из metadata бинарные/несериализуемые поля перед записью в JSONB.
+
+    Бинарные вложения (image_bytes, audio_bytes, file_bytes) заменяются на флаг
+    наличия, чтобы не ломать JSON и не раздувать таблицу.
+    """
+    if not metadata:
+        return {}
+
+    binary_keys = ('image_bytes', 'audio_bytes', 'file_bytes')
+    cleaned: Dict[str, Any] = {}
+
+    for key, value in metadata.items():
+        if key in binary_keys:
+            cleaned[f"has_{key}"] = bool(value)
+        elif isinstance(value, (bytes, bytearray)):
+            cleaned[f"has_{key}"] = True
+        else:
+            cleaned[key] = value
+
+    return cleaned

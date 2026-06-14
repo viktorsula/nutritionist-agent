@@ -98,6 +98,12 @@ class ClientState(TypedDict, total=False):
     # РЕЗУЛЬТАТЫ ПРОВЕРОК
     # ==========================================
 
+    food_items: List[str]
+    """
+    Распознанные/упомянутые продукты (из vision_agent или из текста).
+    Используется business_rules для проверок food_forbidden / food_incompatible.
+    """
+
     alerts: List[Dict[str, Any]]
     """
     Алерты из medical_rules.check_medical_alerts():
