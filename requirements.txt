@@ -13,7 +13,7 @@ langchain-community==0.0.38
 langgraph>=0.0.26
 
 # База данных
-supabase==1.9.0
+supabase==2.10.0
 
 # Векторная база знаний
 chromadb==0.4.24
