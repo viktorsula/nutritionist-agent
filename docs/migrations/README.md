@@ -14,6 +14,16 @@
   - Удаляет старый constraint `users_role_check`
   - Добавляет новый с ролями: `nutritionist`, `client`, `observer`
 
+### **002_add_vector_search.sql**
+- **Дата:** 14 июня 2026
+- **Описание:** RPC-функции семантического поиска по pgvector (Этап 6)
+- **Статус:** ⏳ Требует выполнения
+- **Что делает:**
+  - `match_knowledge_base(query_embedding, match_count, similarity_threshold)` — cosine-поиск по базе знаний
+  - `match_client_documents(query_embedding, p_client_id, match_count, similarity_threshold)` — поиск по документам клиента (с изоляцией по client_id)
+  - Использует ivfflat-индексы (`<=>`, cosine), SECURITY INVOKER + search_path
+- **Зависимость:** эмбеддинги OpenAI `text-embedding-ada-002` (1536), считаются в `utils/knowledge.py`
+
 ---
 
 ## 🚀 КАК ПРИМЕНИТЬ МИГРАЦИЮ
@@ -71,6 +81,7 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | Миграция | Дата выполнения | Статус | Примечания |
 |----------|-----------------|--------|------------|
 | 001_add_observer_role.sql | ___ | ⏳ | Ожидает выполнения |
+| 002_add_vector_search.sql | ___ | ⏳ | Ожидает выполнения |
 
 ---
 

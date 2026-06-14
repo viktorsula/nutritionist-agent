@@ -193,6 +193,53 @@ def get_client_document_chunks(client_id: str) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def search_knowledge_base(
+    query_embedding: List[float],
+    match_count: int = 5,
+    similarity_threshold: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Семантический поиск по базе знаний нутрициолога (pgvector, cosine).
+
+    Вызывает RPC match_knowledge_base (миграция 002_add_vector_search.sql).
+    query_embedding — вектор длины 1536 (OpenAI ada-002), считается в utils/knowledge.py.
+    Возвращает список чанков с полем similarity (0..1), отсортированный по убыванию близости.
+    """
+    supabase = _service_client()
+    response = supabase.rpc(
+        "match_knowledge_base",
+        {
+            "query_embedding": query_embedding,
+            "match_count": match_count,
+            "similarity_threshold": similarity_threshold,
+        },
+    ).execute()
+    return _extract_data(response) or []
+
+
+def search_client_documents(
+    query_embedding: List[float],
+    client_id: str,
+    match_count: int = 5,
+    similarity_threshold: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Семантический поиск по документам конкретного клиента (pgvector, cosine).
+
+    Вызывает RPC match_client_documents (миграция 002_add_vector_search.sql).
+    Изоляция по client_id выполняется на уровне БД.
+    """
+    supabase = _service_client()
+    response = supabase.rpc(
+        "match_client_documents",
+        {
+            "query_embedding": query_embedding,
+            "p_client_id": str(client_id),
+            "match_count": match_count,
+            "similarity_threshold": similarity_threshold,
+        },
+    ).execute()
+    return _extract_data(response) or []
+
+
 # =============================================
 # ФУНКЦИИ ДЛЯ BUSINESS_RULES
 # =============================================

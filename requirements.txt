@@ -5,6 +5,8 @@ streamlit==1.32.0
 groq>=0.4.0
 anthropic>=0.18.0
 google-generativeai>=0.3.0
+# OpenAI: эмбеддинги text-embedding-ada-002 (1536) + Whisper (голос) — Этап 6
+openai>=1.12.0
 
 # LangChain & Агенты
 langchain==0.1.20
@@ -16,8 +18,8 @@ langgraph>=0.0.26
 supabase==2.10.0
 
 # Векторная база знаний
-chromadb==0.4.24
-sentence-transformers==2.7.0
+# Используем pgvector в Supabase + эмбеддинги OpenAI (ada-002, 1536).
+# chromadb/sentence-transformers НЕ нужны (их размерность не совпадает с vector(1536)).
 
 # Telegram Bot
 python-telegram-bot==20.7
