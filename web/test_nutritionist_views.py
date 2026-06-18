@@ -24,12 +24,14 @@ class TestImports(unittest.TestCase):
         from web.nutritionist import (
             render_registry,
             render_analytics,
+            render_settings,
             _registry_table,
             _join,
             _allergy_names,
         )
         self.assertTrue(callable(render_registry))
         self.assertTrue(callable(render_analytics))
+        self.assertTrue(callable(render_settings))
 
 
 class TestRegistryQuery(unittest.TestCase):
@@ -105,10 +107,44 @@ class TestAiAnalysis(unittest.TestCase):
         mock_node.assert_called_once()
 
 
+class TestSettings(unittest.TestCase):
+    def test_parse_json_valid(self):
+        from web.nutritionist import _parse_json
+
+        value, err = _parse_json('{"glucose_critical": 15}')
+        self.assertIsNone(err)
+        self.assertEqual(value["glucose_critical"], 15)
+
+    def test_parse_json_empty(self):
+        from web.nutritionist import _parse_json
+
+        value, err = _parse_json("   ")
+        self.assertIsNone(value)
+        self.assertIsNone(err)
+
+    def test_parse_json_invalid(self):
+        from web.nutritionist import _parse_json
+
+        value, err = _parse_json("{не json}")
+        self.assertIsNone(value)
+        self.assertIsNotNone(err)
+
+    @patch("web.nutritionist.queries.write_audit_log", return_value={})
+    @patch("web.nutritionist.queries.update_system_setting")
+    def test_save_trusted_sources(self, mock_update, mock_audit):
+        from web.nutritionist import _save_trusted_sources
+
+        sources = [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}]
+        _save_trusted_sources(sources, actor_id="nut-1", note="добавлен")
+
+        mock_update.assert_called_once_with("trusted_sources", sources, updated_by="nut-1")
+        mock_audit.assert_called_once()
+
+
 def run_tests():
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for tc in (TestImports, TestRegistryQuery, TestFormatters, TestAiAnalysis):
+    for tc in (TestImports, TestRegistryQuery, TestFormatters, TestAiAnalysis, TestSettings):
         suite.addTests(loader.loadTestsFromTestCase(tc))
     return unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful()
 

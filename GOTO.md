@@ -6,14 +6,15 @@
 
 ## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
-**Этап 8 — Шаг 2: таб «Настройки»** в `web/nutritionist.py` — пороги алертов (system_settings),
-trusted_sources, редактор промптов (list_available_prompts/load_prompt/save_prompt), LLM-модели.
+**Этап 9 — `monitoring/langfuse.py`:** трейсинг всех вызовов LLM (интеграция в `utils/llm.py`).
+Этапы 6 (A+B) и 8 (веб-интерфейс нутрициолога) полностью завершены.
 
-### ✅ Этап 8 Шаг 1 (готово): Реестр + Аналитика
-- `web/nutritionist.py` — `render_registry()` (из `client_registry_view`) + `render_analytics()`
-  (метрики из `get_client_summary` + AI-анализ через `analytics_node`)
+### ✅ Этап 8 (готово): веб-интерфейс нутрициолога
+- `web/nutritionist.py` — `render_registry()` (из `client_registry_view`), `render_analytics()`
+  (метрики `get_client_summary` + AI-анализ через `analytics_node`), `render_settings()`
+  (пороги алертов JSON, trusted_sources, редактор промптов, llm_config)
 - `queries.get_client_registry()` — чтение реестра из view
-- `app.py` — табы 1/2 подключены; тесты `web/test_nutritionist_views.py` 6/6 ✅
+- `app.py` — табы 1/2/3 подключены; тесты `web/test_nutritionist_views.py` 10/10 ✅
 
 ### ✅ Сделано в Части B (ветка нутрициолога):
 - `agents/nutritionist/state.py` — NutritionistState + helpers (thread, pending_action)

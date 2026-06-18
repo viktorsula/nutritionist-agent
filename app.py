@@ -32,7 +32,7 @@ except ImportError as e:
     st.error(f"⚠️ Ошибка импорта agents: {e}")
 
 try:
-    from web.nutritionist import render_registry, render_analytics
+    from web.nutritionist import render_registry, render_analytics, render_settings
     NUTRITIONIST_VIEWS_AVAILABLE = True
 except ImportError as e:
     NUTRITIONIST_VIEWS_AVAILABLE = False
@@ -317,8 +317,10 @@ elif st.session_state.role == "nutritionist":
             st.error("❌ Модуль аналитики недоступен.")
 
     with tab3:
-        st.subheader("⚙️ Настройки системы")
-        st.info("🚧 Настройки (пороги/источники/промпты) — следующий шаг Этапа 8")
+        if NUTRITIONIST_VIEWS_AVAILABLE:
+            render_settings(actor_id=st.session_state.user_id)
+        else:
+            st.error("❌ Модуль настроек недоступен.")
 
     with tab4:
         st.subheader("💬 Тестовый диалог с agents/")

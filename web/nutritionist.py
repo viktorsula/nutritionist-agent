@@ -11,6 +11,7 @@
 задачами — через чат с подтверждением (см. management_agent).
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -202,6 +203,164 @@ def _run_ai_analysis(client_id: str, client_name: str, period: int) -> str:
 
     analytics_node(state)
     return state.get("agent_response") or "Не удалось получить анализ."
+
+
+# ==========================================
+# ТАБ: НАСТРОЙКИ
+# ==========================================
+
+def render_settings(actor_id: Optional[str] = None) -> None:
+    """
+    Таб «Настройки»: пороги алертов, доверенные источники, редактор промптов,
+    LLM-модели. Это системные настройки нутрициолога (ТЗ: правка без кода) —
+    запись прямая, без подтверждения.
+    """
+    st.subheader("⚙️ Настройки системы")
+
+    with st.expander("🚨 Пороги алертов (alert_thresholds)", expanded=True):
+        _render_json_setting("alert_thresholds", actor_id, hint='{"glucose_critical": 15, "glucose_high": 10}')
+
+    with st.expander("🌐 Доверенные источники (trusted_sources)"):
+        _render_trusted_sources(actor_id)
+
+    with st.expander("📝 Редактор промптов"):
+        _render_prompt_editor()
+
+    with st.expander("🤖 LLM-модели (llm_config)"):
+        _render_json_setting("llm_config", actor_id, hint='{"dialog": {...}, "analysis": {...}}')
+
+
+def _render_json_setting(key: str, actor_id: Optional[str], hint: str = "") -> None:
+    """Универсальный JSON-редактор настройки system_settings по ключу."""
+    try:
+        value = queries.get_setting(key)
+    except Exception as e:
+        st.error(f"Не удалось загрузить «{key}»: {e}")
+        return
+
+    current = json.dumps(value, ensure_ascii=False, indent=2) if value is not None else ""
+    text = st.text_area(
+        f"Значение «{key}» (JSON):",
+        value=current,
+        height=200,
+        placeholder=hint,
+        key=f"setting_{key}",
+    )
+
+    if st.button("💾 Сохранить", key=f"save_{key}"):
+        parsed, err = _parse_json(text)
+        if err:
+            st.error(f"Некорректный JSON: {err}")
+            return
+        try:
+            queries.update_system_setting(key, parsed, updated_by=actor_id)
+            queries.write_audit_log(
+                actor_type="nutritionist",
+                actor_id=actor_id,
+                action="update_threshold",
+                entity_type="settings",
+                entity_id=key,
+                new_value={"value": parsed},
+            )
+            st.success(f"«{key}» сохранено.")
+        except Exception as e:
+            st.error(f"Ошибка сохранения: {e}")
+
+
+def _render_trusted_sources(actor_id: Optional[str]) -> None:
+    """Список доверенных источников + добавление/удаление."""
+    try:
+        sources = queries.get_setting("trusted_sources")
+    except Exception as e:
+        st.error(f"Не удалось загрузить источники: {e}")
+        return
+    if not isinstance(sources, list):
+        sources = []
+
+    if sources:
+        for i, src in enumerate(sources):
+            name = src.get("name") if isinstance(src, dict) else None
+            url = src.get("url") if isinstance(src, dict) else src
+            cols = st.columns([4, 1])
+            cols[0].write(f"• {name or '—'} — {url}")
+            if cols[1].button("🗑", key=f"del_src_{i}"):
+                remaining = [s for j, s in enumerate(sources) if j != i]
+                _save_trusted_sources(remaining, actor_id, f"удалён источник {url}")
+                st.rerun()
+    else:
+        st.caption("Источников пока нет.")
+
+    st.markdown("**Добавить источник:**")
+    c1, c2 = st.columns(2)
+    new_name = c1.text_input("Название", key="new_src_name")
+    new_url = c2.text_input("URL", key="new_src_url")
+    if st.button("➕ Добавить", key="add_src"):
+        if not new_url:
+            st.error("Укажите URL.")
+            return
+        sources.append({"name": new_name or None, "url": new_url})
+        _save_trusted_sources(sources, actor_id, f"добавлен источник {new_url}")
+        st.rerun()
+
+
+def _save_trusted_sources(sources: List[Any], actor_id: Optional[str], note: str) -> None:
+    try:
+        queries.update_system_setting("trusted_sources", sources, updated_by=actor_id)
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=actor_id,
+            action="update_threshold",
+            entity_type="settings",
+            entity_id="trusted_sources",
+            new_value={"note": note, "count": len(sources)},
+        )
+    except Exception as e:
+        st.error(f"Ошибка сохранения источников: {e}")
+
+
+def _render_prompt_editor() -> None:
+    """Редактор промптов: список → загрузка текста → сохранение в БД."""
+    from prompts import list_available_prompts, load_prompt, save_prompt
+
+    try:
+        available = list_available_prompts()
+    except Exception as e:
+        st.error(f"Не удалось получить список промптов: {e}")
+        return
+    if not available:
+        st.caption("Промптов не найдено.")
+        return
+
+    name = st.selectbox("Промпт:", sorted(available.keys()), key="prompt_pick")
+    info = available.get(name, {})
+    st.caption(f"Источник: {info.get('source', '—')}")
+
+    try:
+        text = load_prompt(name)
+    except Exception as e:
+        st.error(f"Не удалось загрузить промпт: {e}")
+        return
+
+    edited = st.text_area("Текст промпта:", value=text, height=300, key=f"prompt_text_{name}")
+    description = st.text_input("Описание изменения:", key=f"prompt_desc_{name}")
+
+    if st.button("💾 Сохранить промпт", key=f"save_prompt_{name}"):
+        try:
+            save_prompt(name, edited, description=description or None)
+            st.success(f"Промпт «{name}» сохранён в БД (приоритет над файлом).")
+        except Exception as e:
+            st.error(f"Ошибка сохранения промпта: {e}")
+
+
+def _parse_json(text: str):
+    """Парсит JSON из текста. Возвращает (value, error). Пустой текст → (None, None)."""
+    text = (text or "").strip()
+    if not text:
+        return None, None
+    try:
+        return json.loads(text), None
+    except json.JSONDecodeError as e:
+        return None, str(e)
 
 
 # ==========================================
