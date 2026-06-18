@@ -648,6 +648,22 @@ def get_all_clients(status: Optional[str] = None) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def get_client_registry(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Реестр клиентов из client_registry_view (с агрегацией):
+    статусы, цель, вес, версия активного плана, последняя активность, открытые задачи.
+    Опциональный фильтр по client_status.
+    """
+    supabase = _service_client()
+    query = supabase.table("client_registry_view").select("*")
+
+    if status:
+        query = query.eq("client_status", status)
+
+    response = query.execute()
+    return _extract_data(response) or []
+
+
 def write_audit_log(
     actor_type: str,
     action: str,

@@ -113,7 +113,11 @@
   - management_agent.py — запись через ДВУХШАГОВОЕ ПОДТВЕРЖДЕНИЕ (pending_action в conversations.metadata_json); действия: create_task / create_nutrition_plan / update_client_status / add_trusted_source; всё с created_by='nutritionist' + write_audit_log
   - prompts/nutritionist/management_system.md — разбор команды в строгий JSON
   - тесты: agents/nutritionist/test_nutritionist.py — 13/13 ✅
-- [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
+- [~] **Этап 8:** app.py (полный интерфейс нутрициолога)
+  - [x] Шаг 1: Реестр + Аналитика — web/nutritionist.py (render_registry / render_analytics);
+        queries.get_client_registry() (из client_registry_view); AI-анализ через analytics_node;
+        тесты web/test_nutritionist_views.py 6/6 ✅
+  - [ ] Шаг 2: Настройки (пороги алертов, trusted_sources, редактор промптов, LLM-модели)
 - [ ] **Этап 9:** monitoring/langfuse.py
 
 ## Ключевые решения принятые в ходе разработки
@@ -133,9 +137,9 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 8 — полный веб-интерфейс нутрициолога:** живые табы Реестр / Аналитика / Настройки
-(сейчас заглушки; данные через agents/nutritionist + queries). Затем **Этап 9** — LangFuse.
-Этап 6 (Части A и B) полностью завершён.
+**Этап 8 — Шаг 2:** таб «Настройки» в web/nutritionist.py — пороги алертов (system_settings),
+trusted_sources, редактор промптов (list_available_prompts/load_prompt/save_prompt), LLM-модели.
+Реестр + Аналитика (Шаг 1) — готовы. Затем **Этап 9** — LangFuse.
 
 ## Важно перед запуском
 ⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)

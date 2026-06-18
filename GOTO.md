@@ -6,9 +6,14 @@
 
 ## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
-**Этап 8 — полный веб-интерфейс нутрициолога** (`app.py`): живые табы Реестр / Аналитика /
-Настройки вместо заглушек (данные через `agents/nutritionist` + `queries`).
-Этап 6 (Части A и B) полностью завершён и протестирован.
+**Этап 8 — Шаг 2: таб «Настройки»** в `web/nutritionist.py` — пороги алертов (system_settings),
+trusted_sources, редактор промптов (list_available_prompts/load_prompt/save_prompt), LLM-модели.
+
+### ✅ Этап 8 Шаг 1 (готово): Реестр + Аналитика
+- `web/nutritionist.py` — `render_registry()` (из `client_registry_view`) + `render_analytics()`
+  (метрики из `get_client_summary` + AI-анализ через `analytics_node`)
+- `queries.get_client_registry()` — чтение реестра из view
+- `app.py` — табы 1/2 подключены; тесты `web/test_nutritionist_views.py` 6/6 ✅
 
 ### ✅ Сделано в Части B (ветка нутрициолога):
 - `agents/nutritionist/state.py` — NutritionistState + helpers (thread, pending_action)
