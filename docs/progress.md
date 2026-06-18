@@ -120,7 +120,11 @@
         добавление/удаление), редактор промптов (list/load/save_prompt), llm_config (JSON);
         запись через update_system_setting + write_audit_log
   - [x] тесты web/test_nutritionist_views.py — 10/10 ✅
-- [ ] **Этап 9:** monitoring/langfuse.py
+- [x] **Этап 9:** monitoring/langfuse.py — ЗАВЕРШЕНО ✅
+  - monitoring/langfuse.py — обёртка LangFuse: trace_llm_call / is_enabled / flush; graceful no-op без SDK/ключей, трейсинг никогда не роняет вызов LLM
+  - utils/llm.py — call_llm трейсит каждый вызов (тайминг + успех/ошибка) через _trace(); удалена старая закомментированная заготовка
+  - единая точка: все агенты (клиент + нутрициолог) трейсятся автоматически
+  - тесты monitoring/test_monitoring.py — 7/7 ✅
 
 ## Ключевые решения принятые в ходе разработки
 - **wellness_plans** — отдельная таблица "как жить" vs "что есть" (зафиксировано в ТЗ v1.3)
@@ -139,8 +143,12 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 9 — monitoring/langfuse.py:** трейсинг всех вызовов LLM (интеграция в utils/llm.py).
-Этапы 6 (A+B) и 8 (веб-интерфейс нутрициолога) полностью завершены.
+**Дорожная карта ТЗ v1.3 (Этапы 1–9) — ПОЛНОСТЬЮ ЗАВЕРШЕНА.** ✅
+Остаётся подготовка к продакшену перед слиянием `stage6-utils` → `main`:
+1. Применить миграции в Supabase (001 observer, 002 vector search)
+2. Прописать ключи в Render (OPENAI / TAVILY / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_*)
+3. Живой smoke-тест (сообщение клиента + запрос нутрициолога + фото/голос)
+4. PR `stage6-utils` → `main` (автодеплой выкатит рабочую версию)
 
 ## Важно перед запуском
 ⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)

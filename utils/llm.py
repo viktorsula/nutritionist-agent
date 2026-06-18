@@ -24,6 +24,7 @@ TODO v1.1:
 """
 
 import os
+import time
 import logging
 from typing import List, Dict, Optional, Any
 
@@ -214,7 +215,8 @@ def call_llm(
             f"Доступные task_type: {list(DEFAULT_TASK_MODEL_MAPPING.keys())}"
         )
 
-    # Вызов конкретного провайдера
+    # Вызов конкретного провайдера (+ трейсинг LangFuse, см. monitoring/)
+    start_time = time.monotonic()
     try:
         if config['provider'] == 'groq':
             result = _call_groq(messages, config, stream, **kwargs)
@@ -232,9 +234,11 @@ def call_llm(
         if task_type:
             result['task_type'] = task_type
 
+        _trace(task_type, config, messages, response=result, start_time=start_time)
         return result
 
     except Exception as e:
+        _trace(task_type, config, messages, error=str(e), start_time=start_time)
         logger.error(
             f"LLM call failed: provider={config['provider']}, "
             f"model={config['model']}, error={str(e)}"
@@ -242,6 +246,32 @@ def call_llm(
         raise RuntimeError(
             f"Ошибка вызова LLM ({config['provider']}/{config['model']}): {str(e)}"
         ) from e
+
+
+def _trace(
+    task_type: Optional[str],
+    config: Dict[str, Any],
+    messages: List[Dict[str, str]],
+    response: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+    start_time: Optional[float] = None,
+) -> None:
+    """Отправляет трейс вызова в LangFuse (no-op, если трейсинг отключён)."""
+    try:
+        from monitoring import trace_llm_call
+
+        latency_ms = int((time.monotonic() - start_time) * 1000) if start_time else None
+        trace_llm_call(
+            task_type=task_type,
+            provider=config.get('provider'),
+            model=config.get('model'),
+            messages=messages,
+            response=response,
+            error=error,
+            latency_ms=latency_ms,
+        )
+    except Exception as e:
+        logger.debug(f"Трейсинг пропущен (подавлено): {e}")
 
 
 def get_model_config(task_type: str) -> Dict[str, Any]:
@@ -551,34 +581,7 @@ def list_task_types() -> Dict[str, str]:
 
 
 # ========================================
-# TODO v1.1: ИНТЕГРАЦИЯ LANGFUSE
+# ТРЕЙСИНГ LANGFUSE
 # ========================================
-
-# def _trace_llm_call(config, messages, response):
-#     """
-#     Отправляет трейс в LangFuse для мониторинга.
-#
-#     Отслеживает:
-#     - Использование токенов
-#     - Стоимость запросов
-#     - Латентность
-#     - Ошибки
-#     """
-#     from langfuse import Langfuse
-#
-#     langfuse = Langfuse(
-#         public_key=os.environ.get('LANGFUSE_PUBLIC_KEY'),
-#         secret_key=os.environ.get('LANGFUSE_SECRET_KEY'),
-#         host=os.environ.get('LANGFUSE_HOST', 'https://cloud.langfuse.com')
-#     )
-#
-#     langfuse.trace(
-#         name=f"llm_call_{config['provider']}",
-#         input=messages,
-#         output=response,
-#         metadata={
-#             'provider': config['provider'],
-#             'model': config['model'],
-#             'temperature': config['temperature']
-#         }
-#     )
+# Реализован в monitoring/langfuse.py и подключён выше через _trace() в call_llm.
+# Все вызовы LLM (все агенты) трейсятся автоматически. Трейсинг — no-op без ключей.

@@ -6,15 +6,20 @@
 
 ## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
-**Этап 9 — `monitoring/langfuse.py`:** трейсинг всех вызовов LLM (интеграция в `utils/llm.py`).
-Этапы 6 (A+B) и 8 (веб-интерфейс нутрициолога) полностью завершены.
+**Дорожная карта ТЗ v1.3 (Этапы 1–9) — ЗАВЕРШЕНА.** Дальше — подготовка к продакшену:
+1. Миграции в Supabase (001 observer, 002 vector search)
+2. Ключи в Render: OPENAI / TAVILY / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+3. Живой smoke-тест (клиент: текст/фото/голос; нутрициолог: аналитика/управление)
+4. PR `stage6-utils` → `main` (автодеплой Render)
+
+### ✅ Этап 9 (готово): трейсинг LangFuse
+- `monitoring/langfuse.py` — `trace_llm_call` / `is_enabled` / `flush`; graceful no-op без SDK/ключей
+- `utils/llm.py` — `call_llm` трейсит каждый вызов (тайминг + успех/ошибка); единая точка для всех агентов
+- тесты `monitoring/test_monitoring.py` 7/7 ✅
 
 ### ✅ Этап 8 (готово): веб-интерфейс нутрициолога
-- `web/nutritionist.py` — `render_registry()` (из `client_registry_view`), `render_analytics()`
-  (метрики `get_client_summary` + AI-анализ через `analytics_node`), `render_settings()`
-  (пороги алертов JSON, trusted_sources, редактор промптов, llm_config)
-- `queries.get_client_registry()` — чтение реестра из view
-- `app.py` — табы 1/2/3 подключены; тесты `web/test_nutritionist_views.py` 10/10 ✅
+- `web/nutritionist.py` — `render_registry` / `render_analytics` / `render_settings`
+- `queries.get_client_registry()`; тесты `web/test_nutritionist_views.py` 10/10 ✅
 
 ### ✅ Сделано в Части B (ветка нутрициолога):
 - `agents/nutritionist/state.py` — NutritionistState + helpers (thread, pending_action)
