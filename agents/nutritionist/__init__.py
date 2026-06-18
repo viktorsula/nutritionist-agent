@@ -1,16 +1,18 @@
 """
-Nutritionist agents — агенты для нутрициолога
+Nutritionist agents — агенты для нутрициолога (Этап 6 Часть B).
 
-Структура (TODO Этап 6):
-- state.py — TypedDict для LangGraph State
-- orchestrator.py — LangGraph граф оркестрации (ЗАГЛУШКА готова)
-- analytics_agent.py — аналитика клиентов (TODO)
-- management_agent.py — управление планами/задачами (TODO)
+Структура:
+- state.py            — NutritionistState (TypedDict) + helpers
+- orchestrator.py     — LangGraph граф: parse_request → [analytics|management|help]
+                        → format_response → save_to_db
+- analytics_agent.py  — аналитика клиентов/базы (Claude, read-only)
+- management_agent.py — управление планами/задачами/статусами через подтверждение
 
-Оркестратор будет решать какой агент вызвать на основе запроса:
-- Запрос аналитики → analytics_agent
-- Создание/изменение плана → management_agent
-- Сводки/отчёты → analytics_agent + summary
+Оркестратор определяет intent и вызывает агента:
+- analytics  → analytics_agent (сводки, динамика, паттерны, статистика по базе)
+- management → management_agent (создать/изменить план/задачу/статус; запись через
+               двухшаговое подтверждение)
+- help       → подсказка по возможностям
 """
 
 from .orchestrator import process_nutritionist_message

@@ -1,13 +1,24 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-**Обновлено:** 18 июня 2026, после Этапа 6 Часть A (ЗАВЕРШЕНА: Telegram фото/голос + тесты)
+**Обновлено:** 18 июня 2026, после Этапа 6 Часть B (ветка нутрициолога завершена)
 
 ---
 
 ## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
-**Этап 6, Часть B (ветка нутрициолога):** `analytics_agent.py` + `management_agent.py`.
-Часть A (ветка клиента) полностью завершена и протестирована.
+**Этап 8 — полный веб-интерфейс нутрициолога** (`app.py`): живые табы Реестр / Аналитика /
+Настройки вместо заглушек (данные через `agents/nutritionist` + `queries`).
+Этап 6 (Части A и B) полностью завершён и протестирован.
+
+### ✅ Сделано в Части B (ветка нутрициолога):
+- `agents/nutritionist/state.py` — NutritionistState + helpers (thread, pending_action)
+- `orchestrator.py` — реальный LangGraph граф (заменил заглушку), общий для Telegram и web:
+  parse_request → [analytics|management|help] → format_response → save_to_db
+- `analytics_agent.py` — read-only анализ клиента/базы (Claude)
+- `management_agent.py` — запись ТОЛЬКО через двухшаговое подтверждение (pending_action
+  в conversations.metadata_json); create_task / create_nutrition_plan / update_client_status /
+  add_trusted_source; created_by='nutritionist' + write_audit_log
+- `prompts/nutritionist/management_system.md`; тесты test_nutritionist.py — 13/13 ✅
 
 ---
 

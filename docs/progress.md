@@ -2,7 +2,7 @@
 
 ## Статус: В разработке
 Последнее обновление: 18 июня 2026
-Сессия: Этап 6 Часть A — Шаги 3–4 (Telegram фото/голос + тесты) — ЗАВЕРШЕНО
+Сессия: Этап 6 Часть A (Telegram фото/голос + тесты) + Часть B (ветка нутрициолога) — ЗАВЕРШЕНО
 Ветка разработки: `stage6-utils` (не влита в main)
 
 ## Выполнено
@@ -105,7 +105,14 @@
 - [x] **Этап 7 (часть 1):** app.py — ЗАВЕРШЁН (веб-интерфейс интегрирован с agents/) ✅
 - [x] **Этап 7 (часть 2):** telegram/bot.py — ЗАВЕРШЁН (базовый функционал) ✅
 - [x] **Этап 6 Часть A (клиент):** vision/diary/nutrition агенты + utils + роутинг + Telegram фото/голос + тесты — ЗАВЕРШЕНО ✅
-- [ ] **Этап 6 Часть B (нутрициолог):** analytics_agent + management_agent (расширенная роль: аналитик/контролёр/отчёты/мониторинг/корректировки по команде врача)
+- [x] **Этап 6 Часть B (нутрициолог):** analytics_agent + management_agent — ЗАВЕРШЕНО ✅
+  - state.py — NutritionistState + helpers (thread нутрициолога, pending_action)
+  - orchestrator.py — реальный LangGraph граф: parse_request → [analytics|management|help] → format_response → save_to_db (заменил заглушку; общий для Telegram и web)
+  - parse_request — классификатор intent (Groq) + резолв клиента по имени + детект подтверждения/отмены
+  - analytics_agent.py — read-only анализ клиента/базы (Claude), промпт analytics_system.md
+  - management_agent.py — запись через ДВУХШАГОВОЕ ПОДТВЕРЖДЕНИЕ (pending_action в conversations.metadata_json); действия: create_task / create_nutrition_plan / update_client_status / add_trusted_source; всё с created_by='nutritionist' + write_audit_log
+  - prompts/nutritionist/management_system.md — разбор команды в строгий JSON
+  - тесты: agents/nutritionist/test_nutritionist.py — 13/13 ✅
 - [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
 - [ ] **Этап 9:** monitoring/langfuse.py
 
@@ -126,9 +133,9 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 6 Часть B (ветка нутрициолога):** analytics_agent + management_agent
-(расширенная роль агента: аналитик/контролёр/репортёр, корректировки по команде врача).
-Часть A (ветка клиента) полностью завершена.
+**Этап 8 — полный веб-интерфейс нутрициолога:** живые табы Реестр / Аналитика / Настройки
+(сейчас заглушки; данные через agents/nutritionist + queries). Затем **Этап 9** — LangFuse.
+Этап 6 (Части A и B) полностью завершён.
 
 ## Важно перед запуском
 ⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)
