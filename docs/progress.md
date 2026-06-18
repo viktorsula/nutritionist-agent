@@ -1,8 +1,8 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке
-Последнее обновление: 14 июня 2026
-Сессия: Этап 6 Часть A (ветка клиента) — агенты + utils + роутинг
+Последнее обновление: 18 июня 2026
+Сессия: Этап 6 Часть A — Шаги 3–4 (Telegram фото/голос + тесты) — ЗАВЕРШЕНО
 Ветка разработки: `stage6-utils` (не влита в main)
 
 ## Выполнено
@@ -84,10 +84,16 @@
 - [x] **agents/client/orchestrator.py** — роутинг: ingest(голос→текст) → load_context → route → [vision|diary|nutrition|dialog] → format_response → save_to_db; удалён check_alerts_node
 - [x] **Фиксы:** save_to_db (insert_conversation→save_conversation + _sanitize_metadata); поля state route/food_items
 
-### Этап 6 — Часть A — ОСТАЛОСЬ
-- [ ] **Шаг 3:** telegram/handlers.py — подключить фото/голос к графу
-      (контракт metadata: image_bytes+mime_type для фото; audio_bytes+audio_name для голоса)
-- [ ] **Шаг 4:** тесты (agents/test_agents.py) + финал прогона
+### Этап 6 — Часть A — Шаги 3–4 — ✅ ЗАВЕРШЕНО (18 июня 2026)
+- [x] **Шаг 3:** tg_bot/handlers.py — фото и голос подключены к графу
+  - фото: скачивание наибольшего размера → `metadata['image_bytes']` + `mime_type='image/jpeg'`, caption → message, `message_type='photo'` → vision
+  - голос: скачивание .ogg → `metadata['audio_bytes']` + `audio_name`, `message_type='voice'`, транскрипция в узле ingest оркестратора (Whisper)
+  - вынесена общая логика `_ensure_registered()` + `_dispatch_to_router()` (DRY для text/photo/voice)
+- [x] **Шаг 4:** тесты + прогон
+  - tg_bot/test_bot.py: переведён на `IsolatedAsyncioTestCase` (раньше async-тесты не исполнялись), +4 теста фото/голоса → 10/10 ✅
+  - agents/test_agents.py: 7/7 ✅
+- [x] **Фикс коллизии имён:** пакет `telegram/` → `tg_bot/` (затенял библиотеку python-telegram-bot; `from telegram.ext` ломался). Обновлены импорты в test_bot.py + README. `bot.py`/`commands.py`/`handlers.py` используют относительные импорты — не тронуты.
+- [x] **Фикс:** убран мёртвый импорт `get_user_by_id` в tg_bot/commands.py (ломал загрузку пакета)
 
 ## В процессе
 
@@ -98,7 +104,7 @@
 - [x] **Этап 5:** agents/ + prompts/ — ЗАВЕРШЁН (базовая инфраструктура) ✅
 - [x] **Этап 7 (часть 1):** app.py — ЗАВЕРШЁН (веб-интерфейс интегрирован с agents/) ✅
 - [x] **Этап 7 (часть 2):** telegram/bot.py — ЗАВЕРШЁН (базовый функционал) ✅
-- [~] **Этап 6 Часть A (клиент):** vision/diary/nutrition агенты + utils + роутинг — КОД ГОТОВ, осталось Telegram (Шаг 3) + тесты (Шаг 4)
+- [x] **Этап 6 Часть A (клиент):** vision/diary/nutrition агенты + utils + роутинг + Telegram фото/голос + тесты — ЗАВЕРШЕНО ✅
 - [ ] **Этап 6 Часть B (нутрициолог):** analytics_agent + management_agent (расширенная роль: аналитик/контролёр/отчёты/мониторинг/корректировки по команде врача)
 - [ ] **Этап 8:** app.py (полный интерфейс нутрициолога: реестр, аналитика, редактор промптов)
 - [ ] **Этап 9:** monitoring/langfuse.py
@@ -120,9 +126,9 @@
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
 ## Следующий шаг
-**Этап 6 Часть A — Шаг 3:** telegram/handlers.py — подключить фото и голос к графу оркестратора
-(класть бинарь в metadata: image_bytes+mime_type / audio_bytes+audio_name).
-Затем **Шаг 4** (тесты), потом **Часть B** (analytics_agent + management_agent).
+**Этап 6 Часть B (ветка нутрициолога):** analytics_agent + management_agent
+(расширенная роль агента: аналитик/контролёр/репортёр, корректировки по команде врача).
+Часть A (ветка клиента) полностью завершена.
 
 ## Важно перед запуском
 ⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)

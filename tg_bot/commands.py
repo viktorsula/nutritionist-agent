@@ -7,7 +7,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database.queries import get_client_by_telegram_id, get_user_by_id
+from database.queries import get_client_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
