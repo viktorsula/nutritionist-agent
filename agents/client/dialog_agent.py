@@ -92,8 +92,8 @@ def build_system_prompt(state: ClientState) -> str:
 
         # Форматирование
         prompt = template.format(
-            client_name=profile.get('name', 'Клиент'),
-            client_goal=profile.get('goal', 'Не указана'),
+            client_name=profile.get('name') or 'Клиент',
+            client_goal=profile.get('goals') or 'Не указана',
             restrictions=format_restrictions(plan),
             allergies=format_allergies(profile),
             mode=access.get('mode', 'full_program'),
@@ -102,7 +102,9 @@ def build_system_prompt(state: ClientState) -> str:
             language='русский'  # TODO: Определять из profile или channel
         )
 
-        return prompt
+        # Доп. контекст по ТЗ (вес, задачи, заметки нутрициолога, план)
+        extra = build_context_block(state)
+        return prompt + ("\n\n" + extra if extra else "")
 
     except Exception as e:
         logger.error(f"Error building system prompt: {e}")
@@ -154,6 +156,37 @@ def build_messages(state: ClientState, system_prompt: str) -> List[Dict[str, str
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
+
+def build_context_block(state: ClientState) -> str:
+    """
+    Доп. контекст клиента для агента (по ТЗ): текущий/желаемый вес,
+    активный план, активные задачи, заметки нутрициолога.
+    Используется как внутренний контекст — не цитировать дословно.
+    """
+    profile = state.get('client_profile') or {}
+    client = state.get('client') or {}
+    plan = state.get('active_plan') or {}
+    tasks = state.get('tasks') or []
+
+    lines: List[str] = []
+    if profile.get('weight'):
+        lines.append(f"- Текущий вес: {profile.get('weight')} кг")
+    if profile.get('target_weight'):
+        lines.append(f"- Желаемый вес: {profile.get('target_weight')} кг")
+    if plan and plan.get('title'):
+        lines.append(f"- Активный план питания: {plan.get('title')}")
+    if tasks:
+        titles = ", ".join(t.get('title', '') for t in tasks[:5] if t.get('title'))
+        if titles:
+            lines.append(f"- Активные задачи: {titles}")
+    notes = client.get('nutritionist_notes')
+    if notes:
+        lines.append(f"- Заметки нутрициолога (внутреннее): {notes}")
+
+    if not lines:
+        return ""
+    return "## Дополнительный контекст клиента (для тебя; не цитируй дословно)\n" + "\n".join(lines)
+
 
 def format_restrictions(plan: Dict[str, Any]) -> str:
     """Форматирует ограничения в питании"""

@@ -180,36 +180,41 @@ def load_context_node(state: ClientState) -> ClientState:
     client_id = state['client_id']
 
     try:
-        # Профиль клиента
-        profile = queries.get_client_profile(client_id)
+        # Клиент (имя, заметки нутрициолога, статусы) — по ТЗ нужны всегда
+        client = queries.get_client_by_id(client_id) or {}
+        state['client'] = client
+
+        # Медицинский профиль; имя берём из clients и кладём в профиль для агентов
+        profile = queries.get_client_profile(client_id) or {}
+        if isinstance(profile, dict):
+            profile = {**profile, 'name': client.get('name')}
         state['client_profile'] = profile
 
-        # Активный план питания
-        plan = queries.get_active_nutrition_plan(client_id)
-        state['active_plan'] = plan
+        # Активный план питания — всегда
+        state['active_plan'] = queries.get_active_nutrition_plan(client_id)
 
-        # План ЗОЖ
-        # TODO: Добавить get_active_wellness_plan() в queries.py
-        # wellness = queries.get_active_wellness_plan(client_id)
-        # state['wellness_plan'] = wellness
+        # Активные задачи клиента — всегда
+        state['tasks'] = queries.get_pending_tasks(client_id)
 
-        # История диалога (последние 10 сообщений)
-        conversations = queries.get_conversations(
-            client_id=client_id,
-            limit=10
-        )
+        # Заметки нутрициолога — всегда (внутренний контекст для агента)
+        state['nutritionist_notes'] = client.get('nutritionist_notes')
 
-        # Конвертация в формат для LLM
+        # История диалога (последние 10), в хронологическом порядке,
+        # с маппингом ролей БД (client/agent) → роли LLM (user/assistant)
+        conversations = queries.get_conversations(client_id=client_id, limit=10)
         history = []
-        for conv in conversations:
-            history.append({
-                "role": conv['role'],
-                "content": conv['message']
-            })
-
+        for conv in reversed(conversations):  # get_conversations отдаёт по убыванию
+            db_role = conv.get('role')
+            text = conv.get('message_text') or conv.get('message') or ''
+            if not text:
+                continue
+            llm_role = 'user' if db_role == 'client' else 'assistant'
+            history.append({"role": llm_role, "content": text})
         state['conversation_history'] = history
 
-        logger.info(f"Loaded context for client {client_id}")
+        logger.info(f"Loaded context for client {client_id}: "
+                    f"profile={'yes' if profile else 'no'}, "
+                    f"tasks={len(state['tasks'])}, history={len(history)}")
 
     except Exception as e:
         logger.error(f"Error loading context: {e}")
@@ -389,10 +394,11 @@ def save_to_db_node(state: ClientState) -> ClientState:
 
     try:
         # Сохранение сообщения пользователя.
+        # Роль в БД: 'client' (constraint: client/nutritionist/agent).
         # Из metadata убираем бинарные вложения (фото/аудио), их нельзя писать в JSONB.
         queries.save_conversation(
             client_id=client_id,
-            role="user",
+            role="client",
             message_text=user_message,
             channel=channel,
             metadata={
@@ -401,10 +407,10 @@ def save_to_db_node(state: ClientState) -> ClientState:
             },
         )
 
-        # Сохранение ответа ассистента
+        # Сохранение ответа ассистента (роль 'agent')
         queries.save_conversation(
             client_id=client_id,
-            role="assistant",
+            role="agent",
             message_text=assistant_message,
             channel=channel,
             metadata={

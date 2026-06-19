@@ -268,6 +268,51 @@ def test_mock_flow():
     return True
 
 
+def test_web_search_tool():
+    """Тест 8: build_web_search_tool (серверный инструмент Claude web_search)"""
+    print("=" * 70)
+    print("ТЕСТ 8: build_web_search_tool")
+    print("=" * 70)
+
+    try:
+        from utils.web_access import build_web_search_tool, WEB_SEARCH_TOOL_TYPE
+
+        # С whitelist доменов (доверенные источники нутрициолога)
+        tool = build_web_search_tool(
+            allowed_domains=['pubmed.ncbi.nlm.nih.gov'], max_uses=3
+        )
+        assert tool['type'] == WEB_SEARCH_TOOL_TYPE, "неверный type инструмента"
+        assert tool['name'] == 'web_search', "неверный name инструмента"
+        assert tool['max_uses'] == 3, "max_uses не проброшен"
+        assert tool['allowed_domains'] == ['pubmed.ncbi.nlm.nih.gov'], \
+            "allowed_domains не проброшен"
+        assert 'blocked_domains' not in tool, "не должно быть blocked_domains"
+        print("✅ allowed_domains + max_uses формируются корректно")
+
+        # Без доменов — фильтры не добавляются
+        tool_open = build_web_search_tool()
+        assert 'allowed_domains' not in tool_open and 'blocked_domains' not in tool_open, \
+            "без доменов фильтров быть не должно"
+        print("✅ без доменов инструмент без фильтров")
+
+        # API не допускает оба фильтра — allowed_domains приоритетнее
+        tool_both = build_web_search_tool(
+            allowed_domains=['a.com'], blocked_domains=['b.com']
+        )
+        assert tool_both.get('allowed_domains') == ['a.com'], "allowed должен победить"
+        assert 'blocked_domains' not in tool_both, "оба фильтра одновременно недопустимы"
+        print("✅ при конфликте побеждает allowed_domains")
+
+        print("\n✅ build_web_search_tool работает корректно\n")
+        return True
+
+    except Exception as e:
+        print(f"❌ Ошибка: {e}\n")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def run_all_tests():
     """Запуск всех тестов"""
     print("\n" + "=" * 70)
@@ -281,7 +326,8 @@ def run_all_tests():
         test_prompt_formatting,
         test_langgraph_structure,
         test_router_structure,
-        test_mock_flow
+        test_mock_flow,
+        test_web_search_tool
     ]
 
     results = []
@@ -314,7 +360,7 @@ def run_all_tests():
         print("   >>> route_message('client-uuid', 'Привет!', 'telegram')")
         print()
         print("4. Интеграция с Telegram Bot (Этап 7)")
-        print("5. Расширение utils/ (vision, voice, web_access) — Этап 6")
+        print("5. utils/: vision, voice, knowledge (pgvector), web_search (Claude)")
 
     else:
         print(f"\n⚠️  ПРОВАЛЕНО ТЕСТОВ: {total - passed}")

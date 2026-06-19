@@ -109,12 +109,13 @@ def check_access(client_id: str) -> Dict[str, Any]:
         }
 
     # ════════════════════════════════════════════
-    # [5] ОПРЕДЕЛЕНИЕ РЕЖИМА РАБОТЫ
+    # [5] ОПРЕДЕЛЕНИЕ РЕЖИМА РАБОТЫ (тарифа)
     # ════════════════════════════════════════════
-    client_status = client.get('client_status')
-
-    # РЕЖИМ 1: Полная программа с нутрициологом
-    if client_status == 'active':
+    # Здесь уже: онбординг завершён, оплата ок, не архив/пауза.
+    # Тариф определяется наличием сопровождения нутрициолога:
+    #   - 'active' → full_program (Активный: полный, с поддержкой нутрициолога)
+    #   - иначе    → ai_support  (Базовый: кабинет + ИИ-агент, без нутрициолога)
+    if client.get('client_status') == 'active':
         return {
             "allowed": True,
             "mode": "full_program",
@@ -122,21 +123,48 @@ def check_access(client_id: str) -> Dict[str, Any]:
             "message_for_client": ""
         }
 
-    # РЕЖИМ 2: AI-поддержка без нутрициолога
-    if client_status == 'completed' and payment_status == 'active':
-        return {
-            "allowed": True,
-            "mode": "ai_support",
-            "reason": "ok",
-            "message_for_client": ""
-        }
-
-    # ════════════════════════════════════════════
-    # FALLBACK: Неизвестный статус (не должны попадать сюда)
-    # ════════════════════════════════════════════
     return {
-        "allowed": False,
-        "mode": "blocked",
-        "reason": "unknown_status",
-        "message_for_client": f"Неизвестный статус аккаунта ({client_status}). Обратитесь к нутрициологу."
+        "allowed": True,
+        "mode": "ai_support",
+        "reason": "ok",
+        "message_for_client": ""
     }
+
+
+def check_web_access(client_id: str) -> Dict[str, Any]:
+    """
+    Проверка допуска клиента В ВЕБ-КАБИНЕТ (до диалога с агентом).
+
+    Отличие от check_access: НЕ требует завершённого онбординга (клиент должен
+    войти, чтобы заполнить анкету). Блокирует только по оплате/заморозке/архиву.
+
+    Returns: {"allowed": bool, "reason": str, "message_for_client": str}
+    """
+    try:
+        client = get_client_by_id(client_id)
+    except Exception as e:
+        return {"allowed": False, "reason": "database_error",
+                "message_for_client": f"Ошибка при проверке доступа. ({str(e)})"}
+
+    if not client:
+        return {"allowed": False, "reason": "client_not_found",
+                "message_for_client": "Клиент не найден. Обратитесь к нутрициологу."}
+
+    if client.get('client_status') == 'archived':
+        return {"allowed": False, "reason": "client_archived",
+                "message_for_client": "Ваш аккаунт архивирован. Обратитесь к нутрициологу."}
+
+    if client.get('access_status') == 'frozen':
+        return {"allowed": False, "reason": "access_frozen",
+                "message_for_client": "Доступ временно приостановлен. Обратитесь к нутрициологу."}
+
+    if client.get('payment_status') not in ('trial', 'active'):
+        return {"allowed": False, "reason": "payment_inactive",
+                "message_for_client": "Доступ к кабинету закрыт: услуга не оплачена. Обратитесь к нутрициологу."}
+
+    return {"allowed": True, "reason": "ok", "message_for_client": ""}
+
+
+def get_access_tier(client: Dict[str, Any]) -> str:
+    """Тариф для отображения: 'full' (Активный, с нутрициологом) | 'basic' (Базовый, ИИ)."""
+    return "full" if (client or {}).get("client_status") == "active" else "basic"

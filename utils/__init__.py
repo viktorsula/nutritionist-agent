@@ -6,7 +6,7 @@ Utils — вспомогательные модули для агентов
 - helpers.py: Вспомогательные функции ✅
 - vision.py: Анализ фото через Gemini Flash ✅
 - voice.py: Транскрипция голоса через Whisper ✅
-- web_access.py: Веб-поиск через Tavily ✅
+- web_access.py: Веб-поиск через серверный инструмент Claude (web_search) ✅
 - knowledge.py: Семантический поиск по pgvector (ada-002) ✅
 """
 
@@ -31,7 +31,7 @@ from .knowledge import (
 )
 from .vision import analyze_image, analyze_food_plate, extract_ingredient_names
 from .voice import transcribe_voice
-from .web_access import web_search, build_context_from_results
+from .web_access import build_web_search_tool
 
 __all__ = [
     # llm.py
@@ -67,6 +67,5 @@ __all__ = [
     'transcribe_voice',
 
     # web_access.py
-    'web_search',
-    'build_context_from_results',
+    'build_web_search_tool',
 ]

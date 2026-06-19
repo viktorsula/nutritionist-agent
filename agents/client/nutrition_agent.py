@@ -7,9 +7,10 @@ Nutrition Agent — вопросы клиента о рационе/меню/п�
 
 Поток:
 1. Собрать контекст: активный план питания, профиль, план ЗОЖ.
-2. Подтянуть знания: база нутрициолога (pgvector), документы клиента (pgvector),
-   первостепенные веб-источники (домены из system_settings.trusted_sources).
-3. Сформировать ответ через Claude (task_type='nutrition_analysis').
+2. Подтянуть знания из БД: база нутрициолога (pgvector), документы клиента (pgvector).
+3. Веб-источники: серверный инструмент Claude web_search с whitelist доменов
+   (domains из system_settings.trusted_sources). Поиск выполняет Anthropic.
+4. Сформировать ответ через Claude (task_type='nutrition_analysis').
 
 Промпт: prompts/client/nutrition_system.md
 LLM: Claude Sonnet (task_type='nutrition_analysis').
@@ -25,7 +26,7 @@ from utils.knowledge import (
     search_client_documents,
     build_context_from_chunks,
 )
-from utils.web_access import web_search, build_context_from_results
+from utils.web_access import build_web_search_tool
 from prompts import load_prompt
 from .state import ClientState
 
@@ -47,7 +48,19 @@ def nutrition_node(state: ClientState) -> ClientState:
         system_prompt = _build_system_prompt(state, knowledge_context)
         messages = _build_messages(state, system_prompt)
 
-        response = call_llm(task_type='nutrition_analysis', messages=messages)
+        # Веб-источники: серверный инструмент Claude web_search с whitelist
+        # доверенных доменов (нутрициолог ведёт список в system_settings).
+        # Если доверенных доменов нет — инструмент не подключаем.
+        call_kwargs: Dict[str, Any] = {}
+        domains = _get_trusted_domains()
+        if domains:
+            call_kwargs['tools'] = [
+                build_web_search_tool(allowed_domains=domains, max_uses=3)
+            ]
+
+        response = call_llm(
+            task_type='nutrition_analysis', messages=messages, **call_kwargs
+        )
 
         state['agent_response'] = response['content']
         state['llm_model'] = response.get('model')
@@ -66,14 +79,16 @@ def nutrition_node(state: ClientState) -> ClientState:
 
 
 # ==========================================
-# СБОР ЗНАНИЙ (pgvector + доверенные веб-источники)
+# СБОР ЗНАНИЙ (pgvector из БД)
 # ==========================================
 
 def _gather_knowledge(state: ClientState) -> str:
     """
-    Собирает контекст из трёх источников: база знаний, документы клиента,
-    первостепенные веб-источники (по whitelist доменов из system_settings).
+    Собирает контекст из БД: база знаний нутрициолога и документы клиента (pgvector).
     Всё защищено — при ошибке/без ключей источник просто пропускается.
+
+    Веб-источники сюда НЕ входят: их ищет серверный инструмент Claude web_search
+    (подключается в nutrition_node по whitelist доменов из system_settings).
     """
     query = (state.get('message') or '').strip()
     client_id = state['client_id']
@@ -93,14 +108,6 @@ def _gather_knowledge(state: ClientState) -> str:
     doc_ctx = build_context_from_chunks(doc_chunks, max_chars=2000)
     if doc_ctx:
         parts.append("Из документов клиента:\n" + doc_ctx)
-
-    # 3. Первостепенные веб-источники (только доверенные домены)
-    domains = _get_trusted_domains()
-    if domains:
-        results = web_search(query, max_results=3, include_domains=domains)
-        web_ctx = build_context_from_results(results, max_chars=2000)
-        if web_ctx:
-            parts.append("Из проверенных источников:\n" + web_ctx)
 
     return "\n\n".join(parts)
 

@@ -5,11 +5,19 @@
 
 ---
 
+## 🐞 ИЗВЕСТНЫЕ TODO
+- **Telegram-резолв роли сломан:** `agents/router.py` → `get_user_info()` вызывает
+  `queries.get_user()` и `queries.get_user_by_telegram_id()`, которых НЕТ в `database/queries.py`.
+  Значит `route_message()` для Telegram всегда вернёт «user_not_found». Веб это обходит
+  (резолв в `database/auth.py`). Починить отдельно: добавить `get_user_by_telegram_id`
+  и `get_user_by_auth_id` в `queries.py` (не смешивать с работой по фронту).
+
 ## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
 **Дорожная карта ТЗ v1.3 (Этапы 1–9) — ЗАВЕРШЕНА.** Дальше — подготовка к продакшену:
 1. Миграции в Supabase (001 observer, 002 vector search)
-2. Ключи в Render: OPENAI / TAVILY / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+2. Ключи в Render: OPENAI / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+   (+ включить web search в Claude Console — Settings → Privacy; TAVILY больше не нужен)
 3. Живой smoke-тест (клиент: текст/фото/голос; нутрициолог: аналитика/управление)
 4. PR `stage6-utils` → `main` (автодеплой Render)
 
@@ -40,7 +48,7 @@
 
 ### ✅ Сделано (Часть A, ветка клиента — ПОЛНОСТЬЮ):
 - **requirements.txt** — +openai; модернизирован LangGraph (langgraph>=1.0, langchain-core>=0.3)
-- **utils/** — knowledge.py (ada-002 + pgvector-поиск), vision.py (фото еды), voice.py (Whisper), web_access.py (Tavily + доверенные домены)
+- **utils/** — knowledge.py (ada-002 + pgvector-поиск), vision.py (фото еды), voice.py (Whisper), web_access.py (серверный инструмент Claude web_search + allowed_domains из trusted_sources)
 - **migration 002** — RPC match_knowledge_base / match_client_documents
 - **agents/client/** — vision_agent, diary_agent, nutrition_agent, общий food_analysis.py
 - **orchestrator.py** — роутинг: ingest → load_context → route → [vision|diary|nutrition|dialog] → format → save
@@ -58,11 +66,11 @@
 
 ## ⚠️ ПЕРЕД РЕАЛЬНЫМ ЗАПУСКОМ (действия Виктора)
 
-1. `pip install -r requirements.txt` (новые: openai, tavily)
+1. `pip install -r requirements.txt` (новое: openai; tavily удалён)
 2. Применить миграции в Supabase → SQL Editor:
    - `docs/migrations/001_add_observer_role.sql` ⏳
    - `docs/migrations/002_add_vector_search.sql` ⏳
-3. Ключи окружения: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `GOOGLE_API_KEY`
+3. Ключи окружения: `OPENAI_API_KEY`, `GOOGLE_API_KEY` (веб-поиск — через Claude web search, ключ не нужен; включить в Console)
 4. (Позже) конфликт `streamlit 1.32.0 ↔ protobuf 5.29.6` — перед запуском веба
 
 ---

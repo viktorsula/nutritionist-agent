@@ -1,134 +1,68 @@
 """
-Web Access — веб-поиск через Tavily (Этап 6)
+Web Access — веб-поиск через серверный инструмент Claude (web_search)
 
 Назначение:
 - Поиск актуальной информации в интернете "по запросу" (см. контекст запроса в ТЗ).
 - Используется агентами, когда ответа нет в базе знаний/профиле.
 
-Архитектура:
-1. web_search(query) → список результатов [{title, url, content}]
-2. build_context_from_results(results) → текст для передачи в LLM
+Архитектура (Этап 6, переведено с Tavily на встроенный инструмент Claude):
+- build_web_search_tool(allowed_domains, max_uses) → dict инструмента для Claude.
+- Инструмент передаётся в call_llm(..., tools=[tool]); Anthropic САМ выполняет
+  поиск на своей стороне и возвращает ответ с цитатами. Отдельный поисковый
+  провайдер и ключ (TAVILY_API_KEY) больше не нужны.
+- Контроль источников сохранён: allowed_domains — whitelist доменов из
+  system_settings.trusted_sources (редактирует нутрициолог).
 
-Ключи: TAVILY_API_KEY из os.environ.get (НИКОГДА load_dotenv).
+Требование: web search должен быть включён в Claude Console (Settings → Privacy)
+на уровне организации. Без этого инструмент вернёт ошибку в рантайме.
 
-TODO v1.1:
-- Кэширование частых запросов
-- Фильтр доменов (только медицинские/научные источники)
+Цена: $10 за 1000 поисков + токены (usage.web_search_requests в ответе call_llm).
 """
 
-import os
 import logging
 from typing import Any, Dict, List, Optional
 
-# Импорт SDK (устанавливается через requirements.txt)
-try:
-    from tavily import TavilyClient
-except ImportError:
-    TavilyClient = None
-
 logger = logging.getLogger(__name__)
 
+# Версия серверного инструмента web search (базовый поиск, без code execution).
+WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
+
 
 # ========================================
-# ВЕБ-ПОИСК
+# ПОСТРОЕНИЕ ИНСТРУМЕНТА WEB SEARCH ДЛЯ CLAUDE
 # ========================================
 
-def web_search(
-    query: str,
-    max_results: int = 5,
-    search_depth: str = "basic",
-    include_domains: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
+def build_web_search_tool(
+    allowed_domains: Optional[List[str]] = None,
+    max_uses: int = 3,
+    blocked_domains: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
-    Ищет информацию в интернете через Tavily.
+    Формирует определение серверного инструмента web_search для Claude.
+
+    Передаётся в call_llm(..., tools=[build_web_search_tool(...)]); поиск
+    выполняется на стороне Anthropic, ответ возвращается с цитатами.
 
     Args:
-        query: Поисковый запрос
-        max_results: Сколько результатов вернуть
-        search_depth: 'basic' (быстро) | 'advanced' (глубже)
-        include_domains: Ограничить поиск только этими доменами (первостепенные
-            источники из system_settings.trusted_sources). None/[] = без ограничения.
+        allowed_domains: Whitelist доменов (первостепенные/доверенные источники
+            из system_settings.trusted_sources). None/[] = без ограничения.
+        max_uses: Максимум поисков за один запрос (баланс цена/латентность).
+        blocked_domains: Чёрный список доменов. Нельзя использовать вместе
+            с allowed_domains (API принимает только один из фильтров).
 
     Returns:
-        Список результатов:
-        [{"title": str, "url": str, "content": str, "score": float}, ...]
-        Пустой список при ошибке или отсутствии ключа (поиск не критичен).
+        dict определения инструмента для Anthropic Messages API.
     """
-    if TavilyClient is None:
-        logger.warning("Tavily SDK не установлен — web_search недоступен")
-        return []
+    tool: Dict[str, Any] = {
+        "type": WEB_SEARCH_TOOL_TYPE,
+        "name": "web_search",
+        "max_uses": max_uses,
+    }
 
-    if not query or not query.strip():
-        return []
+    # API не допускает одновременно allowed_domains и blocked_domains.
+    if allowed_domains:
+        tool["allowed_domains"] = allowed_domains
+    elif blocked_domains:
+        tool["blocked_domains"] = blocked_domains
 
-    api_key = os.environ.get('TAVILY_API_KEY')
-    if not api_key:
-        logger.warning("TAVILY_API_KEY не найден — web_search недоступен")
-        return []
-
-    try:
-        client = TavilyClient(api_key=api_key)
-        search_kwargs: Dict[str, Any] = {
-            "query": query,
-            "max_results": max_results,
-            "search_depth": search_depth,
-        }
-        if include_domains:
-            search_kwargs["include_domains"] = include_domains
-
-        response = client.search(**search_kwargs)
-
-        results = []
-        for item in response.get("results", []):
-            results.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "content": item.get("content", ""),
-                "score": item.get("score", 0.0),
-            })
-
-        logger.info(f"web_search('{query[:40]}...'): найдено {len(results)} результатов")
-        return results
-
-    except Exception as e:
-        logger.error(f"Tavily search error: {e}")
-        return []
-
-
-# ========================================
-# ХЕЛПЕР: СБОРКА КОНТЕКСТА ДЛЯ LLM
-# ========================================
-
-def build_context_from_results(
-    results: List[Dict[str, Any]],
-    max_chars: int = 4000,
-) -> str:
-    """
-    Собирает текстовый контекст из результатов поиска для передачи в LLM.
-
-    Args:
-        results: Результат web_search()
-        max_chars: Ограничение длины контекста
-
-    Returns:
-        Склеенный текст результатов (с источниками) или пустая строка.
-    """
-    if not results:
-        return ""
-
-    parts: List[str] = []
-    total = 0
-
-    for item in results:
-        content = item.get("content", "")
-        url = item.get("url", "")
-        if not content:
-            continue
-        block = f"{content}\n(Источник: {url})"
-        if total + len(block) > max_chars:
-            parts.append(block[: max_chars - total])
-            break
-        parts.append(block)
-        total += len(block)
-
-    return "\n\n---\n\n".join(parts)
+    return tool

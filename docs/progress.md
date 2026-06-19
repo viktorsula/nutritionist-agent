@@ -75,11 +75,11 @@
 - [x] **utils/knowledge.py** — get_embedding (OpenAI ada-002, 1536) + семантический поиск + сборка контекста
 - [x] **utils/vision.py** — analyze_image + analyze_food_plate (приоритет: состав/ингредиенты/форма; КБЖУ вторично) + extract_ingredient_names
 - [x] **utils/voice.py** — transcribe_voice (OpenAI Whisper)
-- [x] **utils/web_access.py** — web_search (Tavily) + include_domains (доверенные источники) + сборка контекста
+- [x] **utils/web_access.py** — build_web_search_tool() (серверный инструмент Claude web_search) + allowed_domains из trusted_sources [обновлено 19 июня: Tavily убран]
 - [x] **agents/client/food_analysis.py** — общий анализ состава против рациона (DRY): analyze_against_plan / determine_food_routing / highest_severity
 - [x] **agents/client/vision_agent.py** — фото еды: 3 исхода, анализ против рациона, событие calories_logged, уведомление нутрициолога при отклонениях
 - [x] **agents/client/diary_agent.py** — дневник текстом: ветки meal/weight/wellbeing/other; события weight_logged/bad_wellbeing/calories_logged
-- [x] **agents/client/nutrition_agent.py** — вопросы о рационе (Claude); знания: knowledge_base + client_documents + доверенные веб-источники (system_settings.trusted_sources)
+- [x] **agents/client/nutrition_agent.py** — вопросы о рационе (Claude); знания: knowledge_base + client_documents (pgvector) + веб через серверный инструмент Claude web_search с allowed_domains из system_settings.trusted_sources
 - [x] **prompts/client/** — vision_system.md, diary_system.md, nutrition_system.md
 - [x] **agents/client/orchestrator.py** — роутинг: ingest(голос→текст) → load_context → route → [vision|diary|nutrition|dialog] → format_response → save_to_db; удалён check_alerts_node
 - [x] **Фиксы:** save_to_db (insert_conversation→save_conversation + _sanitize_metadata); поля state route/food_items
@@ -142,20 +142,26 @@
 - **LangGraph для оркестрации:** стандарт мультиагентных систем, граф: load_context → check_alerts → agent → format → save
 - **ClientState TypedDict:** полное состояние агента (входные данные, контекст, алерты, результаты, метаданные)
 
+## TODO (вне текущего фронта)
+- **Telegram-резолв роли:** `agents/router.py:get_user_info()` зовёт несуществующие
+  `queries.get_user()`/`queries.get_user_by_telegram_id()` → Telegram-путь возвращает
+  «user_not_found». Веб обходит через `database/auth.py`. Починить: добавить
+  `get_user_by_telegram_id`/`get_user_by_auth_id` в `queries.py`.
+
 ## Следующий шаг
 **Дорожная карта ТЗ v1.3 (Этапы 1–9) — ПОЛНОСТЬЮ ЗАВЕРШЕНА.** ✅
 Остаётся подготовка к продакшену перед слиянием `stage6-utils` → `main`:
 1. Применить миграции в Supabase (001 observer, 002 vector search)
-2. Прописать ключи в Render (OPENAI / TAVILY / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_*)
+2. Прописать ключи в Render (OPENAI / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_*); включить web search в Claude Console
 3. Живой smoke-тест (сообщение клиента + запрос нутрициолога + фото/голос)
 4. PR `stage6-utils` → `main` (автодеплой выкатит рабочую версию)
 
 ## Важно перед запуском
-⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)
+⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новое: openai; tavily удалён)
 ⚠️ **Выполнить миграции в Supabase (SQL Editor):**
 - `docs/migrations/001_add_observer_role.sql` — роль observer — ⏳ ожидает
 - `docs/migrations/002_add_vector_search.sql` — RPC векторного поиска — ⏳ ожидает
-⚠️ **Ключи окружения:** OPENAI_API_KEY (эмбеддинги+Whisper), TAVILY_API_KEY (веб-поиск), GOOGLE_API_KEY (vision)
+⚠️ **Ключи окружения:** OPENAI_API_KEY (эмбеддинги+Whisper), GOOGLE_API_KEY (vision); веб-поиск — серверный инструмент Claude web_search (ключ не нужен, включить в Console)
 ⚠️ **Пред­существующий конфликт:** streamlit 1.32.0 ↔ protobuf 5.29.6 — разобрать перед запуском веба
 
 ## Ключевые решения Этапа 6 (14 июня 2026)
@@ -163,6 +169,7 @@
 - **Голос:** перенесён в Часть A (делаем сразу), Whisper через openai
 - **Vision приоритет:** состав/ингредиенты/форма приготовления первичны, КБЖУ вторично (для контроля рациона)
 - **DRY:** общий food_analysis.py для vision и diary
-- **Знания nutrition_agent:** knowledge_base + client_documents + доверенные веб-домены (system_settings.trusted_sources, редактирует нутрициолог/агент по его команде)
+- **Знания nutrition_agent:** knowledge_base + client_documents (pgvector) + веб через серверный инструмент Claude web_search с allowed_domains из system_settings.trusted_sources (редактирует нутрициолог/агент по его команде)
+- **[19 июня] Веб-поиск: Tavily → Claude web_search.** ТЗ механизм не задавало; Tavily был выбором Этапа 6. Переведено на встроенный серверный инструмент Claude (web_search_20250305): минус зависимость и ключ, контроль источников сохранён через allowed_domains. Требует включения web search в Claude Console.
 - **Роутинг:** photo→vision (без LLM), текст→Groq-классификатор (diary|nutrition|dialog); check_alerts_node убран (алерты формируют агенты)
 - **LangGraph модернизирован:** код использует только StateGraph/END → апгрейд до langgraph 1.x безопасен

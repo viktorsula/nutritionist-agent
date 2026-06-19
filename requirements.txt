@@ -1,5 +1,10 @@
-# Веб-интерфейс
+# Веб-интерфейс (Streamlit — на время перехода на React; будет удалён при cutover)
 streamlit==1.32.0
+
+# API для веб-фронта (React) — FastAPI (Фронт Фаза 1)
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9   # загрузка файлов (фото/голос/PDF) — Фаза 2
 
 # LLM провайдеры (Этап 4: utils/llm.py)
 groq>=0.4.0
@@ -31,13 +36,9 @@ pypdf==4.1.0
 langfuse>=2.0.0
 # langsmith ставится транзитивно langchain-core (без жёсткого пина, чтобы не конфликтовать)
 
-# Веб-доступ (TODO: Этап 6)
-# requests>=2.31.0
-# beautifulsoup4>=4.12.0
-# duckduckgo-search>=4.0.0
-
-# Поиск
-tavily-python==0.3.3
+# Веб-поиск: серверный инструмент Claude web_search (utils/web_access.py).
+# Поиск выполняет Anthropic — отдельный поисковый SDK/ключ не нужен.
+# Требуется включить web search в Claude Console (Settings → Privacy).
 
 # Утилиты
 python-dotenv==1.0.1

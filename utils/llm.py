@@ -3,7 +3,7 @@
 
 Поддерживает переключение между провайдерами:
 - Groq (llama-3.3-70b) — диалог, бесплатно
-- Claude (Sonnet 4.5/4.6) — аналитика, ~$3/M токенов
+- Claude (Sonnet 4.6) — аналитика, ~$3/M токенов; серверные инструменты (web_search)
 - Gemini (1.5 Flash) — vision, бесплатно
 
 Архитектура:
@@ -441,31 +441,73 @@ def _call_claude(
                     'content': msg['content']
                 })
 
-        # Вызов API
-        response = client.messages.create(
-            model=config['model'],
-            system=system_message,
-            messages=claude_messages,
-            temperature=config['temperature'],
-            max_tokens=config['max_tokens'],
-            stream=stream,
-            **kwargs
-        )
-
         if stream:
             # TODO v1.1: Поддержка streaming
             logger.warning("Streaming not fully implemented for Claude")
-            return response
+            return client.messages.create(
+                model=config['model'],
+                system=system_message,
+                messages=claude_messages,
+                temperature=config['temperature'],
+                max_tokens=config['max_tokens'],
+                stream=True,
+                **kwargs
+            )
+
+        # Серверные инструменты (например, web_search) передаются через tools.
+        # Anthropic сам выполняет поиск; при server-tool-цикле возможен
+        # stop_reason='pause_turn' — нужно дослать ответ и продолжить.
+        # max_iterations — предохранитель от бесконечного цикла.
+        max_iterations = 5
+        loop_messages = claude_messages
+        for _ in range(max_iterations):
+            response = client.messages.create(
+                model=config['model'],
+                system=system_message,
+                messages=loop_messages,
+                temperature=config['temperature'],
+                max_tokens=config['max_tokens'],
+                stream=False,
+                **kwargs
+            )
+
+            if response.stop_reason != 'pause_turn':
+                break
+
+            # Сервер приостановил server-tool-цикл — дослать ассистентский ход
+            # и продолжить (без дополнительного user-сообщения).
+            loop_messages = loop_messages + [
+                {'role': 'assistant', 'content': response.content}
+            ]
+        else:
+            logger.warning(
+                f"Claude server-tool loop hit max_iterations={max_iterations}"
+            )
+
+        # Финальный текст собираем из всех text-блоков (перед ним могут идти
+        # блоки server_tool_use / web_search_tool_result).
+        content_text = "".join(
+            block.text for block in response.content
+            if getattr(block, 'type', None) == 'text'
+        )
+
+        usage = {
+            'input_tokens': response.usage.input_tokens,
+            'output_tokens': response.usage.output_tokens,
+            'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+        }
+        # Учёт серверных инструментов (web search) для стоимости/трейсинга.
+        server_tool_use = getattr(response.usage, 'server_tool_use', None)
+        if server_tool_use is not None:
+            web_requests = getattr(server_tool_use, 'web_search_requests', None)
+            if web_requests is not None:
+                usage['web_search_requests'] = web_requests
 
         return {
-            'content': response.content[0].text,
+            'content': content_text,
             'model': config['model'],
             'provider': 'claude',
-            'usage': {
-                'input_tokens': response.usage.input_tokens,
-                'output_tokens': response.usage.output_tokens,
-                'total_tokens': response.usage.input_tokens + response.usage.output_tokens
-            },
+            'usage': usage,
             'finish_reason': response.stop_reason
         }
 
