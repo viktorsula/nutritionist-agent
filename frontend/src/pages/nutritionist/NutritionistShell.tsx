@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Header } from "../../components/Header";
-import { CreateClientForm } from "../../features/clients/CreateClientForm";
 import { LabIndicatorsManager } from "../../features/nutritionist/LabIndicatorsManager";
 import { AlertsPanel } from "../../features/nutritionist/AlertsPanel";
+import { Registry } from "../../features/nutritionist/Registry";
+import { ClientCard } from "../../features/nutritionist/ClientCard";
+import type { RegistryRow } from "../../features/nutritionist/queries";
 
 type Tab = "alerts" | "registry" | "labs" | "analytics" | "settings";
 
@@ -13,7 +15,8 @@ type Tab = "alerts" | "registry" | "labs" | "analytics" | "settings";
  */
 export function NutritionistShell() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<Tab>("registry");
+  const [tab, setTab] = useState<Tab>("alerts");
+  const [selectedClient, setSelectedClient] = useState<RegistryRow | null>(null);
 
   const tabs: Tab[] = ["alerts", "registry", "labs", "analytics", "settings"];
 
@@ -42,7 +45,11 @@ export function NutritionistShell() {
           {tab === "alerts" ? (
             <AlertsPanel />
           ) : tab === "registry" ? (
-            <CreateClientForm />
+            selectedClient ? (
+              <ClientCard client={selectedClient} onBack={() => setSelectedClient(null)} />
+            ) : (
+              <Registry onOpen={setSelectedClient} />
+            )
           ) : tab === "labs" ? (
             <LabIndicatorsManager />
           ) : (
