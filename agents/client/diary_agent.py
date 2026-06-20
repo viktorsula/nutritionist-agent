@@ -147,6 +147,22 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
     if alerts:
         state['alerts'] = (state.get('alerts') or []) + alerts
         state['routing'] = determine_food_routing(state['alerts'], mode)
+        # Персистим алерт как событие с severity, чтобы он попал в панель
+        # алертов нутрициолога (weight_logged выше пишется без severity).
+        try:
+            top = alerts[0]
+            queries.log_client_event(
+                client_id=client_id,
+                event_type='weight_increase',
+                severity=top.get('severity') or 'high',
+                payload={
+                    "weight": weight,
+                    "message": top.get('message'),
+                    "details": top.get('details'),
+                },
+            )
+        except Exception as e:
+            logger.error(f"Diary failed to log weight_increase alert: {e}")
 
     return 'weight'
 

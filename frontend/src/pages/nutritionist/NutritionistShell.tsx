@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 import { Header } from "../../components/Header";
 import { CreateClientForm } from "../../features/clients/CreateClientForm";
 import { LabIndicatorsManager } from "../../features/nutritionist/LabIndicatorsManager";
+import { AlertsPanel } from "../../features/nutritionist/AlertsPanel";
 
-type Tab = "registry" | "labs" | "analytics" | "settings";
+type Tab = "alerts" | "registry" | "labs" | "analytics" | "settings";
 
 /**
  * Каркас кабинета нутрициолога — табы (реестр / аналитика / настройки)
@@ -14,7 +15,7 @@ export function NutritionistShell() {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("registry");
 
-  const tabs: Tab[] = ["registry", "labs", "analytics", "settings"];
+  const tabs: Tab[] = ["alerts", "registry", "labs", "analytics", "settings"];
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
@@ -38,7 +39,9 @@ export function NutritionistShell() {
           <h2 className="mb-4 text-sm font-semibold text-brand-dark">
             {t(`nutritionist.${tab}`)}
           </h2>
-          {tab === "registry" ? (
+          {tab === "alerts" ? (
+            <AlertsPanel />
+          ) : tab === "registry" ? (
             <CreateClientForm />
           ) : tab === "labs" ? (
             <LabIndicatorsManager />

@@ -26,6 +26,10 @@
   ReferenceArea + плейсхолдер); ассистент использует нормы для лёгкой трактовки.
   Ввод значений анализов — форма `LabValuesForm` в той же вкладке (insert в `lab_results`,
   source='nutritionist', + список последних значений).
+- **Панель алертов нутрициолога (реализовано):** вкладка «Алерты» (первая) — `AlertsPanel`
+  читает `client_events` (severity ∈ medium/high/critical) под RLS + join clients(name);
+  фильтры окно/severity, цвет по уровню. Добавлен персист `weight_increase` как severity-события
+  в `diary_agent` (раньше в панель не попадал).
 
 ## Выполнено
 
