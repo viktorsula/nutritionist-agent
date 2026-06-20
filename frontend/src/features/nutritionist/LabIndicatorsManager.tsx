@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../../components/ui/Button";
 import type { TrackedIndicator } from "../client/queries";
+import { LabValuesForm } from "./LabValuesForm";
 
 interface ClientRow {
   id: string;
@@ -258,6 +259,8 @@ export function LabIndicatorsManager() {
 
           {ok && <div className="text-sm text-green-600">{ok}</div>}
           {error && <div className="text-sm text-red-600">{error}</div>}
+
+          <LabValuesForm clientId={clientId} indicators={rows} />
         </>
       )}
     </div>
