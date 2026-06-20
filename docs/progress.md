@@ -35,6 +35,11 @@
   вес/аллергии/хронические/ограничения), план питания + ЗОЖ, задачи, график веса и анализов
   (с нормами), последние события, редактируемые заметки нутрициолога (update clients под RLS).
   Переиспользует хуки client/queries; новые — features/nutritionist/queries.ts.
+- **Чат нутрициолога с агентом (реализовано):** вкладка «Ассистент-агент» — `NutritionistChat`
+  шлёт запросы в `/nutritionist/query` (analytics + management с двухшаговым подтверждением;
+  pending_action хранится на бэке по nutritionist_id). Исправлен баг: analytics_agent и
+  management_agent звали `call_llm(task_type='analysis')` — нет такого типа → теперь 'analytics'
+  (с взаимозаменой Claude→Groq/Gemini). Проверено: сводка и создание задачи отвечают на Groq.
 
 ## Выполнено
 

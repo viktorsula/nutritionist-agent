@@ -5,9 +5,10 @@ import { LabIndicatorsManager } from "../../features/nutritionist/LabIndicatorsM
 import { AlertsPanel } from "../../features/nutritionist/AlertsPanel";
 import { Registry } from "../../features/nutritionist/Registry";
 import { ClientCard } from "../../features/nutritionist/ClientCard";
+import { NutritionistChat } from "../../features/nutritionist/NutritionistChat";
 import type { RegistryRow } from "../../features/nutritionist/queries";
 
-type Tab = "alerts" | "registry" | "labs" | "analytics" | "settings";
+type Tab = "alerts" | "registry" | "labs" | "assistant" | "analytics" | "settings";
 
 /**
  * Каркас кабинета нутрициолога — табы (реестр / аналитика / настройки)
@@ -18,7 +19,7 @@ export function NutritionistShell() {
   const [tab, setTab] = useState<Tab>("alerts");
   const [selectedClient, setSelectedClient] = useState<RegistryRow | null>(null);
 
-  const tabs: Tab[] = ["alerts", "registry", "labs", "analytics", "settings"];
+  const tabs: Tab[] = ["alerts", "registry", "labs", "assistant", "analytics", "settings"];
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
@@ -52,6 +53,8 @@ export function NutritionistShell() {
             )
           ) : tab === "labs" ? (
             <LabIndicatorsManager />
+          ) : tab === "assistant" ? (
+            <NutritionistChat />
           ) : (
             <p className="text-xs text-gray-400">{t("nutritionist.placeholder")}</p>
           )}

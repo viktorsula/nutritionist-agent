@@ -9,7 +9,7 @@ Read-only: собирает данные из БД и формирует про�
 - по всей базе (клиент не определён): воронка по статусам + критичные алерты.
 
 Промпт: prompts/nutritionist/analytics_system.md
-LLM: Claude (task_type='analysis').
+LLM: Claude (task_type='analytics'); при недоступности — Groq/Gemini (взаимозамена).
 """
 
 import logging
@@ -35,7 +35,7 @@ def analytics_node(state: NutritionistState) -> NutritionistState:
             {"role": "user", "content": _build_user_prompt(state, data_context)},
         ]
 
-        response = call_llm(task_type="analysis", messages=messages)
+        response = call_llm(task_type="analytics", messages=messages)
 
         state["agent_response"] = response["content"]
         state["llm_model"] = response.get("model")

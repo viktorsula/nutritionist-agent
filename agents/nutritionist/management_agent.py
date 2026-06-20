@@ -11,7 +11,7 @@ Management Agent (Нутрициолог) — управление по кома
 и пишут запись в audit_logs. Агент не назначает ничего по своей инициативе.
 
 Промпт: prompts/nutritionist/management_system.md
-LLM: Claude (task_type='analysis').
+LLM: Claude (task_type='analytics'); при недоступности — Groq/Gemini (взаимозамена).
 """
 
 import json
@@ -112,7 +112,7 @@ def _parse_action(message: str) -> Optional[Dict[str, Any]]:
         f"Команда нутрициолога: {message}"
     )
     response = call_llm(
-        task_type="analysis",
+        task_type="analytics",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
