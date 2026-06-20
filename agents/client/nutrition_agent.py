@@ -20,7 +20,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from utils.llm import call_llm
+from utils.llm import call_llm, LLMUnavailableError
 from utils.knowledge import (
     search_knowledge_base,
     search_client_documents,
@@ -58,6 +58,9 @@ def nutrition_node(state: ClientState) -> ClientState:
                 build_web_search_tool(allowed_domains=domains, max_uses=3)
             ]
 
+        # call_llm сам выполняет взаимозамену моделей (Claude → Groq → Gemini).
+        # Если основная модель недоступна (лимиты/сбой/нет кредитов) — ответит
+        # резервная; tools (web_search) применяется только если сработал Claude.
         response = call_llm(
             task_type='nutrition_analysis', messages=messages, **call_kwargs
         )
@@ -65,6 +68,19 @@ def nutrition_node(state: ClientState) -> ClientState:
         state['agent_response'] = response['content']
         state['llm_model'] = response.get('model')
         state['llm_usage'] = response.get('usage', {})
+        if response.get('fallback_used'):
+            state['agent_used'] = 'nutrition_agent_fallback'
+        return state
+
+    except LLMUnavailableError as e:
+        # Ни основная, ни резервные модели не ответили — просим повторить позже.
+        logger.warning(f"Nutrition agent: все модели недоступны: {e}")
+        state['agent_response'] = (
+            "Сейчас сервис перегружен и модели не отвечают. "
+            "Пожалуйста, подождите немного и отправьте вопрос ещё раз."
+        )
+        state['agent_used'] = 'nutrition_agent_unavailable'
+        state['error'] = str(e)
         return state
 
     except Exception as e:
@@ -152,7 +168,7 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
 
     try:
         template = load_prompt('client/nutrition_system')
-        return template.format(
+        prompt = template.format(
             client_name=profile.get('name', 'Клиент'),
             client_goal=profile.get('goal', 'Не указана'),
             restrictions=_format_list(plan.get('restrictions')),
@@ -161,6 +177,15 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
             knowledge_context=knowledge_context or "Дополнительных материалов нет.",
             language='русский',  # TODO: определять из profile/channel
         )
+        # Собственные данные клиента (вес/анализы с динамикой) — можно сообщать ему.
+        from .dialog_agent import build_health_lines
+        health = build_health_lines(state)
+        if health:
+            prompt += (
+                "\n\n## Данные клиента (его собственные; можно сообщать ему)\n"
+                + "\n".join(health)
+            )
+        return prompt
     except Exception as e:
         logger.error(f"Error building nutrition system prompt: {e}")
         return (

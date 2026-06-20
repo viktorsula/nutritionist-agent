@@ -14,7 +14,7 @@ LLM: Groq llama-3.3-70b (task_type='dialog')
 import logging
 from typing import List, Dict, Any
 
-from utils.llm import call_llm
+from utils.llm import call_llm, LLMUnavailableError
 from prompts import load_prompt
 from .state import ClientState
 
@@ -59,6 +59,17 @@ def dialog_node(state: ClientState) -> ClientState:
             f"{response['usage'].get('total_tokens', 0)} tokens"
         )
 
+        return state
+
+    except LLMUnavailableError as e:
+        # Ни основная, ни резервные модели не ответили — просим повторить позже.
+        logger.warning(f"Dialog agent: все модели недоступны: {e}")
+        state['agent_response'] = (
+            "Сейчас сервис перегружен и модели не отвечают. "
+            "Пожалуйста, подождите немного и отправьте сообщение ещё раз."
+        )
+        state['agent_used'] = 'dialog_agent_unavailable'
+        state['error'] = str(e)
         return state
 
     except Exception as e:
@@ -169,8 +180,9 @@ def build_context_block(state: ClientState) -> str:
     tasks = state.get('tasks') or []
 
     lines: List[str] = []
-    if profile.get('weight'):
-        lines.append(f"- Текущий вес: {profile.get('weight')} кг")
+    # Здоровье клиента (вес из последнего замера + анализы с динамикой) —
+    # это его собственные данные, можно озвучивать.
+    lines.extend(build_health_lines(state))
     if profile.get('target_weight'):
         lines.append(f"- Желаемый вес: {profile.get('target_weight')} кг")
     if plan and plan.get('title'):
@@ -185,7 +197,57 @@ def build_context_block(state: ClientState) -> str:
 
     if not lines:
         return ""
-    return "## Дополнительный контекст клиента (для тебя; не цитируй дословно)\n" + "\n".join(lines)
+    return "## Данные клиента (его собственные; можно сообщать ему)\n" + "\n".join(lines)
+
+
+def build_health_lines(state: ClientState) -> List[str]:
+    """
+    Строки контекста о здоровье клиента: вес из последнего замера и недавние
+    анализы с простой динамикой (текущее → предыдущее значение по показателю).
+
+    Общий хелпер для dialog_agent и nutrition_agent. Возвращает [] если данных нет.
+    """
+    profile = state.get('client_profile') or {}
+    measurement = state.get('latest_measurement') or {}
+    labs = state.get('lab_results') or []
+
+    lines: List[str] = []
+
+    # Вес: приоритет — последний замер; иначе из анкеты (profile.weight).
+    weight = measurement.get('weight') if measurement else None
+    when = measurement.get('measured_at') if measurement else None
+    if weight is not None:
+        lines.append(f"- Текущий вес: {weight} кг" + (f" (на {when})" if when else ""))
+    elif profile.get('weight'):
+        lines.append(f"- Текущий вес (из анкеты): {profile.get('weight')} кг")
+
+    # Объёмы тела (если есть в замере).
+    for field, label in (('waist', 'талия'), ('hips', 'бёдра'), ('neck', 'шея')):
+        val = measurement.get(field) if measurement else None
+        if val is not None:
+            lines.append(f"- Объём ({label}): {val} см")
+
+    # Анализы: по каждому показателю последнее значение и предыдущее (динамика).
+    if labs:
+        seen: Dict[str, Dict[str, Any]] = {}
+        prev: Dict[str, Dict[str, Any]] = {}
+        for row in labs:  # labs отсортированы по measured_at desc
+            ind = row.get('indicator')
+            if not ind:
+                continue
+            if ind not in seen:
+                seen[ind] = row
+            elif ind not in prev:
+                prev[ind] = row
+        for ind, row in seen.items():
+            unit = f" {row.get('unit')}" if row.get('unit') else ""
+            text = f"- Анализ «{ind}»: {row.get('value')}{unit} (на {row.get('measured_at')})"
+            p = prev.get(ind)
+            if p is not None and p.get('value') is not None:
+                text += f"; ранее было {p.get('value')}{unit} (на {p.get('measured_at')})"
+            lines.append(text)
+
+    return lines
 
 
 def format_restrictions(plan: Dict[str, Any]) -> str:

@@ -131,6 +131,38 @@ def get_tasks_by_client(client_id: str) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def get_latest_measurement(client_id: str) -> Optional[Dict[str, Any]]:
+    """Последний замер тела клиента (вес/объёмы) из measurements (миграция 003)."""
+    supabase = _service_client()
+    response = (
+        supabase.table("measurements")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("measured_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = _extract_data(response) or []
+    return rows[0] if rows else None
+
+
+def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Недавние числовые анализы клиента из lab_results (миграция 003),
+    свежие сверху. Для контекста ассистента (вес/холестерин и пр.).
+    """
+    supabase = _service_client()
+    response = (
+        supabase.table("lab_results")
+        .select("indicator,value,unit,measured_at,source")
+        .eq("client_id", client_id)
+        .order("measured_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
 def get_system_setting(key: str) -> Optional[Dict[str, Any]]:
     supabase = _service_client()
     return _execute_single(

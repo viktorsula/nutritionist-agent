@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { safeStorageName } from "../client/documents";
 import { IMPROVE } from "./schema";
 
 export type Answers = Record<string, unknown>;
@@ -41,7 +42,8 @@ function composeGoals(answers: Answers, lang: Lang): string {
 async function uploadLabFiles(clientId: string, files: File[]): Promise<void> {
   for (const file of files) {
     try {
-      const path = `${clientId}/${Date.now()}_${file.name}`;
+      const rand = Math.random().toString(36).slice(2, 8);
+      const path = `${clientId}/${Date.now()}_${rand}_${safeStorageName(file.name)}`;
       const up = await supabase.storage.from(STORAGE_BUCKET).upload(path, file);
       if (up.error) {
         console.warn("Lab file upload failed (bucket configured?):", up.error.message);

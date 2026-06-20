@@ -99,6 +99,43 @@ DEFAULT_TASK_MODEL_MAPPING = {
 
 
 # ========================================
+# ВЗАИМОРЕЗЕРВИРОВАНИЕ МОДЕЛЕЙ (graceful degradation)
+# ========================================
+# При сбое основной модели (лимиты, падение провайдера, нет кредитов) call_llm
+# автоматически пробует следующие по списку — способные выполнить ту же задачу.
+# Текстовые задачи резервируются бесплатными Groq/Gemini. Vision — только
+# vision-моделями. Если все исчерпаны → LLMUnavailableError (просьба повторить).
+TASK_FALLBACK_CHAINS = {
+    'dialog': [
+        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+    ],
+    'analytics': [
+        {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
+        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+    ],
+    'nutrition_analysis': [
+        {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
+        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+    ],
+    'summary': [
+        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+    ],
+    'planning': [
+        {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
+        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+    ],
+    'vision': [
+        # vision умеют Claude и Gemini; Groq — нет, поэтому в резерве только Claude.
+        {'provider': 'claude', 'model': 'claude-sonnet-4-6'},
+    ],
+}
+
+
+class LLMUnavailableError(RuntimeError):
+    """Все модели (основная и резервные) недоступны — нужен повтор позже."""
+
+
+# ========================================
 # ОСНОВНАЯ ФУНКЦИЯ (Вариант 3: гибридный)
 # ========================================
 
@@ -215,37 +252,66 @@ def call_llm(
             f"Доступные task_type: {list(DEFAULT_TASK_MODEL_MAPPING.keys())}"
         )
 
-    # Вызов конкретного провайдера (+ трейсинг LangFuse, см. monitoring/)
-    start_time = time.monotonic()
-    try:
-        if config['provider'] == 'groq':
-            result = _call_groq(messages, config, stream, **kwargs)
-        elif config['provider'] == 'claude':
-            result = _call_claude(messages, config, stream, **kwargs)
-        elif config['provider'] == 'gemini':
-            result = _call_gemini(messages, config, stream, **kwargs)
-        else:
-            raise ValueError(
-                f"Unknown provider: {config['provider']}. "
-                f"Supported: groq, claude, gemini"
+    # Кандидаты на выполнение: основная модель + резерв (взаимозамена).
+    # Резерв подключаем только для task_type (для явного provider+model — нет,
+    # там пользователь намеренно выбрал конкретную модель).
+    candidates = [config]
+    if task_type and not (provider and model):
+        for fb in TASK_FALLBACK_CHAINS.get(task_type, []):
+            if fb['provider'] == config['provider'] and fb['model'] == config['model']:
+                continue
+            candidates.append({
+                'provider': fb['provider'],
+                'model': fb['model'],
+                'temperature': config.get('temperature', 0.7),
+                'max_tokens': config.get('max_tokens', 2000),
+            })
+
+    errors: List[str] = []
+    for idx, cand in enumerate(candidates):
+        start_time = time.monotonic()
+        # tools (серверный web_search) — только для Claude; иначе убираем.
+        call_kwargs = dict(kwargs)
+        if cand['provider'] != 'claude':
+            call_kwargs.pop('tools', None)
+        try:
+            if cand['provider'] == 'groq':
+                result = _call_groq(messages, cand, stream, **call_kwargs)
+            elif cand['provider'] == 'claude':
+                result = _call_claude(messages, cand, stream, **call_kwargs)
+            elif cand['provider'] == 'gemini':
+                result = _call_gemini(messages, cand, stream, **call_kwargs)
+            else:
+                raise ValueError(
+                    f"Unknown provider: {cand['provider']}. Supported: groq, claude, gemini"
+                )
+
+            if task_type:
+                result['task_type'] = task_type
+            if idx > 0:
+                result['fallback_used'] = True
+                logger.warning(
+                    f"LLM взаимозамена: задача '{task_type}' выполнена резервной "
+                    f"моделью {cand['provider']}/{cand['model']} (основная не сработала)"
+                )
+
+            _trace(task_type, cand, messages, response=result, start_time=start_time)
+            return result
+
+        except Exception as e:
+            _trace(task_type, cand, messages, error=str(e), start_time=start_time)
+            errors.append(f"{cand['provider']}/{cand['model']}: {e}")
+            logger.error(
+                f"LLM call failed: provider={cand['provider']}, "
+                f"model={cand['model']}, error={str(e)}"
             )
+            continue
 
-        # Добавляем task_type в ответ если был указан
-        if task_type:
-            result['task_type'] = task_type
-
-        _trace(task_type, config, messages, response=result, start_time=start_time)
-        return result
-
-    except Exception as e:
-        _trace(task_type, config, messages, error=str(e), start_time=start_time)
-        logger.error(
-            f"LLM call failed: provider={config['provider']}, "
-            f"model={config['model']}, error={str(e)}"
-        )
-        raise RuntimeError(
-            f"Ошибка вызова LLM ({config['provider']}/{config['model']}): {str(e)}"
-        ) from e
+    # Все кандидаты (основная + резерв) исчерпаны — подходящей замены нет.
+    raise LLMUnavailableError(
+        "Все доступные модели сейчас не отвечают. "
+        "Подождите немного и повторите запрос. | Детали: " + " ; ".join(errors)
+    )
 
 
 def _trace(

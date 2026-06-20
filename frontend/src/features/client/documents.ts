@@ -3,6 +3,28 @@ import { supabase } from "../../lib/supabase";
 
 const BUCKET = "client-documents";
 
+/**
+ * Безопасное имя для ключа Supabase Storage (только ASCII).
+ * Кириллица, пробелы и скобки в ключе вызывают "Invalid key", поэтому
+ * чистим имя; оригинал сохраняется в document_metadata.file_name.
+ */
+export function safeStorageName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  const ext =
+    dot > 0 ? name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "") : "";
+  const base =
+    (dot > 0 ? name.slice(0, dot) : name)
+      .replace(/[^a-zA-Z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40) || "file";
+  return ext ? `${base}.${ext}` : base;
+}
+
+function storageKey(clientId: string, file: File): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${clientId}/${Date.now()}_${rand}_${safeStorageName(file.name)}`;
+}
+
 export interface ClientDocument {
   id: string;
   file_name: string | null;
@@ -36,7 +58,7 @@ export async function uploadDocuments(
   docDate: string,
 ): Promise<void> {
   for (const file of files) {
-    const path = `${clientId}/${Date.now()}_${file.name}`;
+    const path = storageKey(clientId, file);
     const up = await supabase.storage.from(BUCKET).upload(path, file);
     if (up.error) throw new Error(up.error.message);
 

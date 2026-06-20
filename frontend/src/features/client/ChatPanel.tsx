@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { supabase } from "../../lib/supabase";
 import { api } from "../../lib/api";
@@ -16,6 +22,16 @@ export function ChatPanel({ clientId }: { clientId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Авто-высота textarea под объём текста (с ограничением сверху ~5 строк).
+  function autoResize() {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`;
+  }
+  useEffect(autoResize, [input]);
 
   // История из БД (под RLS — только свои сообщения).
   useEffect(() => {
@@ -46,6 +62,7 @@ export function ChatPanel({ clientId }: { clientId: string }) {
     if (!text || busy) return;
     setError("");
     setInput("");
+    requestAnimationFrame(autoResize); // вернуть поле к одной строке
     setMessages((m) => [...m, { role: "client", text }]);
     setBusy(true);
     try {
@@ -84,12 +101,21 @@ export function ChatPanel({ clientId }: { clientId: string }) {
 
       {error && <div className="py-1 text-xs text-red-600">{error}</div>}
 
-      <form onSubmit={send} className="mt-2 flex gap-2">
-        <input
-          className="flex-1 rounded-md border px-3 py-2 text-sm"
+      <form onSubmit={send} className="mt-2 flex items-end gap-2">
+        <textarea
+          ref={taRef}
+          rows={1}
+          className="flex-1 resize-none rounded-md border px-3 py-2 text-sm leading-snug"
           placeholder={t("client.chat_placeholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+            // Enter — отправить, Shift+Enter — перенос строки.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send(e as unknown as FormEvent);
+            }
+          }}
         />
         <Button type="submit" disabled={busy}>
           {t("client.chat_send")}
