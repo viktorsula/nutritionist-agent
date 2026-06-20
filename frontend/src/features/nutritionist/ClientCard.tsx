@@ -12,7 +12,9 @@ import {
   useMeasurements,
   useLabResults,
 } from "../client/queries";
-import { useClientTasks, useClientEventsRecent, type RegistryRow } from "./queries";
+import { useClientEventsRecent, type RegistryRow } from "./queries";
+import { TaskEditor } from "./TaskEditor";
+import { PlanEditor } from "./PlanEditor";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -36,7 +38,6 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
   const wellness = useWellnessPlan(clientId);
   const measurements = useMeasurements(clientId);
   const labs = useLabResults(clientId);
-  const tasks = useClientTasks(clientId);
   const events = useClientEventsRecent(clientId);
 
   const [notes, setNotes] = useState(client.nutritionist_notes ?? "");
@@ -145,24 +146,14 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
               <div className="text-xs text-gray-400">{t("card.no_data")}</div>
             )}
           </div>
+          <div className="mt-3 border-t pt-2">
+            <div className="mb-2 text-xs font-medium text-gray-600">{t("card.plan_history")}</div>
+            <PlanEditor clientId={clientId} />
+          </div>
         </Card>
 
         <Card title={t("card.tasks")}>
-          {(tasks.data ?? []).length === 0 ? (
-            <div className="text-xs text-gray-400">{t("card.no_tasks")}</div>
-          ) : (
-            <ul className="space-y-1">
-              {(tasks.data ?? []).map((tk) => (
-                <li key={tk.id} className="flex justify-between gap-2 text-xs">
-                  <span className="text-gray-800">{tk.title}</span>
-                  <span className="text-gray-400">
-                    {tk.status}
-                    {tk.due_date ? ` · ${tk.due_date.slice(0, 10)}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <TaskEditor clientId={clientId} />
         </Card>
 
         <Card title={t("card.notes")}>

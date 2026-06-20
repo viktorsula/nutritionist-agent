@@ -40,6 +40,11 @@
   pending_action хранится на бэке по nutritionist_id). Исправлен баг: analytics_agent и
   management_agent звали `call_llm(task_type='analysis')` — нет такого типа → теперь 'analytics'
   (с взаимозаменой Claude→Groq/Gemini). Проверено: сводка и создание задачи отвечают на Groq.
+- **Редактор планов/задач (реализовано):** в карточке клиента — `TaskEditor` (список + создание
+  задач + смена статуса done/cancel) и `PlanEditor` (история версий + создание нового плана:
+  деактивируем старый активный ДО вставки нового — EXCLUDE «один активный план», триггер
+  деактивации AFTER INSERT; version проставляет триггер). plan_json: description/target_calories/
+  restrictions, supplements_json.items. Всё под RLS (nutritionist); логика проверена на БД.
 
 ## Выполнено
 

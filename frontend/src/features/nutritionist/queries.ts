@@ -62,6 +62,32 @@ export function useClientTasks(clientId: string) {
   });
 }
 
+export interface PlanRow {
+  id: string;
+  version: number;
+  title: string;
+  effective_from: string;
+  effective_to: string | null;
+  is_active: boolean;
+}
+
+/** История планов питания клиента (все версии, свежие сверху). */
+export function useClientPlans(clientId: string) {
+  return useQuery({
+    queryKey: ["client_plans", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<PlanRow[]> => {
+      const { data, error } = await supabase
+        .from("nutrition_plans")
+        .select("id,version,title,effective_from,effective_to,is_active")
+        .eq("client_id", clientId)
+        .order("version", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
 /** Недавние события клиента (журнал + алерты). */
 export function useClientEventsRecent(clientId: string) {
   return useQuery({
