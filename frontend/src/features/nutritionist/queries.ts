@@ -62,6 +62,34 @@ export function useClientTasks(clientId: string) {
   });
 }
 
+export interface WellnessRow {
+  id: string;
+  sleep_target: string | null;
+  activity_target: string | null;
+  recovery: string | null;
+  stress_management: string | null;
+  notes: string | null;
+}
+
+/** Последний ЗОЖ-план клиента (с id — для редактирования). */
+export function useWellnessRow(clientId: string) {
+  return useQuery({
+    queryKey: ["wellness_row", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<WellnessRow | null> => {
+      const { data, error } = await supabase
+        .from("wellness_plans")
+        .select("id,sleep_target,activity_target,recovery,stress_management,notes")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
 export interface PlanRow {
   id: string;
   version: number;

@@ -186,6 +186,13 @@ const resources = {
         saving: "Сохранение…",
         error: "Не удалось сохранить план",
       },
+      wellness: {
+        edit: "Редактировать ЗОЖ-план",
+        hide: "Скрыть",
+        notes: "Заметки",
+        save: "Сохранить ЗОЖ-план",
+        saving: "Сохранение…",
+      },
       labs_admin: {
         title: "Показатели анализов для графика динамики",
         hint: "Выберите показатели, которые отслеживаются у клиента и выводятся в его график. Ключ должен совпадать с названием показателя в анализах (например, cholesterol_total).",
@@ -431,6 +438,13 @@ const resources = {
         create: "Create plan",
         saving: "Saving…",
         error: "Could not save the plan",
+      },
+      wellness: {
+        edit: "Edit wellness plan",
+        hide: "Hide",
+        notes: "Notes",
+        save: "Save wellness plan",
+        saving: "Saving…",
       },
       labs_admin: {
         title: "Lab indicators for the dynamics chart",

@@ -45,6 +45,9 @@
   деактивируем старый активный ДО вставки нового — EXCLUDE «один активный план», триггер
   деактивации AFTER INSERT; version проставляет триггер). plan_json: description/target_calories/
   restrictions, supplements_json.items. Всё под RLS (nutritionist); логика проверена на БД.
+- **Редактор ЗОЖ-плана (реализовано):** `WellnessEditor` в карточке клиента — редактирует
+  последнюю запись `wellness_plans` (update по id) либо создаёт первую (insert): сон/активность/
+  восстановление/стресс/заметки. Под RLS; проверено на БД.
 
 ## Выполнено
 

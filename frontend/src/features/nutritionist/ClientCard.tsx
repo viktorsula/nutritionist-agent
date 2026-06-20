@@ -8,13 +8,13 @@ import { WeightChart, LabChart } from "../client/charts";
 import {
   useClientProfile,
   useActivePlan,
-  useWellnessPlan,
   useMeasurements,
   useLabResults,
 } from "../client/queries";
 import { useClientEventsRecent, type RegistryRow } from "./queries";
 import { TaskEditor } from "./TaskEditor";
 import { PlanEditor } from "./PlanEditor";
+import { WellnessEditor } from "./WellnessEditor";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -35,7 +35,6 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
 
   const profile = useClientProfile(clientId);
   const plan = useActivePlan(clientId);
-  const wellness = useWellnessPlan(clientId);
   const measurements = useMeasurements(clientId);
   const labs = useLabResults(clientId);
   const events = useClientEventsRecent(clientId);
@@ -135,16 +134,7 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
           )}
           <div className="mt-3 border-t pt-2">
             <div className="mb-1 text-xs font-medium text-gray-600">{t("card.wellness")}</div>
-            {wellness.data ? (
-              <div className="space-y-1">
-                <Row label={t("card.sleep")} value={wellness.data.sleep_target} />
-                <Row label={t("card.activity")} value={wellness.data.activity_target} />
-                <Row label={t("card.recovery")} value={wellness.data.recovery} />
-                <Row label={t("card.stress")} value={wellness.data.stress_management} />
-              </div>
-            ) : (
-              <div className="text-xs text-gray-400">{t("card.no_data")}</div>
-            )}
+            <WellnessEditor clientId={clientId} />
           </div>
           <div className="mt-3 border-t pt-2">
             <div className="mb-2 text-xs font-medium text-gray-600">{t("card.plan_history")}</div>
