@@ -1,6 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 
+/** Показатель анализов, выбранный нутрициологом для графика динамики клиента. */
+export interface TrackedIndicator {
+  key: string; // совпадает с lab_results.indicator
+  label_ru: string;
+  label_en: string;
+  unit: string | null;
+  ref_min: number | null;
+  ref_max: number | null;
+  order?: number;
+}
+
 export interface ClientProfile {
   goals: string | null;
   weight: number | null;
@@ -8,6 +19,7 @@ export interface ClientProfile {
   target_weight: number | null;
   birth_date: string | null;
   gender: string | null;
+  tracked_lab_indicators: TrackedIndicator[] | null;
 }
 
 export interface WellnessPlan {
@@ -52,7 +64,9 @@ export function useClientProfile(clientId: string) {
     queryFn: async (): Promise<ClientProfile | null> => {
       const { data, error } = await supabase
         .from("client_profiles")
-        .select("goals,weight,height,target_weight,birth_date,gender")
+        .select(
+          "goals,weight,height,target_weight,birth_date,gender,tracked_lab_indicators",
+        )
         .eq("client_id", clientId)
         .maybeSingle();
       if (error) throw error;

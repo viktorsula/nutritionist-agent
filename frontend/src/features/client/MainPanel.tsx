@@ -36,14 +36,22 @@ function dailyMacros(events: ClientEvent[]): DailyMacros[] {
 }
 
 export function MainPanel({ clientId }: { clientId: string }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const profile = useClientProfile(clientId);
   const measurements = useMeasurements(clientId);
   const labs = useLabResults(clientId);
   const calories = useCalorieEvents(clientId);
 
   const daily = dailyMacros(calories.data ?? []);
-  const indicators = Array.from(new Set((labs.data ?? []).map((r) => r.indicator)));
+  const lang = i18n.language.startsWith("en") ? "en" : "ru";
+
+  // Показатели для графика: если нутрициолог выбрал список — рисуем строго его
+  // (в порядке order, с нормой и плейсхолдером «нет данных»). Иначе — все, по
+  // которым есть данные (обратная совместимость до настройки нутрициологом).
+  const tracked = (profile.data?.tracked_lab_indicators ?? [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const fallbackKeys = Array.from(new Set((labs.data ?? []).map((r) => r.indicator)));
 
   return (
     <div className="space-y-4">
@@ -71,9 +79,24 @@ export function MainPanel({ clientId }: { clientId: string }) {
       </Card>
 
       <Card title={t("client.labs")}>
-        {indicators.length > 0 ? (
+        {tracked.length > 0 ? (
           <div className="space-y-4">
-            {indicators.map((ind) => (
+            {tracked.map((ind) => (
+              <LabChart
+                key={ind.key}
+                indicator={ind.key}
+                label={lang === "en" ? ind.label_en : ind.label_ru}
+                unit={ind.unit}
+                refMin={ind.ref_min}
+                refMax={ind.ref_max}
+                data={(labs.data ?? []).filter((r) => r.indicator === ind.key)}
+                emptyText={t("client.no_data")}
+              />
+            ))}
+          </div>
+        ) : fallbackKeys.length > 0 ? (
+          <div className="space-y-4">
+            {fallbackKeys.map((ind) => (
               <LabChart
                 key={ind}
                 indicator={ind}

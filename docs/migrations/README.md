@@ -57,6 +57,15 @@
 - **Зависимость:** требует хелперы из 004 (`app_is_nutritionist()`, `app_current_client_id()`, `app_user_role()`); идемпотентна
 - **Зачем:** без бакета фронт падает с `Bucket not found` при загрузке анализов
 
+### **006_tracked_lab_indicators.sql**
+- **Дата:** 20 июня 2026
+- **Описание:** per-client список показателей анализов для графика динамики (выбирает нутрициолог)
+- **Статус:** ⏳ Требует выполнения
+- **Что делает:**
+  - `client_profiles.tracked_lab_indicators` (JSONB) — `[{key,label_ru,label_en,unit,ref_min,ref_max,order}]`
+  - график клиента рисует только выбранные показатели (в порядке, с полосой нормы)
+- **Зависимость:** 003 (lab_results), 004 (RLS — нутрициолог пишет в client_profiles); идемпотентна
+
 ---
 
 ## 🚀 КАК ПРИМЕНИТЬ МИГРАЦИЮ
@@ -118,6 +127,7 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 003_questionnaire_and_measurements.sql | 19 июня 2026 | ✅ | Применена |
 | 004_rls_policies.sql | 19 июня 2026 | ✅ | Применена |
 | 005_storage_client_documents.sql | ___ | ⏳ | Бакет client-documents + storage RLS (требует 004) |
+| 006_tracked_lab_indicators.sql | ___ | ⏳ | Per-client показатели анализов (требует 003/004) |
 
 ---
 

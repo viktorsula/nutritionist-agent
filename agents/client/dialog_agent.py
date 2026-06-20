@@ -227,6 +227,12 @@ def build_health_lines(state: ClientState) -> List[str]:
         if val is not None:
             lines.append(f"- Объём ({label}): {val} см")
 
+    # Нормы и названия показателей, выбранные нутрициологом (для лёгкой трактовки).
+    ref_by_key: Dict[str, Dict[str, Any]] = {}
+    for ti in (profile.get('tracked_lab_indicators') or []):
+        if isinstance(ti, dict) and ti.get('key'):
+            ref_by_key[ti['key']] = ti
+
     # Анализы: по каждому показателю последнее значение и предыдущее (динамика).
     if labs:
         seen: Dict[str, Dict[str, Any]] = {}
@@ -240,11 +246,15 @@ def build_health_lines(state: ClientState) -> List[str]:
             elif ind not in prev:
                 prev[ind] = row
         for ind, row in seen.items():
+            meta = ref_by_key.get(ind) or {}
+            name = meta.get('label_ru') or ind
             unit = f" {row.get('unit')}" if row.get('unit') else ""
-            text = f"- Анализ «{ind}»: {row.get('value')}{unit} (на {row.get('measured_at')})"
+            text = f"- Анализ «{name}»: {row.get('value')}{unit} (на {row.get('measured_at')})"
             p = prev.get(ind)
             if p is not None and p.get('value') is not None:
                 text += f"; ранее было {p.get('value')}{unit} (на {p.get('measured_at')})"
+            if meta.get('ref_min') is not None and meta.get('ref_max') is not None:
+                text += f"; норма {meta.get('ref_min')}–{meta.get('ref_max')}"
             lines.append(text)
 
     return lines

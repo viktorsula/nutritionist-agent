@@ -3,6 +3,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -107,32 +108,64 @@ export function CaloriesDynamics({
   );
 }
 
-/** График одного показателя анализов во времени. */
+/**
+ * График одного показателя анализов во времени.
+ * label — отображаемое имя (если не задано — indicator/key).
+ * refMin/refMax — полоса нормы (если заданы), задаёт нутрициолог.
+ * emptyText — текст-плейсхолдер, если показатель выбран, но данных ещё нет.
+ */
 export function LabChart({
   indicator,
+  label,
   unit,
   data,
+  refMin,
+  refMax,
+  emptyText,
 }: {
   indicator: string;
+  label?: string | null;
   unit: string | null;
   data: LabResult[];
+  refMin?: number | null;
+  refMax?: number | null;
+  emptyText?: string;
 }) {
   const points = data
     .filter((r) => r.value != null)
     .map((r) => ({ date: r.measured_at, value: r.value }));
 
+  const title = (
+    <div className="mb-1 text-xs font-medium text-gray-600">
+      {label || indicator}
+      {unit ? `, ${unit}` : ""}
+      {refMin != null && refMax != null && (
+        <span className="ml-1 text-gray-400">(норма {refMin}–{refMax})</span>
+      )}
+    </div>
+  );
+
+  if (points.length === 0) {
+    return (
+      <div>
+        {title}
+        {empty(emptyText ?? "Нет данных")}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="mb-1 text-xs font-medium text-gray-600">
-        {indicator}
-        {unit ? `, ${unit}` : ""}
-      </div>
+      {title}
       <ResponsiveContainer width="100%" height={160}>
         <LineChart data={points} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
           <XAxis dataKey="date" fontSize={10} />
           <YAxis fontSize={10} domain={["auto", "auto"]} />
           <Tooltip />
+          {refMin != null && refMax != null && (
+            <ReferenceArea y1={refMin} y2={refMax} fill="#2e7d5b" fillOpacity={0.08} />
+          )}
           <Line type="monotone" dataKey="value" stroke="#2e7d5b" strokeWidth={2} dot />
         </LineChart>
       </ResponsiveContainer>
