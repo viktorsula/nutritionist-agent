@@ -1,5 +1,21 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
+## ▶️ НАЧАТЬ ЗАВТРА РОВНО ОТСЮДА (22 июня, конец сессии)
+Прод поднят на Render (бэкенд + фронт), OpenAI+Anthropic оплачены. **Открытый шаг — белый
+экран фронта:** в бандл НЕ вшиты `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
+(`supabase.createClient("")` → `supabaseUrl is required` → React не монтируется).
+1. Render → Static Site `nutritionist-agent-1` → Environment: добавить
+   `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (`VITE_API_URL` уже есть).
+2. **Manual Deploy → Clear build cache & deploy** (Vite вшивает env только при сборке).
+3. Проверить: в бандле появился `*.supabase.co`; https://nutritionist-agent-1-ljzi.onrender.com/
+   рендерит форму входа (не белый лист).
+4. **Smoke-тест:** вход нутрициологом → создать клиента (оплата/режим/дата) → чат-аналитика
+   по клиенту (живой OpenAI+Claude) → отчёт (правка → PDF/TXT).
+URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
+`https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
+
+---
+
 **Обновлено:** 22 июня 2026 — React-фронт, кабинет нутрициолога (Фаза 3) собран локально.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)

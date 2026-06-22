@@ -1,9 +1,19 @@
 # Журнал прогресса проекта
 
-## Статус: В разработке
-Последнее обновление: 22 июня 2026
-Сессия: React-фронт — кабинет нутрициолога (Фаза 3), доработка под уточнённое ТЗ
-Ветка разработки: `stage6-utils` (не влита в main)
+## Статус: В разработке → ПРОД на Render (поднимается)
+Последнее обновление: 22 июня 2026 (вечер)
+Сессия: Фаза 3 слита в main (PR #1–3) + продакшен-деплой на Render
+Ветка: Фаза 3 в `main`; рабочая `stage6-utils` синхронизирована
+
+### Деплой 22 июня 2026 (продакшен)
+- **Бэкенд** (FastAPI/Docker→uvicorn) на Render: https://nutritionist-agent-gvxp.onrender.com — `/health` ок.
+- **Фронт** (React Static Site) на Render: https://nutritionist-agent-1-ljzi.onrender.com.
+- Чинили деплой: requirements ResolutionImpossible (ptb 20.7 httpx ↔ supabase → ptb>=21; убран
+  streamlit/protobuf-конфликт); Dockerfile→uvicorn; SPA deep-link → `404.html`=index.html на сборке.
+- CORS_ORIGINS бэкенда = URL фронта (ок); Supabase Auth Site URL/Redirect = URL фронта (ок).
+- OpenAI + Anthropic **оплачены** → ИИ полноценный. Миграции 001–008 применены (проверено интроспекцией).
+- **⏳ ОТКРЫТО (старт следующей сессии):** белый экран фронта — не вшиты `VITE_SUPABASE_URL`/
+  `VITE_SUPABASE_ANON_KEY`. Задать на Static Site + Manual Deploy (Clear cache) → рендер входа → smoke-тест.
 
 ### Сессия 22 июня 2026 — кабинет нутрициолога: 3 панели, аналитика-RAG, отчёты, настройки
 - **Раскладка в 3 панели** (`NutritionistShell`): слева инструменты, центр — рабочая
