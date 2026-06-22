@@ -17,11 +17,11 @@ from telegram import Update, User, Chat, Message
 from telegram.ext import ContextTypes
 
 # Импортируем наши модули
-from telegram.commands import start_command, help_command, status_command
-from telegram.handlers import handle_text_message
+from tg_bot.commands import start_command, help_command, status_command
+from tg_bot.handlers import handle_text_message, handle_photo_message, handle_voice_message
 
 
-class TestTelegramCommands(unittest.TestCase):
+class TestTelegramCommands(unittest.IsolatedAsyncioTestCase):
     """Тесты команд бота"""
 
     def setUp(self):
@@ -44,7 +44,7 @@ class TestTelegramCommands(unittest.TestCase):
 
         self.context = Mock(spec=ContextTypes.DEFAULT_TYPE)
 
-    @patch('telegram.commands.get_client_by_telegram_id')
+    @patch('tg_bot.commands.get_client_by_telegram_id')
     async def test_start_command_new_user(self, mock_get_client):
         """Тест /start для нового пользователя"""
         mock_get_client.return_value = None
@@ -61,7 +61,7 @@ class TestTelegramCommands(unittest.TestCase):
         self.assertIn("Telegram ID", message_text)
         self.assertIn("зарегистрироваться", message_text.lower())
 
-    @patch('telegram.commands.get_client_by_telegram_id')
+    @patch('tg_bot.commands.get_client_by_telegram_id')
     async def test_start_command_existing_user(self, mock_get_client):
         """Тест /start для существующего пользователя"""
         mock_client = Mock()
@@ -77,7 +77,7 @@ class TestTelegramCommands(unittest.TestCase):
         self.assertIn("возвращением", message_text)
         self.assertIn("Иван Петров", message_text)
 
-    @patch('telegram.commands.get_client_by_telegram_id')
+    @patch('tg_bot.commands.get_client_by_telegram_id')
     async def test_help_command_registered_user(self, mock_get_client):
         """Тест /help для зарегистрированного пользователя"""
         mock_client = Mock()
@@ -93,7 +93,7 @@ class TestTelegramCommands(unittest.TestCase):
         self.assertIn("/start", message_text)
         self.assertIn("/status", message_text)
 
-    @patch('telegram.commands.get_client_by_telegram_id')
+    @patch('tg_bot.commands.get_client_by_telegram_id')
     async def test_help_command_unregistered_user(self, mock_get_client):
         """Тест /help для незарегистрированного пользователя"""
         mock_get_client.return_value = None
@@ -107,7 +107,7 @@ class TestTelegramCommands(unittest.TestCase):
         self.assertIn("не зарегистрированы", message_text)
 
 
-class TestTelegramHandlers(unittest.TestCase):
+class TestTelegramHandlers(unittest.IsolatedAsyncioTestCase):
     """Тесты обработчиков сообщений"""
 
     def setUp(self):
@@ -132,7 +132,7 @@ class TestTelegramHandlers(unittest.TestCase):
 
         self.context = Mock(spec=ContextTypes.DEFAULT_TYPE)
 
-    @patch('telegram.handlers.get_client_by_telegram_id')
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
     async def test_handle_text_unregistered_user(self, mock_get_client):
         """Тест обработки текста от незарегистрированного пользователя"""
         mock_get_client.return_value = None
@@ -145,8 +145,8 @@ class TestTelegramHandlers(unittest.TestCase):
 
         self.assertIn("не зарегистрированы", message_text)
 
-    @patch('telegram.handlers.route_message')
-    @patch('telegram.handlers.get_client_by_telegram_id')
+    @patch('tg_bot.handlers.route_message')
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
     async def test_handle_text_success(self, mock_get_client, mock_route):
         """Тест успешной обработки текста"""
         mock_client = Mock()
@@ -172,33 +172,123 @@ class TestTelegramHandlers(unittest.TestCase):
         # Проверяем отправку ответа
         self.message.reply_text.assert_called_once()
 
+    # --- Фото (vision) ---
+
+    def _attach_photo(self, image_bytes: bytes = b"\xff\xd8\xff\xee_fake_jpeg", caption=None):
+        """Добавляет к message мок фото с скачиваемыми байтами."""
+        tg_file = Mock()
+        tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(image_bytes))
+
+        photo_size = Mock()
+        photo_size.get_file = AsyncMock(return_value=tg_file)
+
+        # В Telegram message.photo — список размеров; берём последний (наибольший)
+        self.message.photo = [photo_size]
+        self.message.caption = caption
+
+    @patch('tg_bot.handlers.route_message')
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
+    async def test_handle_photo_success(self, mock_get_client, mock_route):
+        """Фото: скачивается и передаётся в роутер как message_type='photo' с image_bytes."""
+        mock_client = Mock()
+        mock_client.user_id = "user-uuid-123"
+        mock_get_client.return_value = mock_client
+
+        mock_route.return_value = {"success": True, "message": "Вижу тарелку!"}
+
+        self._attach_photo(caption="мой обед")
+
+        await handle_photo_message(self.update, self.context)
+
+        mock_route.assert_called_once()
+        call_kwargs = mock_route.call_args[1]
+        self.assertEqual(call_kwargs["message_type"], "photo")
+        self.assertEqual(call_kwargs["message"], "мой обед")  # caption → message
+        self.assertIn("image_bytes", call_kwargs["metadata"])
+        self.assertIsInstance(call_kwargs["metadata"]["image_bytes"], bytes)
+        self.assertEqual(call_kwargs["metadata"]["mime_type"], "image/jpeg")
+
+        self.message.reply_text.assert_called_once()
+
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
+    async def test_handle_photo_unregistered_user(self, mock_get_client):
+        """Фото от незарегистрированного — не качаем и не вызываем роутер."""
+        mock_get_client.return_value = None
+        self._attach_photo()
+
+        await handle_photo_message(self.update, self.context)
+
+        self.message.reply_text.assert_called_once()
+        self.assertIn("не зарегистрированы", self.message.reply_text.call_args[0][0])
+
+    # --- Голос (Whisper в оркестраторе) ---
+
+    def _attach_voice(self, audio_bytes: bytes = b"OggS_fake_voice", file_name=None):
+        """Добавляет к message мок голосового с скачиваемыми байтами."""
+        tg_file = Mock()
+        tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(audio_bytes))
+
+        voice = Mock(spec=["get_file"])  # у voice нет file_name → handler подставит voice.ogg
+        voice.get_file = AsyncMock(return_value=tg_file)
+
+        self.message.voice = voice
+        self.message.audio = None
+
+    @patch('tg_bot.handlers.route_message')
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
+    async def test_handle_voice_success(self, mock_get_client, mock_route):
+        """Голос: скачивается и передаётся как message_type='voice' с audio_bytes (текст пустой)."""
+        mock_client = Mock()
+        mock_client.user_id = "user-uuid-123"
+        mock_get_client.return_value = mock_client
+
+        mock_route.return_value = {"success": True, "message": "Записал!"}
+
+        self._attach_voice()
+
+        await handle_voice_message(self.update, self.context)
+
+        mock_route.assert_called_once()
+        call_kwargs = mock_route.call_args[1]
+        self.assertEqual(call_kwargs["message_type"], "voice")
+        self.assertEqual(call_kwargs["message"], "")  # транскрипцию делает оркестратор
+        self.assertIn("audio_bytes", call_kwargs["metadata"])
+        self.assertIsInstance(call_kwargs["metadata"]["audio_bytes"], bytes)
+        self.assertEqual(call_kwargs["metadata"]["audio_name"], "voice.ogg")
+
+        self.message.reply_text.assert_called_once()
+
+    @patch('tg_bot.handlers.route_message')
+    @patch('tg_bot.handlers.get_client_by_telegram_id')
+    async def test_handle_voice_access_denied(self, mock_get_client, mock_route):
+        """Голос: при access_denied клиент получает сообщение об ограничении доступа."""
+        mock_client = Mock()
+        mock_client.user_id = "user-uuid-123"
+        mock_get_client.return_value = mock_client
+
+        mock_route.return_value = {
+            "success": False,
+            "error": "access_denied",
+            "message": "Подписка неактивна.",
+        }
+
+        self._attach_voice()
+
+        await handle_voice_message(self.update, self.context)
+
+        self.message.reply_text.assert_called_once()
+        self.assertIn("Доступ ограничен", self.message.reply_text.call_args[0][0])
+
 
 def run_tests():
-    """Запуск всех тестов"""
-    import asyncio
-
-    # Создаём test suite
+    """Запуск всех тестов через стандартный раннер (поддерживает async-тесты)."""
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
 
     suite.addTests(loader.loadTestsFromTestCase(TestTelegramCommands))
     suite.addTests(loader.loadTestsFromTestCase(TestTelegramHandlers))
 
-    # Запускаем тесты
     runner = unittest.TextTestRunner(verbosity=2)
-
-    # Для async тестов используем asyncio
-    async def run_async_tests():
-        for test in suite:
-            try:
-                if hasattr(test, '_testMethodName'):
-                    method = getattr(test, test._testMethodName)
-                    if asyncio.iscoroutinefunction(method):
-                        await method()
-            except Exception as e:
-                print(f"Ошибка в тесте: {e}")
-
-    # Запускаем
     result = runner.run(suite)
     return result.wasSuccessful()
 

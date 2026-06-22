@@ -94,9 +94,24 @@ class ClientState(TypedDict, total=False):
     ]
     """
 
+    latest_measurement: Optional[Dict[str, Any]]
+    """Последний замер тела из measurements: {measured_at, weight, neck, waist, hips}."""
+
+    lab_results: List[Dict[str, Any]]
+    """Недавние анализы из lab_results: [{indicator, value, unit, measured_at, source}, ...]."""
+
     # ==========================================
     # РЕЗУЛЬТАТЫ ПРОВЕРОК
     # ==========================================
+
+    route: str
+    """Выбранная оркестратором ветка: 'vision' | 'diary' | 'nutrition' | 'dialog'."""
+
+    food_items: List[str]
+    """
+    Распознанные/упомянутые продукты (из vision_agent или из текста).
+    Используется business_rules для проверок food_forbidden / food_incompatible.
+    """
 
     alerts: List[Dict[str, Any]]
     """

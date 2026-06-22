@@ -365,7 +365,7 @@ LangFuse трейсинг
 Включено:
 •	Таблица users + интеграция с Supabase Auth
 •	Регистрация клиента нутрициологом + анкета
-¥	client_status: lead → onboarding → active
+	client_status: lead → onboarding → active
 •	Ветка клиента: ежедневный диалог, питание текстом, задачи
 •	Счётчик калорий по фото тарелки (Gemini Vision)
 •	Ветка нутрициолога: сводка, план, задачи, реестр
@@ -373,12 +373,12 @@ LangFuse трейсинг
 •	Business Rules: доступ, оплата, 5 типов алертов
 •	Персональное расписание уведомлений (timezone-aware)
 •	Версионирование планов питания и wellness-планов
-¥	client_events + tasks + audit_logs + system_settings
+	client_events + tasks + audit_logs + system_settings
 •	Языки: русский + английский
-•	LangFuse мониторинг
+	LangFuse мониторинг
+    Голосовые сообщения (Whisper)
 
-Следующая итерация (v1.1):
-•	Голосовые сообщения (Whisper)
+Следующая итерация (v1.1):	
 •	Анализ фото холодильника
 •	Арабский и Урду
 

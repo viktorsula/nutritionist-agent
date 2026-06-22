@@ -4,10 +4,10 @@ Utils — вспомогательные модули для агентов
 Содержит:
 - llm.py: Мультипровайдерный LLM клиент (Groq, Claude, Gemini) ✅
 - helpers.py: Вспомогательные функции ✅
-- vision.py: Анализ фото через Gemini Flash (TODO: Этап 6)
-- voice.py: Транскрипция голоса через Whisper (TODO: Этап 6)
-- web_access.py: Веб-доступ к источникам знаний (TODO: Этап 6)
-- knowledge.py: Работа с pgvector базой знаний (TODO: Этап 6)
+- vision.py: Анализ фото через Gemini Flash ✅
+- voice.py: Транскрипция голоса через Whisper ✅
+- web_access.py: Веб-поиск через серверный инструмент Claude (web_search) ✅
+- knowledge.py: Семантический поиск по pgvector (ada-002) ✅
 """
 
 from .llm import call_llm, get_model_config, list_available_providers, list_task_types
@@ -23,6 +23,15 @@ from .helpers import (
     detect_language,
     translate_if_needed
 )
+from .knowledge import (
+    get_embedding,
+    search_knowledge_base,
+    search_client_documents,
+    build_context_from_chunks,
+)
+from .vision import analyze_image, analyze_food_plate, extract_ingredient_names
+from .voice import transcribe_voice
+from .web_access import build_web_search_tool
 
 __all__ = [
     # llm.py
@@ -41,5 +50,22 @@ __all__ = [
     'generate_summary',
     'format_analytics_report',
     'detect_language',
-    'translate_if_needed'
+    'translate_if_needed',
+
+    # knowledge.py
+    'get_embedding',
+    'search_knowledge_base',
+    'search_client_documents',
+    'build_context_from_chunks',
+
+    # vision.py
+    'analyze_image',
+    'analyze_food_plate',
+    'extract_ingredient_names',
+
+    # voice.py
+    'transcribe_voice',
+
+    # web_access.py
+    'build_web_search_tool',
 ]

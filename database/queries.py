@@ -76,7 +76,7 @@ def insert_knowledge_base_chunk(chunk: KnowledgeBaseChunk) -> Any:
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "chunk_text": chunk.chunk_text,
-        "embedding": chunk.embedding,
+        "embedding": _vector_literal(chunk.embedding),
         "source": chunk.source,
     }
     return _extract_data(
@@ -91,7 +91,7 @@ def insert_client_document_chunk(chunk: ClientDocumentChunk) -> Any:
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "chunk_text": chunk.chunk_text,
-        "embedding": chunk.embedding,
+        "embedding": _vector_literal(chunk.embedding),
     }
     return _extract_data(
         supabase.table("client_documents").insert(payload).select("*").execute()
@@ -127,6 +127,38 @@ def get_tasks_by_client(client_id: str) -> List[Dict[str, Any]]:
     supabase = _service_client()
     response = (
         supabase.table("tasks").select("*").eq("client_id", client_id).execute()
+    )
+    return _extract_data(response) or []
+
+
+def get_latest_measurement(client_id: str) -> Optional[Dict[str, Any]]:
+    """Последний замер тела клиента (вес/объёмы) из measurements (миграция 003)."""
+    supabase = _service_client()
+    response = (
+        supabase.table("measurements")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("measured_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = _extract_data(response) or []
+    return rows[0] if rows else None
+
+
+def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Недавние числовые анализы клиента из lab_results (миграция 003),
+    свежие сверху. Для контекста ассистента (вес/холестерин и пр.).
+    """
+    supabase = _service_client()
+    response = (
+        supabase.table("lab_results")
+        .select("indicator,value,unit,measured_at,source")
+        .eq("client_id", client_id)
+        .order("measured_at", desc=True)
+        .limit(limit)
+        .execute()
     )
     return _extract_data(response) or []
 
@@ -190,6 +222,64 @@ def get_client_document_chunks(client_id: str) -> List[Dict[str, Any]]:
         .eq("client_id", client_id)
         .execute()
     )
+    return _extract_data(response) or []
+
+
+def _vector_literal(embedding: List[float]) -> str:
+    """
+    Преобразует список float в pgvector-литерал '[0.1,0.2,...]'.
+
+    Через PostgREST RPC параметр vector(1536) НЕ принимает JSON-массив (Python list):
+    PostgreSQL не кастует json[] → vector автоматически. pgvector принимает текстовый
+    формат '[...]', который корректно кастуется к vector. Поэтому шлём строку.
+    """
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
+def search_knowledge_base(
+    query_embedding: List[float],
+    match_count: int = 5,
+    similarity_threshold: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Семантический поиск по базе знаний нутрициолога (pgvector, cosine).
+
+    Вызывает RPC match_knowledge_base (миграция 002_add_vector_search.sql).
+    query_embedding — вектор длины 1536 (OpenAI ada-002), считается в utils/knowledge.py.
+    Возвращает список чанков с полем similarity (0..1), отсортированный по убыванию близости.
+    """
+    supabase = _service_client()
+    response = supabase.rpc(
+        "match_knowledge_base",
+        {
+            "query_embedding": _vector_literal(query_embedding),
+            "match_count": match_count,
+            "similarity_threshold": similarity_threshold,
+        },
+    ).execute()
+    return _extract_data(response) or []
+
+
+def search_client_documents(
+    query_embedding: List[float],
+    client_id: str,
+    match_count: int = 5,
+    similarity_threshold: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Семантический поиск по документам конкретного клиента (pgvector, cosine).
+
+    Вызывает RPC match_client_documents (миграция 002_add_vector_search.sql).
+    Изоляция по client_id выполняется на уровне БД.
+    """
+    supabase = _service_client()
+    response = supabase.rpc(
+        "match_client_documents",
+        {
+            "query_embedding": _vector_literal(query_embedding),
+            "p_client_id": str(client_id),
+            "match_count": match_count,
+            "similarity_threshold": similarity_threshold,
+        },
+    ).execute()
     return _extract_data(response) or []
 
 
@@ -593,6 +683,22 @@ def get_all_clients(status: Optional[str] = None) -> List[Dict[str, Any]]:
     """Получить список всех клиентов (для нутрициолога)."""
     supabase = _service_client()
     query = supabase.table("clients").select("*").order("created_at", desc=True)
+
+    if status:
+        query = query.eq("client_status", status)
+
+    response = query.execute()
+    return _extract_data(response) or []
+
+
+def get_client_registry(status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Реестр клиентов из client_registry_view (с агрегацией):
+    статусы, цель, вес, версия активного плана, последняя активность, открытые задачи.
+    Опциональный фильтр по client_status.
+    """
+    supabase = _service_client()
+    query = supabase.table("client_registry_view").select("*")
 
     if status:
         query = query.eq("client_status", status)

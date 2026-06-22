@@ -1,166 +1,136 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-**Обновлено:** 8 июня 2026, после завершения миграции БД v1.3 и реализации queries.py
+**Обновлено:** 22 июня 2026 — React-фронт, кабинет нутрициолога (Фаза 3) собран локально.
+
+## 🔜 СЛЕДУЮЩЕЕ (22 июня)
+- **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с
+  ресайзом и скрытием), создание клиента со статусами (+`paid_until`), фильтры реестра,
+  индикатор истечения тарифа, агент наполняет центр (директива вида), аналитика-RAG
+  (клиент+vector), отчёты (генерация→правка→PDF/TXT), полные «Настройки» (каталог/пороги/
+  источники/llm/промпты). Подробности — `docs/progress.md` (сессия 22 июня).
+- **Миграции применены:** 001–008 (007 paid_until, 008 client_reports).
+- **Запуск локально:** `uvicorn api.main:app --port 8000` (env: `set -a; . ./.env; set +a`
+  + `CORS_ORIGINS`) и `cd frontend && npm run dev` (:5173, публичный).
+- **PR #1** `stage6-utils`→`main` открыт. Пост-PR фиксы: pgvector-литерал (формат сервис↔БД),
+  Dockerfile→uvicorn, тема-адаптивный `analytics_system.md`.
+- **Блокеры качества (среда):** OpenAI ключ 429 (нет эмбеддингов → vector пуст, фикс не проверен);
+  Claude без кредитов (синтез на Groq). Пополнить → проверить векторный поиск и сильную аналитику.
+- **Осталось:** web-шаг аналитики + группа клиентов (ждут Claude); аудит правок настроек с фронта;
+  PDF одним кликом (jsPDF+шрифт); финальный smoke-тест и merge PR.
+- **Новые формы отчётов (до 5)** — добавлять как `report_type` в `agents/nutritionist/reports.py`
+  + шаблон `prompts/nutritionist/reports/<...>.md`.
+
+## 🗄️ СТАРОЕ СЛЕДУЮЩЕЕ (20 июня)
+- **Кабинет клиента (React)** работает: вход/роль/анкета/график веса/чат/загрузка анализов.
+  Серверы локально: `uvicorn api.main:app --port 8000` (env: `set -a; . ./.env; set +a` +
+  `CORS_ORIGINS` с URL фронта; порт 8000 — public) и `cd frontend && npm run dev` (:5173).
+- **Миграции 001–005 ПРИМЕНЕНЫ** (005 — storage-бакет `client-documents`).
+  ⏳ **006_tracked_lab_indicators.sql — ПРИМЕНИТЬ** (per-client показатели анализов; без неё
+  select `tracked_lab_indicators` на фронте упадёт).
+- **Claude без кредитов** (пополнять не стали) → всё работает на Groq/Gemini через
+  взаиморезервирование (`utils/llm.py`). Когда пополнят — автоматически вернётся на Claude.
+- **Per-client показатели анализов — РЕАЛИЗОВАНО** (JSONB в client_profiles, редактор
+  нутрициолога «Показатели анализов», график рисует выбранное с нормой). Ввод значений в
+  `lab_results` — форма в той же вкладке (LabValuesForm). Парсер PDF → lab_results — позже.
+- **Панель алертов — РЕАЛИЗОВАНО** (вкладка «Алерты», `AlertsPanel`: client_events с severity
+  под RLS, фильтры окно/severity). weight_increase теперь персистится в diary_agent.
+- **Реестр + карточка клиента — РЕАЛИЗОВАНО** (вкладка «Реестр»: список → `ClientCard` с
+  профилем/планами/задачами/графиками/событиями/заметками; всё под RLS).
+- **Чат нутрициолога с агентом — РЕАЛИЗОВАНО** (вкладка «Ассистент-агент», `NutritionistChat`
+  → `/nutritionist/query`; analytics + management с подтверждением «да»). Исправлен баг
+  task_type='analysis' → 'analytics' в analytics_agent/management_agent.
+- **Редакторы планов/задач/ЗОЖ — РЕАЛИЗОВАНЫ** (карточка клиента: `TaskEditor`, `PlanEditor`,
+  `WellnessEditor`; всё под RLS; план — деактивация старого до вставки нового).
+- **Дальше по Фазе 3:** React-вкладки «Аналитика» (дашборды) и «Настройки»
+  (пороги/источники/промпты — перенести с Streamlit `web/nutritionist.py`). Затем
+  smoke-тест и PR `stage6-utils` → `main`.
 
 ---
 
-## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ:
+## 🐞 ИЗВЕСТНЫЕ TODO
+- **Telegram-резолв роли сломан:** `agents/router.py` → `get_user_info()` вызывает
+  `queries.get_user()` и `queries.get_user_by_telegram_id()`, которых НЕТ в `database/queries.py`.
+  Значит `route_message()` для Telegram всегда вернёт «user_not_found». Веб это обходит
+  (резолв в `database/auth.py`). Починить отдельно: добавить `get_user_by_telegram_id`
+  и `get_user_by_auth_id` в `queries.py` (не смешивать с работой по фронту).
 
-**Начать разработку `business_rules/` — детерминированный слой между входом и LLM**
+## 🎯 ЦЕЛЬ СЛЕДУЮЩЕЙ СЕССИИ
 
----
+**Дорожная карта ТЗ v1.3 (Этапы 1–9) — ЗАВЕРШЕНА.** Дальше — подготовка к продакшену:
+1. Миграции в Supabase (001 observer, 002 vector search)
+2. Ключи в Render: OPENAI / GOOGLE / TELEGRAM_BOT_TOKEN / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+   (+ включить web search в Claude Console — Settings → Privacy; TAVILY больше не нужен)
+3. Живой smoke-тест (клиент: текст/фото/голос; нутрициолог: аналитика/управление)
+4. PR `stage6-utils` → `main` (автодеплой Render)
 
-## ✅ ТЕКУЩЕЕ СОСТОЯНИЕ (8 июня 2026):
+### ✅ Этап 9 (готово): трейсинг LangFuse
+- `monitoring/langfuse.py` — `trace_llm_call` / `is_enabled` / `flush`; graceful no-op без SDK/ключей
+- `utils/llm.py` — `call_llm` трейсит каждый вызов (тайминг + успех/ошибка); единая точка для всех агентов
+- тесты `monitoring/test_monitoring.py` 7/7 ✅
 
-### **База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА:**
-- ✅ **14 таблиц** созданы и проверены:
-  - **Блок 1:** users, clients, client_profiles, wellness_plans
-  - **Блок 2:** conversations, client_events
-  - **Блок 3:** nutrition_plans, tasks
-  - **Блок 4:** notification_schedule, audit_logs, system_settings
-  - **Блок 5:** document_metadata, knowledge_base, client_documents
-- ✅ **VIEW:** client_registry_view (с SECURITY INVOKER)
-- ✅ **Триггеры:** trg_plan_version, trg_deactivate_old_plans
-- ✅ **Индексы:** включая ivfflat для pgvector (cosine distance)
-- ✅ **Security Advisor:** 0 errors, 0 warnings
-- ✅ **pgvector extension:** включён и работает
+### ✅ Этап 8 (готово): веб-интерфейс нутрициолога
+- `web/nutritionist.py` — `render_registry` / `render_analytics` / `render_settings`
+- `queries.get_client_registry()`; тесты `web/test_nutritionist_views.py` 10/10 ✅
 
-### **Код Python — ГОТОВ:**
-- ✅ `database/client.py` — подключение к Supabase (service role + anon)
-- ✅ `database/models.py` — 14 dataclass моделей для всех таблиц
-- ✅ `database/queries.py` — **42 функции** готовы:
-  - 8 для business_rules
-  - 14 для agents
-  - 8 для n8n
-  - 12 базовых
-
-### **Документация — АКТУАЛЬНА:**
-- ✅ `docs/schema.sql` — схема v1.3
-- ✅ `CLAUDE.md` — обновлён под v1.3
-- ✅ `docs/progress.md` — миграция завершена
-- ✅ Справочники по queries.py созданы
-
----
-
-## 📋 ПЛАН НА СЛЕДУЮЩУЮ СЕССИЮ:
-
-### **ШАГ 1: Создать business_rules/ (приоритет)**
-
-**Структура:**
-```
-business_rules/
-├── __init__.py
-├── access_rules.py      — check_access(), check_payment()
-├── medical_rules.py     — check_medical_alerts(), check_allergies()
-├── payment_rules.py     — проверка статуса подписки
-└── notification_rules.py — расписание, timezone, on/off
-```
-
-**Что реализовать:**
-1. **access_rules.py:**
-   - `check_access(client_id)` → allow | (block, reason)
-   - `check_payment(client_id)` → active | (restricted, reason)
-   - Использует: `get_client_by_id()`, `update_client_status()`
-
-2. **medical_rules.py:**
-   - `check_medical_alerts(data, client_id)` → safe | (severity, message)
-   - `check_allergies(ingredients, client_id)` → safe | warning
-   - Использует: `get_client_profile()`, `log_client_event()`, `get_system_setting()`
-
-3. **payment_rules.py:**
-   - `check_subscription_status(client_id)` → active | expired
-   - Использует: `get_client_by_id()`, `update_client()`
-
-4. **notification_rules.py:**
-   - `should_send_notification(client_id, notification_type)` → bool
-   - Использует: `get_notification_schedule()`
+### ✅ Сделано в Части B (ветка нутрициолога):
+- `agents/nutritionist/state.py` — NutritionistState + helpers (thread, pending_action)
+- `orchestrator.py` — реальный LangGraph граф (заменил заглушку), общий для Telegram и web:
+  parse_request → [analytics|management|help] → format_response → save_to_db
+- `analytics_agent.py` — read-only анализ клиента/базы (Claude)
+- `management_agent.py` — запись ТОЛЬКО через двухшаговое подтверждение (pending_action
+  в conversations.metadata_json); create_task / create_nutrition_plan / update_client_status /
+  add_trusted_source; created_by='nutritionist' + write_audit_log
+- `prompts/nutritionist/management_system.md`; тесты test_nutritionist.py — 13/13 ✅
 
 ---
 
-### **ШАГ 2: Создать utils/llm.py (после business_rules)**
+## 📍 ГДЕ МЫ СЕЙЧАС
 
-**Функция:**
-```python
-def call_llm(
-    provider: str,
-    model: str,
-    messages: List[Dict],
-    task_type: str
-) -> str:
-    """
-    Мультипровайдерный LLM клиент.
-    provider: 'groq' | 'anthropic' | 'google'
-    model: 'llama-3.3-70b' | 'claude-sonnet-4-6' | 'gemini-1.5-flash'
-    task_type: 'dialog' | 'analysis' | 'vision'
-    """
-```
+Вся работа Этапа 6 — на ветке **`stage6-utils`** (НЕ влита в main, push мог быть сделан вручную).
 
----
-
-### **ШАГ 3: Начать agents/router.py**
-
-**Входная точка:**
-- Определение роли по токену (nutritionist / client)
-- Вызов business_rules ПЕРВЫМ
-- Маршрутизация в нужный оркестратор
+### ✅ Сделано (Часть A, ветка клиента — ПОЛНОСТЬЮ):
+- **requirements.txt** — +openai; модернизирован LangGraph (langgraph>=1.0, langchain-core>=0.3)
+- **utils/** — knowledge.py (ada-002 + pgvector-поиск), vision.py (фото еды), voice.py (Whisper), web_access.py (серверный инструмент Claude web_search + allowed_domains из trusted_sources)
+- **migration 002** — RPC match_knowledge_base / match_client_documents
+- **agents/client/** — vision_agent, diary_agent, nutrition_agent, общий food_analysis.py
+- **orchestrator.py** — роутинг: ingest → load_context → route → [vision|diary|nutrition|dialog] → format → save
+- **prompts/client/** — vision_system.md, diary_system.md, nutrition_system.md
+- **Шаг 3 — `tg_bot/handlers.py`** — фото и голос подключены к графу:
+  - фото → `image_bytes`+`mime_type`, caption→message, `message_type='photo'` → vision
+  - голос → `audio_bytes`+`audio_name`, `message_type='voice'`, транскрипция в узле ingest
+  - DRY: `_ensure_registered()` + `_dispatch_to_router()` для text/photo/voice
+- **Шаг 4 — тесты:** tg_bot/test_bot.py 10/10 ✅, agents/test_agents.py 7/7 ✅
+- **Фиксы:** пакет `telegram/` → `tg_bot/` (коллизия с библиотекой python-telegram-bot);
+  убран мёртвый импорт `get_user_by_id`; tg_bot/test_bot.py на `IsolatedAsyncioTestCase`
+- **Ранее:** сохранение диалога (save_conversation), удалён check_alerts_node
 
 ---
 
-## 📊 ГОТОВЫЕ ФУНКЦИИ queries.py ДЛЯ BUSINESS_RULES:
+## ⚠️ ПЕРЕД РЕАЛЬНЫМ ЗАПУСКОМ (действия Виктора)
 
-```python
-# Уже реализованы и готовы к использованию:
-get_client_by_id(client_id)
-get_client_profile(client_id)
-update_client(client_id, updates)
-update_client_status(client_id, client_status, payment_status, access_status)
-log_client_event(client_id, event_type, severity, payload)
-get_client_events(client_id, severity, limit)
-get_notification_schedule(client_id)
-update_notification_schedule(client_id, notification_type, is_active, scheduled_time)
-get_system_setting(key)
-update_system_setting(key, value, updated_by)
-```
+1. `pip install -r requirements.txt` (новое: openai; tavily удалён)
+2. Применить миграции в Supabase → SQL Editor:
+   - `docs/migrations/001_add_observer_role.sql` ⏳
+   - `docs/migrations/002_add_vector_search.sql` ⏳
+3. Ключи окружения: `OPENAI_API_KEY`, `GOOGLE_API_KEY` (веб-поиск — через Claude web search, ключ не нужен; включить в Console)
+4. (Позже) конфликт `streamlit 1.32.0 ↔ protobuf 5.29.6` — перед запуском веба
 
 ---
 
-## 🔧 ЧТО УЖЕ НЕ НУЖНО ДЕЛАТЬ:
+## 🔭 ДАЛЬШЕ (после Части A)
 
-- ❌ Миграция БД — завершена
-- ❌ Создание таблиц — все 14 готовы
-- ❌ models.py — все 14 моделей готовы
-- ❌ queries.py — 42 функции реализованы
-- ❌ Документация — обновлена
-
----
-
-## 📝 ВАЖНЫЕ ФАЙЛЫ ДЛЯ СПРАВКИ:
-
-- `docs/schema.sql` — актуальная схема БД v1.3
-- `docs/queries_for_business_rules.md` — описание 8 функций
-- `docs/queries_for_agents.md` — описание 14 функций
-- `docs/queries_for_n8n.md` — описание 8 функций
-- `docs/session_summary_2026-06-08.md` — полная сводка сессии
+**Часть B — ветка нутрициолога** (роль агента ШИРЕ советника — аналитик/контролёр/репортёр):
+- `analytics_agent.py` — произвольные запросы по базе, мониторинг следования плану,
+  выявление паттернов/связей (Claude), отчёты, эскалация проблем
+- `management_agent.py` — клиенты/планы/задачи/реестр, корректировки по команде врача,
+  пополнение trusted_sources по просьбе нутрициолога
 
 ---
 
-## 🎯 НАЧАТЬ С:
+## 📝 КЛЮЧЕВЫЕ ФАЙЛЫ ДЛЯ СПРАВКИ
 
-```bash
-# 1. Создать структуру
-mkdir -p business_rules
-touch business_rules/__init__.py
-touch business_rules/access_rules.py
-touch business_rules/medical_rules.py
-touch business_rules/payment_rules.py
-touch business_rules/notification_rules.py
-
-# 2. Начать с access_rules.py
-# Реализовать check_access() и check_payment()
-```
-
----
-
-**Статус:** База данных и queries.py полностью готовы. Можно начинать бизнес-логику.
-
-**Следующий файл для работы:** `business_rules/access_rules.py`
+- `docs/progress.md` — полный журнал
+- `agents/client/orchestrator.py` — граф и роутинг
+- `agents/client/food_analysis.py` — общий анализ против рациона
+- `docs/migrations/002_add_vector_search.sql` — RPC pgvector
+- ТЗ: `docs/docs/technical_specification.docx` (v1.2), `..._V1.3.docx` (читаются как UTF-8 текст)

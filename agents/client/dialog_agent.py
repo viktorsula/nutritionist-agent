@@ -14,7 +14,7 @@ LLM: Groq llama-3.3-70b (task_type='dialog')
 import logging
 from typing import List, Dict, Any
 
-from utils.llm import call_llm
+from utils.llm import call_llm, LLMUnavailableError
 from prompts import load_prompt
 from .state import ClientState
 
@@ -61,6 +61,17 @@ def dialog_node(state: ClientState) -> ClientState:
 
         return state
 
+    except LLMUnavailableError as e:
+        # Ни основная, ни резервные модели не ответили — просим повторить позже.
+        logger.warning(f"Dialog agent: все модели недоступны: {e}")
+        state['agent_response'] = (
+            "Сейчас сервис перегружен и модели не отвечают. "
+            "Пожалуйста, подождите немного и отправьте сообщение ещё раз."
+        )
+        state['agent_used'] = 'dialog_agent_unavailable'
+        state['error'] = str(e)
+        return state
+
     except Exception as e:
         logger.error(f"Dialog agent error: {e}", exc_info=True)
         state['agent_response'] = (
@@ -92,8 +103,8 @@ def build_system_prompt(state: ClientState) -> str:
 
         # Форматирование
         prompt = template.format(
-            client_name=profile.get('name', 'Клиент'),
-            client_goal=profile.get('goal', 'Не указана'),
+            client_name=profile.get('name') or 'Клиент',
+            client_goal=profile.get('goals') or 'Не указана',
             restrictions=format_restrictions(plan),
             allergies=format_allergies(profile),
             mode=access.get('mode', 'full_program'),
@@ -102,7 +113,9 @@ def build_system_prompt(state: ClientState) -> str:
             language='русский'  # TODO: Определять из profile или channel
         )
 
-        return prompt
+        # Доп. контекст по ТЗ (вес, задачи, заметки нутрициолога, план)
+        extra = build_context_block(state)
+        return prompt + ("\n\n" + extra if extra else "")
 
     except Exception as e:
         logger.error(f"Error building system prompt: {e}")
@@ -154,6 +167,98 @@ def build_messages(state: ClientState, system_prompt: str) -> List[Dict[str, str
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
+
+def build_context_block(state: ClientState) -> str:
+    """
+    Доп. контекст клиента для агента (по ТЗ): текущий/желаемый вес,
+    активный план, активные задачи, заметки нутрициолога.
+    Используется как внутренний контекст — не цитировать дословно.
+    """
+    profile = state.get('client_profile') or {}
+    client = state.get('client') or {}
+    plan = state.get('active_plan') or {}
+    tasks = state.get('tasks') or []
+
+    lines: List[str] = []
+    # Здоровье клиента (вес из последнего замера + анализы с динамикой) —
+    # это его собственные данные, можно озвучивать.
+    lines.extend(build_health_lines(state))
+    if profile.get('target_weight'):
+        lines.append(f"- Желаемый вес: {profile.get('target_weight')} кг")
+    if plan and plan.get('title'):
+        lines.append(f"- Активный план питания: {plan.get('title')}")
+    if tasks:
+        titles = ", ".join(t.get('title', '') for t in tasks[:5] if t.get('title'))
+        if titles:
+            lines.append(f"- Активные задачи: {titles}")
+    notes = client.get('nutritionist_notes')
+    if notes:
+        lines.append(f"- Заметки нутрициолога (внутреннее): {notes}")
+
+    if not lines:
+        return ""
+    return "## Данные клиента (его собственные; можно сообщать ему)\n" + "\n".join(lines)
+
+
+def build_health_lines(state: ClientState) -> List[str]:
+    """
+    Строки контекста о здоровье клиента: вес из последнего замера и недавние
+    анализы с простой динамикой (текущее → предыдущее значение по показателю).
+
+    Общий хелпер для dialog_agent и nutrition_agent. Возвращает [] если данных нет.
+    """
+    profile = state.get('client_profile') or {}
+    measurement = state.get('latest_measurement') or {}
+    labs = state.get('lab_results') or []
+
+    lines: List[str] = []
+
+    # Вес: приоритет — последний замер; иначе из анкеты (profile.weight).
+    weight = measurement.get('weight') if measurement else None
+    when = measurement.get('measured_at') if measurement else None
+    if weight is not None:
+        lines.append(f"- Текущий вес: {weight} кг" + (f" (на {when})" if when else ""))
+    elif profile.get('weight'):
+        lines.append(f"- Текущий вес (из анкеты): {profile.get('weight')} кг")
+
+    # Объёмы тела (если есть в замере).
+    for field, label in (('waist', 'талия'), ('hips', 'бёдра'), ('neck', 'шея')):
+        val = measurement.get(field) if measurement else None
+        if val is not None:
+            lines.append(f"- Объём ({label}): {val} см")
+
+    # Нормы и названия показателей, выбранные нутрициологом (для лёгкой трактовки).
+    ref_by_key: Dict[str, Dict[str, Any]] = {}
+    for ti in (profile.get('tracked_lab_indicators') or []):
+        if isinstance(ti, dict) and ti.get('key'):
+            ref_by_key[ti['key']] = ti
+
+    # Анализы: по каждому показателю последнее значение и предыдущее (динамика).
+    if labs:
+        seen: Dict[str, Dict[str, Any]] = {}
+        prev: Dict[str, Dict[str, Any]] = {}
+        for row in labs:  # labs отсортированы по measured_at desc
+            ind = row.get('indicator')
+            if not ind:
+                continue
+            if ind not in seen:
+                seen[ind] = row
+            elif ind not in prev:
+                prev[ind] = row
+        for ind, row in seen.items():
+            meta = ref_by_key.get(ind) or {}
+            name = meta.get('label_ru') or ind
+            unit = f" {row.get('unit')}" if row.get('unit') else ""
+            text = f"- Анализ «{name}»: {row.get('value')}{unit} (на {row.get('measured_at')})"
+            p = prev.get(ind)
+            if p is not None and p.get('value') is not None:
+                text += f"; ранее было {p.get('value')}{unit} (на {p.get('measured_at')})"
+            if meta.get('ref_min') is not None and meta.get('ref_max') is not None:
+                text += f"; норма {meta.get('ref_min')}–{meta.get('ref_max')}"
+            lines.append(text)
+
+    return lines
+
 
 def format_restrictions(plan: Dict[str, Any]) -> str:
     """Форматирует ограничения в питании"""

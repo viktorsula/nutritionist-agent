@@ -9,10 +9,62 @@
 ### **001_add_observer_role.sql**
 - **Дата:** 10 июня 2026
 - **Описание:** Добавление роли `observer` для продакшн-версии
-- **Статус:** ⏳ Требует выполнения
+- **Статус:** ✅ Применена (19 июня 2026)
 - **Что делает:**
   - Удаляет старый constraint `users_role_check`
   - Добавляет новый с ролями: `nutritionist`, `client`, `observer`
+
+### **002_add_vector_search.sql**
+- **Дата:** 14 июня 2026
+- **Описание:** RPC-функции семантического поиска по pgvector (Этап 6)
+- **Статус:** ✅ Применена (19 июня 2026)
+- **Что делает:**
+  - `match_knowledge_base(query_embedding, match_count, similarity_threshold)` — cosine-поиск по базе знаний
+  - `match_client_documents(query_embedding, p_client_id, match_count, similarity_threshold)` — поиск по документам клиента (с изоляцией по client_id)
+  - Использует ivfflat-индексы (`<=>`, cosine), SECURITY INVOKER + search_path
+- **Зависимость:** эмбеддинги OpenAI `text-embedding-ada-002` (1536), считаются в `utils/knowledge.py`
+
+### **003_questionnaire_and_measurements.sql**
+- **Дата:** 19 июня 2026
+- **Описание:** Опросник онбординга + замеры тела + анализы (Фронт Фаза 1)
+- **Статус:** ✅ Применена (19 июня 2026)
+- **Что делает:**
+  - `client_profiles.questionnaire_json` (JSONB) — полный опросник (33 вопроса)
+  - таблица `measurements` — вес/шея/талия/бёдра во времени (графики динамики)
+  - таблица `lab_results` — числовые показатели анализов (графики динамики)
+  - `system_settings.lab_indicators_top` — до 10 показателей для дашборда (нутрициолог)
+- **Порядок:** применять ДО 004 (RLS ссылается на новые таблицы)
+
+### **004_rls_policies.sql**
+- **Дата:** 19 июня 2026
+- **Описание:** Row Level Security для веб-доступа клиентов (Фронт Фаза 1)
+- **Статус:** ✅ Применена (19 июня 2026)
+- **Что делает:**
+  - функции-хелперы `app_user_role()` / `app_current_client_id()` / `app_is_nutritionist()` / `app_can_read_client()`
+  - включает RLS на всех клиентских таблицах + политики
+  - client видит/правит только свои данные; статус/оплату/роль менять НЕ может
+  - nutritionist — полный доступ; observer — чтение; service_role RLS обходит
+- **Зависимость:** требует 003 (таблицы measurements/lab_results); идемпотентна
+- **После применения проверить:** клиент не видит чужие строки; смена своего статуса из браузера отклоняется
+
+### **005_storage_client_documents.sql**
+- **Дата:** 20 июня 2026
+- **Описание:** Storage-бакет `client-documents` + RLS на `storage.objects` (загрузка анализов/документов из кабинета клиента и анкеты)
+- **Статус:** ⏳ Требует выполнения
+- **Что делает:**
+  - создаёт приватный бакет `client-documents`
+  - политики: клиент пишет/читает только свою папку `{client_id}/...`; нутрициолог — всё; observer — чтение; service_role обходит RLS
+- **Зависимость:** требует хелперы из 004 (`app_is_nutritionist()`, `app_current_client_id()`, `app_user_role()`); идемпотентна
+- **Зачем:** без бакета фронт падает с `Bucket not found` при загрузке анализов
+
+### **006_tracked_lab_indicators.sql**
+- **Дата:** 20 июня 2026
+- **Описание:** per-client список показателей анализов для графика динамики (выбирает нутрициолог)
+- **Статус:** ⏳ Требует выполнения
+- **Что делает:**
+  - `client_profiles.tracked_lab_indicators` (JSONB) — `[{key,label_ru,label_en,unit,ref_min,ref_max,order}]`
+  - график клиента рисует только выбранные показатели (в порядке, с полосой нормы)
+- **Зависимость:** 003 (lab_results), 004 (RLS — нутрициолог пишет в client_profiles); идемпотентна
 
 ---
 
@@ -70,7 +122,12 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 
 | Миграция | Дата выполнения | Статус | Примечания |
 |----------|-----------------|--------|------------|
-| 001_add_observer_role.sql | ___ | ⏳ | Ожидает выполнения |
+| 001_add_observer_role.sql | 19 июня 2026 | ✅ | Применена |
+| 002_add_vector_search.sql | 19 июня 2026 | ✅ | Применена |
+| 003_questionnaire_and_measurements.sql | 19 июня 2026 | ✅ | Применена |
+| 004_rls_policies.sql | 19 июня 2026 | ✅ | Применена |
+| 005_storage_client_documents.sql | ___ | ⏳ | Бакет client-documents + storage RLS (требует 004) |
+| 006_tracked_lab_indicators.sql | ___ | ⏳ | Per-client показатели анализов (требует 003/004) |
 
 ---
 
@@ -104,5 +161,5 @@ ALTER TABLE users ADD CONSTRAINT users_role_check
 
 ---
 
-**Последнее обновление:** 10 июня 2026  
-**Версия схемы:** v1.3.1 (добавлена роль observer)
+**Последнее обновление:** 19 июня 2026  
+**Версия схемы:** v1.4 (опросник + замеры + анализы + RLS для веб-доступа)

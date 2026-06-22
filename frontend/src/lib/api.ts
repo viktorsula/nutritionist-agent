@@ -1,0 +1,83 @@
+import { supabase } from "./supabase";
+import type { AppUser } from "../types";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "";
+
+/** Текущий access token из сессии Supabase. */
+async function authHeader(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(await authHeader()),
+    ...(init.headers ?? {}),
+  };
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  /** Текущий пользователь (роль, client_id, статусы) — авторитетно из БД. */
+  me: () => request<AppUser>("/me"),
+
+  /** Сообщение клиента агенту. */
+  chat: (message: string, messageType = "text") =>
+    request<Record<string, unknown>>("/chat", {
+      method: "POST",
+      body: JSON.stringify({ message, message_type: messageType }),
+    }),
+
+  /** Запрос нутрициолога к агенту. */
+  nutritionistQuery: (message: string) =>
+    request<Record<string, unknown>>("/nutritionist/query", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  /** Создать аккаунт клиента (приглашение по email) — для нутрициолога. */
+  createClient: (payload: {
+    email: string;
+    name: string;
+    timezone?: string;
+    language?: string;
+    paid: boolean;
+    mode: "basic" | "full";
+    paid_until?: string | null;
+  }) =>
+    request<{ client_id: string; user_id: string; email: string }>("/clients", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  /** Список промптов {name: {source, ...}}. */
+  promptsList: () => request<Record<string, { source: string }>>("/nutritionist/prompts"),
+
+  /** Текущий текст промпта. */
+  promptLoad: (name: string) =>
+    request<{ name: string; text: string }>(`/nutritionist/prompt?name=${encodeURIComponent(name)}`),
+
+  /** Сохранить промпт в БД. */
+  promptSave: (payload: { name: string; text: string; description?: string }) =>
+    request<{ ok: boolean }>("/nutritionist/prompt", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  /** Доступные типы отчётов {report_type: title}. */
+  reportTypes: () => request<Record<string, string>>("/nutritionist/report-types"),
+
+  /** Сформировать отчёт по клиенту (агент по шаблону). */
+  generateReport: (payload: { client_id: string; report_type: string }) =>
+    request<{ report_type: string; title: string; content: string }>("/nutritionist/report", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};

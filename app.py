@@ -31,6 +31,13 @@ except ImportError as e:
     AGENTS_AVAILABLE = False
     st.error(f"⚠️ Ошибка импорта agents: {e}")
 
+try:
+    from web.nutritionist import render_registry, render_analytics, render_settings
+    NUTRITIONIST_VIEWS_AVAILABLE = True
+except ImportError as e:
+    NUTRITIONIST_VIEWS_AVAILABLE = False
+    st.error(f"⚠️ Ошибка импорта web.nutritionist: {e}")
+
 
 # ==========================================
 # ИНИЦИАЛИЗАЦИЯ SESSION STATE
@@ -289,8 +296,6 @@ if st.session_state.role == "client":
 
 elif st.session_state.role == "nutritionist":
 
-    st.info("🚧 Панель нутрициолога в разработке (Этап 8)")
-
     # Табы для разных функций
     tab1, tab2, tab3, tab4 = st.tabs([
         "📋 Реестр клиентов",
@@ -300,25 +305,22 @@ elif st.session_state.role == "nutritionist":
     ])
 
     with tab1:
-        st.subheader("📋 Реестр клиентов")
-        st.write("TODO: Список всех клиентов с фильтрами")
-        st.write("- Статусы (active, completed, archived)")
-        st.write("- Алерты (критичные события)")
-        st.write("- Последняя активность")
+        if NUTRITIONIST_VIEWS_AVAILABLE:
+            render_registry()
+        else:
+            st.error("❌ Модуль реестра недоступен.")
 
     with tab2:
-        st.subheader("📊 Аналитика")
-        st.write("TODO: Аналитика по клиентам")
-        st.write("- Сводки за период")
-        st.write("- Графики прогресса")
-        st.write("- Соблюдение планов")
+        if NUTRITIONIST_VIEWS_AVAILABLE:
+            render_analytics()
+        else:
+            st.error("❌ Модуль аналитики недоступен.")
 
     with tab3:
-        st.subheader("⚙️ Настройки системы")
-        st.write("TODO: Настройки")
-        st.write("- Редактирование промптов")
-        st.write("- Настройка моделей LLM")
-        st.write("- Пороги алертов")
+        if NUTRITIONIST_VIEWS_AVAILABLE:
+            render_settings(actor_id=st.session_state.user_id)
+        else:
+            st.error("❌ Модуль настроек недоступен.")
 
     with tab4:
         st.subheader("💬 Тестовый диалог с agents/")

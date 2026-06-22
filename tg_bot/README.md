@@ -5,7 +5,7 @@ Telegram бот для общения клиентов с агентом-асс�
 ## 📁 Структура
 
 ```
-telegram/
+tg_bot/
 ├── __init__.py       — экспорт start_bot()
 ├── bot.py            — основной модуль бота
 ├── commands.py       — /start, /help, /status
@@ -14,18 +14,21 @@ telegram/
 └── README.md         — этот файл
 ```
 
+> ⚠️ Пакет называется `tg_bot`, а не `telegram`, чтобы не конфликтовать
+> с библиотекой `python-telegram-bot` (она импортируется как `telegram`).
+
 ## 🚀 Запуск
 
 ### Локально (для разработки):
 
 ```bash
-python -m telegram.bot
+python -m tg_bot.bot
 ```
 
 ### В продакшене (через основной app.py):
 
 ```python
-from telegram import start_bot
+from tg_bot import start_bot
 start_bot()
 ```
 
@@ -99,7 +102,7 @@ dialog_agent → utils/llm.py → Groq llama-3.3-70b
 Запуск тестов:
 
 ```bash
-python telegram/test_bot.py
+PYTHONPATH=. python tg_bot/test_bot.py
 ```
 
 Тесты покрывают:
