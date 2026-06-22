@@ -31,8 +31,19 @@
   источники + llm_config (system_settings под RLS) + редактор промптов (эндпоинты
   `/nutritionist/prompt(s)`). Компоненты в `features/nutritionist/settings/`.
 - **Применены миграции** Supabase: 007, 008.
+- **Коммит + PR:** ветка `stage6-utils` → `main`, PR #1.
+- **Пост-PR фиксы (22 июня):**
+  - **pgvector-формат:** `query_embedding`/`embedding` в RPC `match_*` и в INSERT чанков
+    передаются как pgvector-литерал `'[...]'` (`queries._vector_literal`) — PostgREST не
+    кастует JSON-массив → vector. Конфликт сервис↔БД устранён (проверить нельзя, пока OpenAI 429).
+  - **Dockerfile:** точка входа `uvicorn api.main:app` на `$PORT` (вместо Streamlit/8501);
+    requirements актуализированы (Streamlit → legacy).
+  - **analytics_system.md → тема-адаптивный:** анализ строится вокруг вопроса; при отсутствии
+    данных по теме — честно «данных нет: …» + что собрать, без generic-«весовой» простыни.
+- **Среда (блокеры качества):** OpenAI ключ — 429 insufficient_quota (эмбеддинги/vector не
+  работают); Claude — без кредитов (синтез на резерве Groq/Gemini). Векторный фикс не проверен.
 - **Не сделано (по плану позже):** web-шаг аналитики и анализ группы клиентов (ждут Claude);
-  аудит правок настроек из фронта; PDF одним кликом (jsPDF+кириллический шрифт); коммит и PR.
+  аудит правок настроек из фронта; PDF одним кликом (jsPDF+кириллический шрифт).
 
 ### Сессия 20 июня 2026 — кабинет клиента (React) + отказоустойчивость LLM
 - **Запуск локально:** FastAPI (`api/`) :8000 + Vite (`frontend/`) :5173 в Codespaces;

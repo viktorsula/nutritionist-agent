@@ -11,8 +11,12 @@
 - **Миграции применены:** 001–008 (007 paid_until, 008 client_reports).
 - **Запуск локально:** `uvicorn api.main:app --port 8000` (env: `set -a; . ./.env; set +a`
   + `CORS_ORIGINS`) и `cd frontend && npm run dev` (:5173, публичный).
-- **Осталось:** web-шаг аналитики + группа клиентов (ждут кредитов Claude); аудит правок
-  настроек с фронта; PDF одним кликом (jsPDF+шрифт); **smoke-тест → коммит → PR `stage6-utils`→`main`**.
+- **PR #1** `stage6-utils`→`main` открыт. Пост-PR фиксы: pgvector-литерал (формат сервис↔БД),
+  Dockerfile→uvicorn, тема-адаптивный `analytics_system.md`.
+- **Блокеры качества (среда):** OpenAI ключ 429 (нет эмбеддингов → vector пуст, фикс не проверен);
+  Claude без кредитов (синтез на Groq). Пополнить → проверить векторный поиск и сильную аналитику.
+- **Осталось:** web-шаг аналитики + группа клиентов (ждут Claude); аудит правок настроек с фронта;
+  PDF одним кликом (jsPDF+шрифт); финальный smoke-тест и merge PR.
 - **Новые формы отчётов (до 5)** — добавлять как `report_type` в `agents/nutritionist/reports.py`
   + шаблон `prompts/nutritionist/reports/<...>.md`.
 
