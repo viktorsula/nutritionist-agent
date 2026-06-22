@@ -76,7 +76,7 @@ def insert_knowledge_base_chunk(chunk: KnowledgeBaseChunk) -> Any:
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "chunk_text": chunk.chunk_text,
-        "embedding": chunk.embedding,
+        "embedding": _vector_literal(chunk.embedding),
         "source": chunk.source,
     }
     return _extract_data(
@@ -91,7 +91,7 @@ def insert_client_document_chunk(chunk: ClientDocumentChunk) -> Any:
         "document_id": str(chunk.document_id),
         "chunk_index": chunk.chunk_index,
         "chunk_text": chunk.chunk_text,
-        "embedding": chunk.embedding,
+        "embedding": _vector_literal(chunk.embedding),
     }
     return _extract_data(
         supabase.table("client_documents").insert(payload).select("*").execute()
@@ -225,6 +225,17 @@ def get_client_document_chunks(client_id: str) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def _vector_literal(embedding: List[float]) -> str:
+    """
+    Преобразует список float в pgvector-литерал '[0.1,0.2,...]'.
+
+    Через PostgREST RPC параметр vector(1536) НЕ принимает JSON-массив (Python list):
+    PostgreSQL не кастует json[] → vector автоматически. pgvector принимает текстовый
+    формат '[...]', который корректно кастуется к vector. Поэтому шлём строку.
+    """
+    return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
 def search_knowledge_base(
     query_embedding: List[float],
     match_count: int = 5,
@@ -240,7 +251,7 @@ def search_knowledge_base(
     response = supabase.rpc(
         "match_knowledge_base",
         {
-            "query_embedding": query_embedding,
+            "query_embedding": _vector_literal(query_embedding),
             "match_count": match_count,
             "similarity_threshold": similarity_threshold,
         },
@@ -263,7 +274,7 @@ def search_client_documents(
     response = supabase.rpc(
         "match_client_documents",
         {
-            "query_embedding": query_embedding,
+            "query_embedding": _vector_literal(query_embedding),
             "p_client_id": str(client_id),
             "match_count": match_count,
             "similarity_threshold": similarity_threshold,
