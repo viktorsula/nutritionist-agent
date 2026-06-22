@@ -120,10 +120,20 @@ def invite_client_account(
     timezone: str = "Asia/Dubai",
     language: str = "ru",
     actor_user_id: Optional[str] = None,
+    payment_status: str = "trial",
+    client_status: str = "onboarding",
+    paid_until: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Создаёт аккаунт клиента (вызывает нутрициолог): приглашение в Supabase Auth +
     строки в users (role='client') и clients. Под service-ключом (admin).
+
+    Нутрициолог задаёт стартовые статусы:
+    - payment_status: 'active' (оплачено) | 'inactive' (не оплачено) | 'trial'.
+      'inactive' блокирует вход в кабинет (check_web_access).
+    - client_status: 'active' (режим «полный», сопровождение нутрициолога) |
+      'onboarding' (режим «базовый», кабинет + ИИ). Тариф выводится из статуса.
+    - paid_until: дата окончания оплаченного периода ('YYYY-MM-DD' или None).
 
     Клиент получает письмо-приглашение и задаёт пароль / входит по коду.
     Возвращает {auth_id, user_id, client_id, email}.
@@ -149,13 +159,16 @@ def invite_client_account(
         raise RuntimeError("Failed to create users row")
     user_id = users[0]["id"]
 
-    # 3. Строка в clients
+    # 3. Строка в clients (со стартовыми статусами от нутрициолога)
     crow = sb.table("clients").insert({
         "user_id": user_id,
         "name": name,
         "email": email,
         "timezone": timezone,
         "language": language,
+        "payment_status": payment_status,
+        "client_status": client_status,
+        "paid_until": paid_until,
     }).execute()
     clients = getattr(crow, "data", None) or []
     if not clients:
@@ -171,7 +184,13 @@ def invite_client_account(
             action="create_client",
             entity_type="client",
             entity_id=client_id,
-            new_value={"email": email, "name": name},
+            new_value={
+                "email": email,
+                "name": name,
+                "payment_status": payment_status,
+                "client_status": client_status,
+                "paid_until": paid_until,
+            },
         )
     except Exception as e:
         logger.warning(f"audit log for create_client failed: {e}")

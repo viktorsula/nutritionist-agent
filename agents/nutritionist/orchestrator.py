@@ -274,7 +274,32 @@ def help_node(state: NutritionistState) -> NutritionistState:
 
 def format_response_node(state: NutritionistState) -> NutritionistState:
     state["final_message"] = state.get("agent_response") or "Готово."
+    state["view"] = _build_view_directive(state)
     return state
+
+
+def _build_view_directive(state: NutritionistState) -> Optional[Dict[str, Any]]:
+    """
+    Директива для центральной панели веб-кабинета (Блок 2), выводится из уже
+    разобранного запроса. Telegram её игнорирует.
+
+    - конкретный клиент определён → карточка клиента (с графиками)
+    - аналитика по базе (без клиента) → дашборд аналитики
+    - неоднозначное имя / help / запись → не переключаем вид (None)
+    """
+    intent = state.get("intent")
+    # Аналитика всегда уходит в панель «Аналитика» (анализ рендерится там).
+    if intent == "analytics":
+        return {"type": "analytics"}
+    # Прочие запросы по конкретному клиенту (управление) → карточка клиента.
+    if state.get("target_client_id"):
+        return {
+            "type": "client_card",
+            "client_id": state.get("target_client_id"),
+            "client_name": state.get("target_client_name"),
+            "period_days": state.get("period_days", 7),
+        }
+    return None
 
 
 # ==========================================

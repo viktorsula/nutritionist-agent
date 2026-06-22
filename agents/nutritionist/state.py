@@ -76,6 +76,21 @@ class NutritionistState(TypedDict, total=False):
     llm_model: Optional[str]
     llm_usage: Optional[Dict[str, int]]
 
+    view: Optional[Dict[str, Any]]
+    """
+    Директива вида для центральной панели веб-кабинета (Блок 2). Выводится из
+    разобранного запроса (intent + target_client_id), фронт по ней переключает
+    центр. Структура: {"type": "client_card"|"analytics"|"registry", ...}.
+    None — не менять текущий вид.
+    """
+
+    analysis: Optional[Dict[str, Any]]
+    """
+    Результат аналитики для панели «Аналитика» (Блок 2 / конвейер RAG):
+    {"client_id", "client_name", "title", "markdown", "charts": [...], "period_days"}.
+    Полный анализ уходит в панель, в чат — короткая отметка. None — анализа нет.
+    """
+
     # ==========================================
     # МЕТАДАННЫЕ
     # ==========================================
@@ -125,5 +140,9 @@ def extract_response(state: NutritionistState) -> Dict[str, Any]:
         "model": state.get("llm_model"),
         "processing_time_ms": state.get("processing_time_ms"),
         "intent": state.get("intent"),
+        "target_client_id": state.get("target_client_id"),
+        "target_client_name": state.get("target_client_name"),
+        "view": state.get("view"),
+        "analysis": state.get("analysis"),
         "error": state.get("error"),
     }

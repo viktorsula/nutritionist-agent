@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
+import type { CenterView, AgentAnalysis } from "./view";
 
 interface Msg {
   role: "user" | "agent";
@@ -14,7 +15,13 @@ interface Msg {
  * нутрициолог отвечает «да»/«нет» (pending_action хранится на бэке по nutritionist_id).
  * История — в рамках сессии (не грузится из БД).
  */
-export function NutritionistChat() {
+export function NutritionistChat({
+  onView,
+  onAnalysis,
+}: {
+  onView?: (view: CenterView) => void;
+  onAnalysis?: (analysis: AgentAnalysis) => void;
+}) {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -42,8 +49,14 @@ export function NutritionistChat() {
     setMessages((m) => [...m, { role: "user", text }]);
     setBusy(true);
     try {
-      const res = (await api.nutritionistQuery(text)) as { message?: string };
+      const res = (await api.nutritionistQuery(text)) as {
+        message?: string;
+        view?: CenterView | null;
+        analysis?: AgentAnalysis | null;
+      };
       setMessages((m) => [...m, { role: "agent", text: res.message ?? "…" }]);
+      if (res.analysis && onAnalysis) onAnalysis(res.analysis);
+      if (res.view && onView) onView(res.view);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("nchat.error"));
     } finally {

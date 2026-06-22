@@ -48,8 +48,35 @@ export const api = {
     name: string;
     timezone?: string;
     language?: string;
+    paid: boolean;
+    mode: "basic" | "full";
+    paid_until?: string | null;
   }) =>
     request<{ client_id: string; user_id: string; email: string }>("/clients", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  /** Список промптов {name: {source, ...}}. */
+  promptsList: () => request<Record<string, { source: string }>>("/nutritionist/prompts"),
+
+  /** Текущий текст промпта. */
+  promptLoad: (name: string) =>
+    request<{ name: string; text: string }>(`/nutritionist/prompt?name=${encodeURIComponent(name)}`),
+
+  /** Сохранить промпт в БД. */
+  promptSave: (payload: { name: string; text: string; description?: string }) =>
+    request<{ ok: boolean }>("/nutritionist/prompt", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  /** Доступные типы отчётов {report_type: title}. */
+  reportTypes: () => request<Record<string, string>>("/nutritionist/report-types"),
+
+  /** Сформировать отчёт по клиенту (агент по шаблону). */
+  generateReport: (payload: { client_id: string; report_type: string }) =>
+    request<{ report_type: string; title: string; content: string }>("/nutritionist/report", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

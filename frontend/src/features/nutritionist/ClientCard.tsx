@@ -11,10 +11,11 @@ import {
   useMeasurements,
   useLabResults,
 } from "../client/queries";
-import { useClientEventsRecent, type RegistryRow } from "./queries";
+import { useClientEventsRecent, useClientRow } from "./queries";
 import { TaskEditor } from "./TaskEditor";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
+import { ReportsCard } from "./ReportsCard";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -26,12 +27,15 @@ function age(birth?: string | null): number | null {
 
 const list = (a?: string[] | null) => (a && a.length ? a.join(", ") : null);
 
-/** Карточка клиента для нутрициолога: профиль, планы, задачи, графики, события, заметки. */
-export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: () => void }) {
+/** Карточка клиента для нутрициолога: профиль, планы, задачи, графики, события, заметки.
+ *  Грузит строку клиента по clientId — открывается и из реестра, и из чата (Блок 2). */
+export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () => void }) {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
-  const clientId = client.id;
   const lang = i18n.language.startsWith("en") ? "en" : "ru";
+
+  const clientRow = useClientRow(clientId);
+  const client = clientRow.data;
 
   const profile = useClientProfile(clientId);
   const plan = useActivePlan(clientId);
@@ -39,10 +43,11 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
   const labs = useLabResults(clientId);
   const events = useClientEventsRecent(clientId);
 
-  const [notes, setNotes] = useState(client.nutritionist_notes ?? "");
+  const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesOk, setNotesOk] = useState(false);
-  useEffect(() => setNotes(client.nutritionist_notes ?? ""), [client.id, client.nutritionist_notes]);
+  const [alertsOnly, setAlertsOnly] = useState(false);
+  useEffect(() => setNotes(client?.nutritionist_notes ?? ""), [clientId, client?.nutritionist_notes]);
 
   async function saveNotes() {
     setSavingNotes(true);
@@ -55,6 +60,7 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
     if (!error) {
       setNotesOk(true);
       qc.invalidateQueries({ queryKey: ["registry_clients"] });
+      qc.invalidateQueries({ queryKey: ["client_row", clientId] });
     }
   }
 
@@ -85,12 +91,14 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
           <button onClick={onBack} className="text-sm text-gray-500 hover:text-brand">
             ← {t("card.back")}
           </button>
-          <h3 className="text-base font-semibold text-gray-800">{client.name}</h3>
+          <h3 className="text-base font-semibold text-gray-800">
+            {client?.name ?? (clientRow.isLoading ? t("loading") : "—")}
+          </h3>
         </div>
         <div className="flex flex-wrap gap-1">
-          {badge(client.client_status)}
-          {badge(client.payment_status)}
-          {badge(client.access_status)}
+          {badge(client?.client_status ? t(`registry.status_value.${client.client_status}`, { defaultValue: client.client_status }) : null)}
+          {badge(client?.payment_status ? t(`registry.payment_value.${client.payment_status}`, { defaultValue: client.payment_status }) : null)}
+          {badge(client?.access_status ? t(`registry.access_value.${client.access_status}`, { defaultValue: client.access_status }) : null)}
         </div>
       </div>
 
@@ -146,6 +154,10 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
           <TaskEditor clientId={clientId} />
         </Card>
 
+        <Card title={t("card.reports")}>
+          <ReportsCard clientId={clientId} />
+        </Card>
+
         <Card title={t("card.notes")}>
           <textarea
             className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
@@ -195,21 +207,53 @@ export function ClientCard({ client, onBack }: { client: RegistryRow; onBack: ()
       </Card>
 
       <Card title={t("card.events")}>
-        {(events.data ?? []).length === 0 ? (
-          <div className="text-xs text-gray-400">{t("card.no_data")}</div>
-        ) : (
-          <ul className="space-y-1 text-xs">
-            {(events.data ?? []).map((e, i) => (
-              <li key={i} className="flex justify-between gap-2">
-                <span className="text-gray-700">
-                  {e.event_type}
-                  {e.severity ? ` [${e.severity}]` : ""}
-                </span>
-                <span className="text-gray-400">{new Date(e.event_date).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <label className="mb-2 flex items-center gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={alertsOnly}
+            onChange={(e) => setAlertsOnly(e.target.checked)}
+          />
+          {t("card.alerts_only")}
+        </label>
+        {(() => {
+          // Хронологический порядок (новые сверху) уже задан запросом;
+          // при включённом фильтре оставляем только события с severity (алерты).
+          const list = alertsOnly
+            ? (events.data ?? []).filter((e) => e.severity)
+            : events.data ?? [];
+          return list.length === 0 ? (
+            <div className="text-xs text-gray-400">
+              {alertsOnly ? t("card.no_alerts") : t("card.no_data")}
+            </div>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
+              {list.map((e, i) => {
+              const tone =
+                e.severity === "critical"
+                  ? "border-l-red-600 bg-red-50"
+                  : e.severity === "high"
+                    ? "border-l-orange-500 bg-orange-50"
+                    : e.severity === "medium"
+                      ? "border-l-amber-400 bg-amber-50"
+                      : "border-l-transparent";
+              return (
+                <li
+                  key={i}
+                  className={`flex items-center justify-between gap-2 rounded border-l-4 px-2 py-1 ${tone}`}
+                >
+                  <span className="text-gray-700">
+                    {e.event_type}
+                    {e.severity ? ` [${e.severity}]` : ""}
+                  </span>
+                  <span className="shrink-0 text-gray-400">
+                    {new Date(e.event_date).toLocaleString()}
+                  </span>
+                </li>
+              );
+              })}
+            </ul>
+          );
+        })()}
       </Card>
     </div>
   );

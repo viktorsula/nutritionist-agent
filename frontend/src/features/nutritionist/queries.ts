@@ -7,6 +7,7 @@ export interface RegistryRow {
   client_status: string | null;
   payment_status: string | null;
   access_status: string | null;
+  paid_until: string | null;
   nutritionist_notes: string | null;
   client_profiles: { goals: string | null; weight: number | null; target_weight: number | null } | null;
 }
@@ -36,11 +37,57 @@ export function useClientsList() {
       const { data, error } = await supabase
         .from("clients")
         .select(
-          "id,name,client_status,payment_status,access_status,nutritionist_notes,client_profiles(goals,weight,target_weight)",
+          "id,name,client_status,payment_status,access_status,paid_until,nutritionist_notes,client_profiles(goals,weight,target_weight)",
         )
         .order("name", { ascending: true });
       if (error) throw error;
       return (data ?? []) as unknown as RegistryRow[];
+    },
+  });
+}
+
+export interface ReportRow {
+  id: string;
+  report_type: string;
+  title: string;
+  content: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Сохранённые отчёты клиента (свежие сверху). */
+export function useClientReports(clientId: string) {
+  return useQuery({
+    queryKey: ["client_reports", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<ReportRow[]> => {
+      const { data, error } = await supabase
+        .from("client_reports")
+        .select("id,report_type,title,content,status,created_at,updated_at")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
+/** Одна строка реестра по client_id (для карточки, открытой из чата). */
+export function useClientRow(clientId: string) {
+  return useQuery({
+    queryKey: ["client_row", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<RegistryRow | null> => {
+      const { data, error } = await supabase
+        .from("clients")
+        .select(
+          "id,name,client_status,payment_status,access_status,paid_until,nutritionist_notes,client_profiles(goals,weight,target_weight)",
+        )
+        .eq("id", clientId)
+        .maybeSingle();
+      if (error) throw error;
+      return (data as unknown as RegistryRow) ?? null;
     },
   });
 }
@@ -127,7 +174,7 @@ export function useClientEventsRecent(clientId: string) {
         .select("event_type,severity,event_date,payload_json")
         .eq("client_id", clientId)
         .order("event_date", { ascending: false })
-        .limit(15);
+        .limit(50);
       if (error) throw error;
       return data ?? [];
     },

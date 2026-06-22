@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { daysUntil, SOON_DAYS } from "./expiry";
 
 type Severity = "critical" | "high" | "medium";
 const SEVERITIES: Severity[] = ["critical", "high", "medium"];
@@ -29,6 +30,32 @@ const SEVERITY_STYLE: Record<Severity, string> = {
   medium: "border-l-amber-400 bg-amber-50",
 };
 
+interface ExpiringRow {
+  id: string;
+  name: string | null;
+  paid_until: string;
+}
+
+/** Клиенты, у кого тариф истекает в ближайшие SOON_DAYS дней или уже истёк. */
+function useExpiringTariffs() {
+  return useQuery({
+    queryKey: ["expiring_tariffs", SOON_DAYS],
+    queryFn: async (): Promise<ExpiringRow[]> => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() + SOON_DAYS);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const { data, error } = await supabase
+        .from("clients")
+        .select("id,name,paid_until")
+        .not("paid_until", "is", null)
+        .lte("paid_until", cutoffStr)
+        .order("paid_until", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as ExpiringRow[];
+    },
+  });
+}
+
 function useAlerts(hours: number, severity: Severity | "all") {
   return useQuery({
     queryKey: ["alerts", hours, severity],
@@ -53,6 +80,15 @@ export function AlertsPanel() {
   const [winHours, setWinHours] = useState(24 * 7);
   const [severity, setSeverity] = useState<Severity | "all">("all");
   const alerts = useAlerts(winHours, severity);
+  const expiring = useExpiringTariffs();
+
+  function expiryNote(paidUntil: string): string {
+    const d = daysUntil(paidUntil);
+    if (d === null) return "";
+    if (d < 0) return t("alerts.expiry_expired", { n: -d });
+    if (d === 0) return t("alerts.expiry_today");
+    return t("alerts.expiry_soon", { n: d });
+  }
 
   function typeLabel(eventType: string): string {
     const key = `alerts.type.${eventType}`;
@@ -108,6 +144,36 @@ export function AlertsPanel() {
         </button>
         <span className="text-xs text-gray-400">{t("alerts.count", { n: rows.length })}</span>
       </div>
+
+      {/* Истечение тарифа — отдельная секция (источник: clients.paid_until). */}
+      {(expiring.data ?? []).length > 0 && (
+        <div>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {t("alerts.expiry_title")}
+          </h3>
+          <ul className="space-y-2">
+            {(expiring.data ?? []).map((c) => {
+              const expired = (daysUntil(c.paid_until) ?? 0) < 0;
+              return (
+                <li
+                  key={c.id}
+                  className={`rounded-md border border-l-4 p-3 ${
+                    expired ? "border-l-red-600 bg-red-50" : "border-l-amber-400 bg-amber-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-gray-800">{c.name || "—"}</span>
+                    <span className="text-[11px] text-gray-500">{c.paid_until}</span>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {t("alerts.expiry_label")} — {expiryNote(c.paid_until)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {alerts.isLoading ? (
         <div className="text-xs text-gray-400">{t("loading")}</div>
