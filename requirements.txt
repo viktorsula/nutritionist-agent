@@ -8,9 +8,9 @@ fastapi>=0.110,<1.0
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9   # загрузка файлов (фото/голос/PDF)
 
-# Streamlit — LEGACY (app.py, web/*.py). В Docker НЕ запускается, оставлен для
-# совместимости со старыми модулями/их тестами. Удалить вместе с app.py/web/ при чистке.
-streamlit==1.32.0
+# Streamlit (app.py, web/*.py) — LEGACY, в Docker НЕ запускается. УДАЛЁН из зависимостей:
+# streamlit 1.32 требует protobuf<5, что конфликтует с langgraph/google-generativeai (protobuf>=5).
+# Если понадобится запускать старый Streamlit-UI — ставить отдельно (pip install streamlit) вне этого деплоя.
 
 # LLM провайдеры (Этап 4: utils/llm.py)
 groq>=0.4.0
@@ -33,7 +33,9 @@ supabase==2.10.0
 # chromadb/sentence-transformers НЕ нужны (их размерность не совпадает с vector(1536)).
 
 # Telegram Bot
-python-telegram-bot==20.7
+# 21.x использует httpx~=0.27 — совместимо с supabase (httpx>=0.26,<0.28).
+# Пин 20.7 (httpx~=0.25.2) давал ResolutionImpossible с supabase 2.10.
+python-telegram-bot>=21,<22
 
 # Документы
 pypdf==4.1.0
