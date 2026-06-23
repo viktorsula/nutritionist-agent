@@ -7,18 +7,20 @@ type Mode = "password" | "otp_request" | "otp_verify";
 
 export function Login() {
   const { t, i18n } = useTranslation();
-  const { signInWithPassword, sendOtp, verifyOtp } = useAuth();
+  const { signInWithPassword, sendOtp, verifyOtp, resetPassword } = useAuth();
 
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function handle(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setInfo("");
     setBusy(true);
     try {
       if (mode === "password") {
@@ -31,6 +33,24 @@ export function Login() {
       }
     } catch {
       setError(t("login.error"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleForgot() {
+    setError("");
+    setInfo("");
+    if (!email) {
+      setError(t("login.email_required"));
+      return;
+    }
+    setBusy(true);
+    try {
+      await resetPassword(email);
+      setInfo(t("login.reset_sent"));
+    } catch {
+      setError(t("login.reset_error"));
     } finally {
       setBusy(false);
     }
@@ -78,6 +98,7 @@ export function Login() {
           )}
 
           {error && <div className="text-sm text-red-600">{error}</div>}
+          {info && <div className="text-sm text-green-600">{info}</div>}
 
           <Button type="submit" disabled={busy} className="w-full">
             {mode === "password" && t("login.sign_in")}
@@ -86,17 +107,37 @@ export function Login() {
           </Button>
         </form>
 
-        <div className="mt-4 text-center">
+        <div className="mt-4 flex flex-col items-center gap-2">
           {mode === "password" ? (
-            <button
-              onClick={() => setMode("otp_request")}
-              className="text-xs text-brand hover:underline"
-            >
-              {t("login.use_code")}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleForgot}
+                disabled={busy}
+                className="text-xs text-brand hover:underline disabled:opacity-50"
+              >
+                {t("login.forgot")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setInfo("");
+                  setMode("otp_request");
+                }}
+                className="text-xs text-brand hover:underline"
+              >
+                {t("login.use_code")}
+              </button>
+            </>
           ) : (
             <button
-              onClick={() => setMode("password")}
+              type="button"
+              onClick={() => {
+                setError("");
+                setInfo("");
+                setMode("password");
+              }}
               className="text-xs text-brand hover:underline"
             >
               {t("login.use_password")}
