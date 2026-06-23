@@ -7,6 +7,11 @@
 `https://ggorlbhrrlqocnqvbxqr.supabase.co` → `createClient("<ref>", …)` → `Invalid URL` →
 React не монтируется. Исправлено: полный https-URL + Manual Deploy (Clear cache).
 
+✅ **СБРОС ПАРОЛЯ РАБОТАЕТ (23 июня, PR #5–#9).** По КОДУ из письма (не по ссылке — её
+прокликивает сканер Gmail). Требует в Supabase: Custom SMTP (Resend) + шаблон Reset Password
+с `{{ .Token }}`. Полный цикл проверен E2E реальным браузером на проде. Детали — `docs/DEPLOY.md`
+(4b/4c) и [[project_deploy_state]].
+
 **Осталось — интерактивный smoke-тест в браузере** (headless-проверки уже зелёные):
 1. https://nutritionist-agent-1-ljzi.onrender.com/ → форма входа (✅ рендерится).
 2. Вход нутрициологом → кабинет (3 панели).
