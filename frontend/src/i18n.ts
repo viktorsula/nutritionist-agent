@@ -21,6 +21,7 @@ const resources = {
         email_required: "Введите email",
         reset_sent: "Письмо для сброса пароля отправлено. Перейдите по ссылке из письма.",
         reset_error: "Не удалось отправить письмо. Проверьте email.",
+        link_error: "Ссылка из письма недействительна или устарела. Запросите новую через «Забыли пароль?» и откройте её сразу после получения.",
       },
       recovery: {
         title: "Новый пароль",
@@ -421,6 +422,7 @@ const resources = {
         email_required: "Enter your email",
         reset_sent: "Password reset email sent. Open the link from the email.",
         reset_error: "Could not send the email. Check the address.",
+        link_error: "The link from the email is invalid or expired. Request a new one via «Forgot password?» and open it right after you receive it.",
       },
       recovery: {
         title: "New password",

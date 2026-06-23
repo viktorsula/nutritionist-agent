@@ -7,7 +7,7 @@ type Mode = "password" | "otp_request" | "otp_verify";
 
 export function Login() {
   const { t, i18n } = useTranslation();
-  const { signInWithPassword, sendOtp, verifyOtp, resetPassword } = useAuth();
+  const { signInWithPassword, sendOtp, verifyOtp, resetPassword, authError } = useAuth();
 
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
@@ -64,6 +64,12 @@ export function Login() {
           {t("app_title")}
         </h1>
         <p className="mb-6 text-center text-xs text-gray-500">{t("welcome_brand")}</p>
+
+        {authError && (
+          <div className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            {t("login.link_error")}
+          </div>
+        )}
 
         <form onSubmit={handle} className="space-y-3">
           <input
