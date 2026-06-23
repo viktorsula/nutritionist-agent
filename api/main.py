@@ -80,32 +80,6 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/diag")
-def diag() -> Dict[str, Any]:
-    """ВРЕМЕННО: диагностика окружения бэкенда (без раскрытия значений ключей).
-    Удалить после устранения проблемы с /me."""
-    import os as _os
-
-    out: Dict[str, Any] = {
-        "has_SUPABASE_URL": bool(_os.environ.get("SUPABASE_URL")),
-        "has_SUPABASE_ANON_KEY": bool(_os.environ.get("SUPABASE_ANON_KEY")),
-        "has_SUPABASE_SERVICE_KEY": bool(
-            _os.environ.get("SUPABASE_SERVICE_KEY") or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        ),
-        "service_client": "?",
-        "verify_uses": "service",  # маркер: новый код задеплоен
-    }
-    try:
-        from database.client import get_supabase_service_client
-
-        sb = get_supabase_service_client()
-        r = sb.table("users").select("id").limit(1).execute()
-        out["service_client"] = "ok" if hasattr(r, "data") else "no-data"
-    except Exception as e:  # noqa: BLE001
-        out["service_client"] = f"ERR {type(e).__name__}: {str(e)[:120]}"
-    return out
-
-
 @app.get("/me")
 def me(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """Текущий пользователь — для маршрутизации по роли и gate доступа во фронте."""
