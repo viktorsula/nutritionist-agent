@@ -16,6 +16,8 @@ interface AuthState {
   loading: boolean;
   /** true, пока пользователь в потоке восстановления пароля (ссылка из письма). */
   recovery: boolean;
+  /** Текст ошибки из ссылки письма (ссылка устарела/недействительна), если есть. */
+  authError: string;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   sendOtp: (email: string) => Promise<void>;
   verifyOtp: (email: string, token: string) => Promise<void>;
@@ -27,11 +29,30 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+/**
+ * Синхронно разбираем hash из ссылки письма ДО монтирования роутера: иначе редирект
+ * на /login успевает стереть hash, а одноразовое событие PASSWORD_RECOVERY теряется
+ * (клиент Supabase инициализируется раньше, чем подпишется React-обработчик).
+ * implicit-флоу кладёт в hash либо access_token+type=recovery, либо error_*.
+ */
+function parseAuthHash(): { recovery: boolean; error: string } {
+  if (typeof window === "undefined") return { recovery: false, error: "" };
+  const p = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return {
+    recovery: p.get("type") === "recovery" && !!p.get("access_token"),
+    error: p.get("error_description") || p.get("error_code") || p.get("error") || "",
+  };
+}
+
+const initialHash = parseAuthHash();
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [recovery, setRecovery] = useState(false);
+  const [recovery, setRecovery] = useState(initialHash.recovery);
+  // Ошибка приходит только из ссылки письма на старте — сеттер не нужен.
+  const [authError] = useState(initialHash.error);
 
   // Резолвим прикладного пользователя (роль/доступ) через API /me.
   async function loadAppUser(current: Session | null) {
@@ -57,11 +78,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
-      // Переход по ссылке из письма сброса пароля: показываем экран нового пароля.
+      // Дубль к синхронному разбору hash: ловим событие, если успели подписаться.
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(s);
       await loadAppUser(s);
     });
+
+    // Подчищаем hash из адресной строки (токен/ошибку уже забрали) — без перезагрузки.
+    if (window.location.hash.includes("access_token") || window.location.hash.includes("error")) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
 
     return () => {
       active = false;
@@ -74,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     appUser,
     loading,
     recovery,
+    authError,
     signInWithPassword: async (email, password) => {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
