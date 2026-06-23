@@ -1,22 +1,30 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ЗАВТРА РОВНО ОТСЮДА (22 июня, конец сессии)
-Прод поднят на Render (бэкенд + фронт), OpenAI+Anthropic оплачены. **Открытый шаг — белый
-экран фронта:** в бандл НЕ вшиты `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
-(`supabase.createClient("")` → `supabaseUrl is required` → React не монтируется).
-1. Render → Static Site `nutritionist-agent-1` → Environment: добавить
-   `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (`VITE_API_URL` уже есть).
-2. **Manual Deploy → Clear build cache & deploy** (Vite вшивает env только при сборке).
-3. Проверить: в бандле появился `*.supabase.co`; https://nutritionist-agent-1-ljzi.onrender.com/
-   рендерит форму входа (не белый лист).
-4. **Smoke-тест:** вход нутрициологом → создать клиента (оплата/режим/дата) → чат-аналитика
-   по клиенту (живой OpenAI+Claude) → отчёт (правка → PDF/TXT).
+## ▶️ НАЧАТЬ ЗАВТРА РОВНО ОТСЮДА (23 июня, конец сессии)
+Прод поднят на Render (бэкенд + фронт), OpenAI+Anthropic оплачены. ✅ **Белый экран фронта
+УСТРАНЁН — форма входа рендерится.** Причина была НЕ «пустой env», а неверный формат:
+`VITE_SUPABASE_URL` стоял как голый реф проекта `ggorlbhrrlqocnqvbxqr` вместо полного
+`https://ggorlbhrrlqocnqvbxqr.supabase.co` → `createClient("<ref>", …)` → `Invalid URL` →
+React не монтируется. Исправлено: полный https-URL + Manual Deploy (Clear cache).
+
+**Осталось — интерактивный smoke-тест в браузере** (headless-проверки уже зелёные):
+1. https://nutritionist-agent-1-ljzi.onrender.com/ → форма входа (✅ рендерится).
+2. Вход нутрициологом → кабинет (3 панели).
+3. Создать клиента (оплата/режим/дата) → проверить приглашение.
+4. Чат-аналитика по клиенту (живой OpenAI+Claude) → панель «Аналитика».
+5. Отчёт по клиенту → правка → PDF/TXT.
+
+**На будущее (деплой фронта):** `VITE_SUPABASE_URL` = ПОЛНЫЙ `https://<ref>.supabase.co`
+(с протоколом), не голый реф. Проверка без браузера: в JS-бандле есть строка
+`https://<ref>.supabase.co` (не только реф внутри JWT); `auth/v1/settings` с anon → 200;
+CORS бэкенда `Access-Control-Allow-Origin` = URL фронта.
+
 URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
 `https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
 
 ---
 
-**Обновлено:** 22 июня 2026 — React-фронт, кабинет нутрициолога (Фаза 3) собран локально.
+**Обновлено:** 23 июня 2026 — прод-фронт поднят (белый экран устранён), осталось smoke в браузере.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)
 - **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с

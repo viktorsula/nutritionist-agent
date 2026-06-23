@@ -14,10 +14,14 @@ interface AuthState {
   session: Session | null;
   appUser: AppUser | null;
   loading: boolean;
+  /** true, пока пользователь в потоке восстановления пароля (ссылка из письма). */
+  recovery: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   sendOtp: (email: string) => Promise<void>;
   verifyOtp: (email: string, token: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
+  endRecovery: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -27,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recovery, setRecovery] = useState(false);
 
   // Резолвим прикладного пользователя (роль/доступ) через API /me.
   async function loadAppUser(current: Session | null) {
@@ -51,7 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (active) setLoading(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
+      // Переход по ссылке из письма сброса пароля: показываем экран нового пароля.
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(s);
       await loadAppUser(s);
     });
@@ -66,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     appUser,
     loading,
+    recovery,
     signInWithPassword: async (email, password) => {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
@@ -78,10 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
       if (error) throw error;
     },
+    resetPassword: async (email) => {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+    },
     changePassword: async (newPassword) => {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
     },
+    endRecovery: () => setRecovery(false),
     signOut: async () => {
       await supabase.auth.signOut();
       setAppUser(null);

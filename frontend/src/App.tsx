@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "./auth/AuthProvider";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { Login } from "./pages/Login";
+import { SetNewPassword } from "./pages/SetNewPassword";
 import { AccessRestricted } from "./pages/AccessRestricted";
 import { ClientArea } from "./pages/client/ClientArea";
 import { NutritionistShell } from "./pages/nutritionist/NutritionistShell";
@@ -41,6 +42,11 @@ function ObserverNotice() {
 }
 
 export default function App() {
+  const { recovery } = useAuth();
+
+  // Поток сброса пароля имеет приоритет над любым роутом и редиректом в кабинет.
+  if (recovery) return <SetNewPassword />;
+
   return (
     <Routes>
       <Route path="/" element={<RootRedirect />} />
