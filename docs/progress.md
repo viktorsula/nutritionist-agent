@@ -1,9 +1,25 @@
 # Журнал прогресса проекта
 
-## Статус: В разработке → ПРОД на Render (поднимается)
-Последнее обновление: 22 июня 2026 (вечер)
-Сессия: Фаза 3 слита в main (PR #1–3) + продакшен-деплой на Render
+## Статус: В разработке → ПРОД на Render (поднят, фронт рендерится)
+Последнее обновление: 23 июня 2026
+Сессия: Фаза 3 слита в main (PR #1–4) + продакшен-деплой на Render; белый экран фронта устранён
 Ветка: Фаза 3 в `main`; рабочая `stage6-utils` синхронизирована
+
+### Деплой 23 июня 2026 — белый экран фронта УСТРАНЁН ✅
+- **Реальная причина** (не «пустой env», как предполагалось 22 июня): `VITE_SUPABASE_URL` на
+  Render Static Site был задан как **голый реф проекта** `ggorlbhrrlqocnqvbxqr` вместо полного
+  `https://ggorlbhrrlqocnqvbxqr.supabase.co`. `createClient("<ref>", anon)` → `supabase-js`
+  делает `new URL(...)` → `Invalid URL` → React не монтируется. Anon-ключ и `VITE_API_URL`
+  были вшиты корректно.
+- **Фикс:** значение `VITE_SUPABASE_URL` → полный https-URL + Manual Deploy с Clear build cache.
+- **Headless-верификация прода (вся зелёная):** бэкенд `/health` ок; фронт `index.html` 200 +
+  свежий бандл (старый хэш был залипшим CDN-кэшем); в бандле строка `https://<ref>.supabase.co`;
+  anon-ключ — валидный JWT (3 части); `VITE_API_URL` корректен; Supabase `auth/v1/settings`
+  с anon → 200; CORS бэкенда `Access-Control-Allow-Origin` = URL фронта; CSS/JS-ассеты 200.
+- **Подтверждено Виктором:** форма входа рендерится в браузере.
+- **На будущее:** `VITE_SUPABASE_URL` = ПОЛНЫЙ `https://<ref>.supabase.co` (с протоколом), не голый реф.
+- **⏳ Осталось:** интерактивный smoke в браузере (вход нутрициолога → создать клиента →
+  чат-аналитика → отчёт PDF/TXT).
 
 ### Деплой 22 июня 2026 (продакшен)
 - **Бэкенд** (FastAPI/Docker→uvicorn) на Render: https://nutritionist-agent-gvxp.onrender.com — `/health` ок.
@@ -12,8 +28,6 @@
   streamlit/protobuf-конфликт); Dockerfile→uvicorn; SPA deep-link → `404.html`=index.html на сборке.
 - CORS_ORIGINS бэкенда = URL фронта (ок); Supabase Auth Site URL/Redirect = URL фронта (ок).
 - OpenAI + Anthropic **оплачены** → ИИ полноценный. Миграции 001–008 применены (проверено интроспекцией).
-- **⏳ ОТКРЫТО (старт следующей сессии):** белый экран фронта — не вшиты `VITE_SUPABASE_URL`/
-  `VITE_SUPABASE_ANON_KEY`. Задать на Static Site + Manual Deploy (Clear cache) → рендер входа → smoke-тест.
 
 ### Сессия 22 июня 2026 — кабинет нутрициолога: 3 панели, аналитика-RAG, отчёты, настройки
 - **Раскладка в 3 панели** (`NutritionistShell`): слева инструменты, центр — рабочая
