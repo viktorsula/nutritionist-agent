@@ -3,11 +3,12 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthProvider";
 import { Button } from "../components/ui/Button";
 
-type Mode = "password" | "otp_request" | "otp_verify";
+type Mode = "password" | "otp_request" | "otp_verify" | "recover_request" | "recover_verify";
 
 export function Login() {
   const { t, i18n } = useTranslation();
-  const { signInWithPassword, sendOtp, verifyOtp, resetPassword, authError } = useAuth();
+  const { signInWithPassword, sendOtp, verifyOtp, resetPassword, verifyRecoveryOtp, authError } =
+    useAuth();
 
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
@@ -16,6 +17,13 @@ export function Login() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [busy, setBusy] = useState(false);
+
+  function switchMode(next: Mode) {
+    setError("");
+    setInfo("");
+    setCode("");
+    setMode(next);
+  }
 
   async function handle(e: FormEvent) {
     e.preventDefault();
@@ -28,33 +36,25 @@ export function Login() {
       } else if (mode === "otp_request") {
         await sendOtp(email);
         setMode("otp_verify");
-      } else {
+      } else if (mode === "otp_verify") {
         await verifyOtp(email, code);
+      } else if (mode === "recover_request") {
+        // Шлём письмо сброса (содержит код {{ .Token }}).
+        await resetPassword(email);
+        setInfo(t("login.code_sent"));
+        setMode("recover_verify");
+      } else {
+        // recover_verify: код из письма → recovery-сессия → экран нового пароля.
+        await verifyRecoveryOtp(email, code);
       }
     } catch {
-      setError(t("login.error"));
+      setError(mode === "recover_request" ? t("login.reset_error") : t("login.error"));
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleForgot() {
-    setError("");
-    setInfo("");
-    if (!email) {
-      setError(t("login.email_required"));
-      return;
-    }
-    setBusy(true);
-    try {
-      await resetPassword(email);
-      setInfo(t("login.reset_sent"));
-    } catch {
-      setError(t("login.reset_error"));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const isRecover = mode === "recover_request" || mode === "recover_verify";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-light px-4">
@@ -68,6 +68,12 @@ export function Login() {
         {authError && (
           <div className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
             {t("login.link_error")}
+          </div>
+        )}
+
+        {isRecover && (
+          <div className="mb-4 rounded-md bg-brand-light px-3 py-2 text-xs text-gray-600">
+            {t("login.recover_hint")}
           </div>
         )}
 
@@ -92,7 +98,7 @@ export function Login() {
             />
           )}
 
-          {mode === "otp_verify" && (
+          {(mode === "otp_verify" || mode === "recover_verify") && (
             <input
               type="text"
               required
@@ -110,6 +116,8 @@ export function Login() {
             {mode === "password" && t("login.sign_in")}
             {mode === "otp_request" && t("login.send_code")}
             {mode === "otp_verify" && t("login.verify")}
+            {mode === "recover_request" && t("login.recover_send")}
+            {mode === "recover_verify" && t("login.verify")}
           </Button>
         </form>
 
@@ -118,19 +126,14 @@ export function Login() {
             <>
               <button
                 type="button"
-                onClick={handleForgot}
-                disabled={busy}
-                className="text-xs text-brand hover:underline disabled:opacity-50"
+                onClick={() => switchMode("recover_request")}
+                className="text-xs text-brand hover:underline"
               >
                 {t("login.forgot")}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setError("");
-                  setInfo("");
-                  setMode("otp_request");
-                }}
+                onClick={() => switchMode("otp_request")}
                 className="text-xs text-brand hover:underline"
               >
                 {t("login.use_code")}
@@ -139,11 +142,7 @@ export function Login() {
           ) : (
             <button
               type="button"
-              onClick={() => {
-                setError("");
-                setInfo("");
-                setMode("password");
-              }}
+              onClick={() => switchMode("password")}
               className="text-xs text-brand hover:underline"
             >
               {t("login.use_password")}

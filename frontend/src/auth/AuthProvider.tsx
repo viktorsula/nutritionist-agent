@@ -22,6 +22,8 @@ interface AuthState {
   sendOtp: (email: string) => Promise<void>;
   verifyOtp: (email: string, token: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  /** Подтверждение кода восстановления из письма (type=recovery) → сессия + событие recovery. */
+  verifyRecoveryOtp: (email: string, token: string) => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
   endRecovery: () => void;
   signOut: () => Promise<void>;
@@ -138,6 +140,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: window.location.origin,
       });
+      if (error) throw error;
+    },
+    verifyRecoveryOtp: async (email, token) => {
+      // Код из письма → recovery-сессия. Событие PASSWORD_RECOVERY поднимет экран
+      // нового пароля. Не зависит от клика по ссылке (иммунно к сканерам почты).
+      const { error } = await supabase.auth.verifyOtp({ email, token, type: "recovery" });
       if (error) throw error;
     },
     changePassword: async (newPassword) => {
