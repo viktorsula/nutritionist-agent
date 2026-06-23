@@ -7,8 +7,15 @@ type Mode = "password" | "otp_request" | "otp_verify" | "recover_request" | "rec
 
 export function Login() {
   const { t, i18n } = useTranslation();
-  const { signInWithPassword, sendOtp, verifyOtp, resetPassword, verifyRecoveryOtp, authError } =
-    useAuth();
+  const {
+    signInWithPassword,
+    sendOtp,
+    verifyOtp,
+    resetPassword,
+    verifyRecoveryOtp,
+    beginPasswordReset,
+    authError,
+  } = useAuth();
 
   const [mode, setMode] = useState<Mode>("password");
   const [email, setEmail] = useState("");
@@ -44,8 +51,11 @@ export function Login() {
         setInfo(t("login.code_sent"));
         setMode("recover_verify");
       } else {
-        // recover_verify: код из письма → recovery-сессия → экран нового пароля.
+        // recover_verify: код из письма → recovery-сессия. Затем ДЕТЕРМИНИРОВАННО
+        // открываем экран нового пароля (не полагаясь на тайминг события PASSWORD_RECOVERY,
+        // иначе сессия успевает увести в кабинет минуя смену пароля).
         await verifyRecoveryOtp(email, code);
+        beginPasswordReset();
       }
     } catch {
       setError(mode === "recover_request" ? t("login.reset_error") : t("login.error"));
