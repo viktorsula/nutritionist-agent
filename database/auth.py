@@ -15,17 +15,22 @@
 import logging
 from typing import Any, Dict, Optional
 
-from database.client import get_supabase_client, get_supabase_service_client
+from database.client import get_supabase_service_client
 
 logger = logging.getLogger(__name__)
 
 
 def verify_access_token(access_token: str) -> Optional[Dict[str, Any]]:
-    """Валидирует Supabase access token. Возвращает {auth_id, email} или None."""
+    """Валидирует Supabase access token. Возвращает {auth_id, email} или None.
+
+    Используем service-клиент, а НЕ anon: личность берётся из самого JWT
+    (get_user проверяет токен на стороне Supabase), apikey лишь авторизует запрос.
+    Так бэкенду не нужен SUPABASE_ANON_KEY — раньше его отсутствие давало 401 на /me.
+    """
     if not access_token:
         return None
     try:
-        sb = get_supabase_client()  # anon-клиент
+        sb = get_supabase_service_client()
         resp = sb.auth.get_user(access_token)
         user = getattr(resp, "user", None)
         if not user or not getattr(user, "id", None):
