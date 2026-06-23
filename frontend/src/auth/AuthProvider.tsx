@@ -35,15 +35,25 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
  * (клиент Supabase инициализируется раньше, чем подпишется React-обработчик).
  * implicit-флоу кладёт в hash либо access_token+type=recovery, либо error_*.
  */
-function parseAuthHash(): { recovery: boolean; error: string } {
-  if (typeof window === "undefined") return { recovery: false, error: "" };
+function parseAuthHash(): {
+  recovery: boolean;
+  error: string;
+  accessToken: string;
+  refreshToken: string;
+} {
+  if (typeof window === "undefined")
+    return { recovery: false, error: "", accessToken: "", refreshToken: "" };
   const p = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   return {
     recovery: p.get("type") === "recovery" && !!p.get("access_token"),
     error: p.get("error_description") || p.get("error_code") || p.get("error") || "",
+    accessToken: p.get("access_token") || "",
+    refreshToken: p.get("refresh_token") || "",
   };
 }
 
+// Захватываем токены из ссылки ОДИН РАЗ при загрузке модуля — до того как
+// detectSessionInUrl или роутер очистят hash. Так смена пароля не зависит от гонки.
 const initialHash = parseAuthHash();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -69,8 +79,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    const inRecovery =
+      initialHash.recovery && !!initialHash.accessToken && !!initialHash.refreshToken;
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    // В потоке восстановления ставим сессию ЯВНО из захваченных токенов (не полагаясь на
+    // тайминг detectSessionInUrl) — только тогда updateUser сможет сменить пароль.
+    const init = inRecovery
+      ? supabase.auth.setSession({
+          access_token: initialHash.accessToken,
+          refresh_token: initialHash.refreshToken,
+        })
+      : supabase.auth.getSession();
+
+    init.then(async ({ data }) => {
       if (!active) return;
       setSession(data.session);
       await loadAppUser(data.session);
@@ -84,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await loadAppUser(s);
     });
 
-    // Подчищаем hash из адресной строки (токен/ошибку уже забрали) — без перезагрузки.
+    // Токены/ошибку из ссылки уже забрали в initialHash — убираем hash из адреса.
     if (window.location.hash.includes("access_token") || window.location.hash.includes("error")) {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
     }
