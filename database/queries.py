@@ -229,6 +229,48 @@ def get_latest_measurement(client_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
+def get_recent_measurements(client_id: str, limit: int = 2) -> List[Dict[str, Any]]:
+    """Последние замеры клиента (свежие сверху, по времени записи) — для динамики/алерта веса."""
+    supabase = _service_client()
+    response = (
+        supabase.table("measurements")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def insert_measurement(
+    client_id: str,
+    weight: Optional[float] = None,
+    measured_at: Optional[str] = None,
+    neck: Optional[float] = None,
+    waist: Optional[float] = None,
+    hips: Optional[float] = None,
+    notes: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Добавляет замер тела клиента (вес/объёмы) в measurements. measured_at → сегодня по умолчанию."""
+    supabase = _service_client()
+    payload: Dict[str, Any] = {"client_id": client_id}
+    for key, value in (
+        ("weight", weight),
+        ("measured_at", measured_at),
+        ("neck", neck),
+        ("waist", waist),
+        ("hips", hips),
+        ("notes", notes),
+    ):
+        if value is not None:
+            payload[key] = value
+    rows = _extract_data(
+        supabase.table("measurements").insert(payload).select("*").execute()
+    )
+    return (rows or [None])[0]
+
+
 def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Недавние числовые анализы клиента из lab_results (миграция 003),

@@ -9,7 +9,7 @@ Diary Agent — дневник: фиксация того, что клиент �
 Поток:
 1. Извлечь структуру одним LLM-вызовом (JSON): {kind, ingredients, weight_kg, wellbeing}.
 2. Ветвление по kind:
-   - weight    → событие weight_logged + проверка алерта weight_increase;
+   - weight    → запись в measurements + проверка алерта weight_increase;
    - wellbeing → событие bad_wellbeing + уведомление нутрициолога;
    - meal      → анализ состава против рациона + событие calories_logged;
    - other     → мягкий уточняющий ответ.
@@ -124,15 +124,16 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
     if weight is None:
         return 'other'
 
+    # Вес — это точка временного ряда → measurements (для графиков/динамики),
+    # а НЕ событие. Событие в client_events пишем только если сработает алерт (ниже).
     try:
-        queries.log_client_event(
+        queries.insert_measurement(
             client_id=client_id,
-            event_type='weight_logged',
-            severity=None,
-            payload={"weight": weight, "channel": state.get('channel')},
+            weight=weight,
+            notes=f"channel={state.get('channel')}",
         )
     except Exception as e:
-        logger.error(f"Diary failed to log weight: {e}")
+        logger.error(f"Diary failed to insert measurement: {e}")
 
     # Проверка алерта weight_increase (сравнивает события за 24ч)
     try:
@@ -148,7 +149,7 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
         state['alerts'] = (state.get('alerts') or []) + alerts
         state['routing'] = determine_food_routing(state['alerts'], mode)
         # Персистим алерт как событие с severity, чтобы он попал в панель
-        # алертов нутрициолога (weight_logged выше пишется без severity).
+        # алертов нутрициолога (сам вес выше уходит в measurements, не в события).
         try:
             top = alerts[0]
             queries.log_client_event(
