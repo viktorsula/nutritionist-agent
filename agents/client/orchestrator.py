@@ -34,6 +34,7 @@ from .dialog_agent import dialog_node
 from .vision_agent import vision_node
 from .diary_agent import diary_node
 from .nutrition_agent import nutrition_node
+from .document_agent import document_node
 from utils.llm import call_llm
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,7 @@ def create_client_graph():
     workflow.add_node("diary_agent", diary_node)
     workflow.add_node("nutrition_agent", nutrition_node)
     workflow.add_node("dialog_agent", dialog_node)
+    workflow.add_node("document_agent", document_node)
     workflow.add_node("format_response", format_response_node)
     workflow.add_node("save_to_db", save_to_db_node)
 
@@ -143,11 +145,12 @@ def create_client_graph():
             "diary": "diary_agent",
             "nutrition": "nutrition_agent",
             "dialog": "dialog_agent",
+            "document": "document_agent",
         },
     )
 
     # Все агенты сходятся в форматирование и сохранение
-    for agent in ("vision_agent", "diary_agent", "nutrition_agent", "dialog_agent"):
+    for agent in ("vision_agent", "diary_agent", "nutrition_agent", "dialog_agent", "document_agent"):
         workflow.add_edge(agent, "format_response")
 
     workflow.add_edge("format_response", "save_to_db")
@@ -297,6 +300,11 @@ def route_node(state: ClientState) -> ClientState:
     # Фото → vision (без LLM)
     if message_type == 'photo':
         state['route'] = 'vision'
+        return state
+
+    # Документ (PDF/текст) → document_agent
+    if message_type == 'document':
+        state['route'] = 'document'
         return state
 
     # Текст → классификация интента

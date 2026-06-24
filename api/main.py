@@ -12,15 +12,29 @@ CRUD/Auth/Storage фронт делает напрямую в Supabase под RL
 """
 
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user, require_role
 
-app = FastAPI(title="Nutritionist Agent API", version="1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Жизненный цикл: поднять Telegram-бота (если настроен) на старте, остановить на выходе."""
+    from api.telegram_webhook import startup_telegram, shutdown_telegram
+
+    await startup_telegram()
+    try:
+        yield
+    finally:
+        await shutdown_telegram()
+
+
+app = FastAPI(title="Nutritionist Agent API", version="1.0", lifespan=lifespan)
 
 # CORS: список origin фронта через переменную окружения (через запятую).
 _origins = [
@@ -78,6 +92,30 @@ class CreateClientIn(BaseModel):
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> Dict[str, bool]:
+    """Приём апдейтов Telegram (webhook). Без настроенного бота — 503."""
+    from api.telegram_webhook import process_webhook_update, webhook_secret_ok
+
+    if not webhook_secret_ok(x_telegram_bot_api_secret_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid secret token")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+
+    ok = await process_webhook_update(data)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram bot not configured"
+        )
+    return {"ok": True}
 
 
 @app.get("/me")

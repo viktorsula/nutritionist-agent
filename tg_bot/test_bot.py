@@ -163,10 +163,12 @@ class TestTelegramHandlers(unittest.IsolatedAsyncioTestCase):
         # Проверяем что показали "typing"
         self.chat.send_action.assert_called_once_with("typing")
 
-        # Проверяем что вызвали route_message
+        # Проверяем что вызвали route_message.
+        # Для Telegram роутеру передаётся telegram_id (он сам резолвит client_id
+        # через get_user_by_telegram_id), а НЕ users.id.
         mock_route.assert_called_once()
         call_kwargs = mock_route.call_args[1]
-        self.assertEqual(call_kwargs["user_id"], "user-uuid-123")
+        self.assertEqual(call_kwargs["user_id"], "123456789")
         self.assertEqual(call_kwargs["channel"], "telegram")
 
         # Проверяем отправку ответа

@@ -17,6 +17,7 @@ from .handlers import (
     handle_text_message,
     handle_photo_message,
     handle_voice_message,
+    handle_document_message,
     error_handler
 )
 
@@ -28,41 +29,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def start_bot():
+def build_application(token: str = None) -> Application:
     """
-    Запуск Telegram бота
+    Собирает и настраивает PTB Application (регистрирует команды и обработчики).
+
+    Общий билдер для двух режимов запуска: polling (start_bot) и webhook
+    (api.telegram_webhook). Токен — из аргумента или TELEGRAM_BOT_TOKEN.
     """
-    # Получаем токен из переменных окружения
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN не найден в переменных окружения")
         raise ValueError("TELEGRAM_BOT_TOKEN не установлен")
 
-    logger.info("Запуск Telegram бота...")
-
-    # Создаём приложение
     application = Application.builder().token(token).build()
 
-    # Регистрируем команды
+    # Команды
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
 
-    # Регистрируем обработчики сообщений
+    # Сообщения
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)
     )
-    application.add_handler(
-        MessageHandler(filters.PHOTO, handle_photo_message)
-    )
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     application.add_handler(
         MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message)
+    )
+    application.add_handler(
+        MessageHandler(filters.Document.ALL, handle_document_message)
     )
 
     # Глобальный обработчик ошибок
     application.add_error_handler(error_handler)
 
-    # Запуск бота
+    return application
+
+
+def start_bot():
+    """Запуск Telegram бота в режиме polling (локально/воркер)."""
+    logger.info("Запуск Telegram бота (polling)...")
+    application = build_application()
     logger.info("Бот запущен и ожидает сообщений...")
     application.run_polling(allowed_updates=["message"])
 
