@@ -51,3 +51,6 @@ langfuse>=2.0.0
 # Утилиты
 python-dotenv==1.0.1
 pytz==2024.1
+
+# Планировщик уведомлений (timezone-aware чек-ины/напоминания) — вместо n8n в v1
+APScheduler>=3.10

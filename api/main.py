@@ -24,13 +24,16 @@ from api.auth import get_current_user, require_role
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Жизненный цикл: поднять Telegram-бота (если настроен) на старте, остановить на выходе."""
+    """Жизненный цикл: Telegram-бот + планировщик уведомлений на старте, остановка на выходе."""
     from api.telegram_webhook import startup_telegram, shutdown_telegram
+    from api.scheduler import start_scheduler, shutdown_scheduler
 
     await startup_telegram()
+    start_scheduler()
     try:
         yield
     finally:
+        shutdown_scheduler()
         await shutdown_telegram()
 
 

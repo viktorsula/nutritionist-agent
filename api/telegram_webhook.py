@@ -98,3 +98,8 @@ def webhook_secret_ok(header_value: Optional[str]) -> bool:
 def is_configured() -> bool:
     """True, если PTB-приложение инициализировано (бот активен)."""
     return _application is not None
+
+
+def get_bot():
+    """PTB Bot активного приложения (для исходящих сообщений) или None."""
+    return _application.bot if _application is not None else None
