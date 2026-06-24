@@ -193,6 +193,13 @@ def load_context_node(state: ClientState) -> ClientState:
         # Активный план питания — всегда
         state['active_plan'] = queries.get_active_nutrition_plan(client_id)
 
+        # Активный план ЗОЖ (сон/активность/восстановление/стресс) — «как жить»
+        try:
+            state['wellness_plan'] = queries.get_wellness_plan(client_id)
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить план ЗОЖ: {e}")
+            state['wellness_plan'] = None
+
         # Активные задачи клиента — всегда
         state['tasks'] = queries.get_pending_tasks(client_id)
 

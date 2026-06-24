@@ -185,6 +185,12 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
                 "\n\n## Данные клиента (его собственные; можно сообщать ему)\n"
                 + "\n".join(health)
             )
+
+        # План ЗОЖ («как жить»: сон/активность/восстановление/стресс) — назначен
+        # нутрициологом; учитываем при советах по рациону, но не выходим за рамки.
+        wellness = _format_wellness(state.get('wellness_plan'))
+        if wellness:
+            prompt += "\n\n## План ЗОЖ клиента (назначен нутрициологом)\n" + wellness
         return prompt
     except Exception as e:
         logger.error(f"Error building nutrition system prompt: {e}")
@@ -233,6 +239,21 @@ def _format_plan(plan: Dict[str, Any]) -> str:
         lines.append(f"БАДы/добавки: {supplements}")
 
     return "\n".join(lines) if lines else "План назначен, детали не заполнены."
+
+
+def _format_wellness(plan: Optional[Dict[str, Any]]) -> str:
+    """Человекочитаемый план ЗОЖ (только заполненные поля). Пусто → ''."""
+    if not plan:
+        return ""
+    fields = [
+        ("Сон", plan.get('sleep_target')),
+        ("Активность", plan.get('activity_target')),
+        ("Восстановление", plan.get('recovery')),
+        ("Стресс", plan.get('stress_management')),
+        ("Заметки", plan.get('notes')),
+    ]
+    lines = [f"- {label}: {value}" for label, value in fields if value]
+    return "\n".join(lines)
 
 
 def _format_list(values: Optional[List[Any]]) -> str:

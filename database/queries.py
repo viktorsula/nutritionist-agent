@@ -112,6 +112,64 @@ def get_client_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
     )
 
 
+def _user_info_from_client(client: Dict[str, Any]) -> Dict[str, Any]:
+    """Нормализует строку clients к контракту router.get_user_info (роль client)."""
+    return {
+        "id": client.get("id"),
+        "role": "client",
+        "name": client.get("name"),
+        "telegram_id": client.get("telegram_id"),
+        "email": client.get("email"),
+    }
+
+
+def get_user_by_telegram_id(telegram_id: Any) -> Optional[Dict[str, Any]]:
+    """
+    Резолвит пользователя по Telegram ID для router.get_user_info.
+
+    telegram_id хранится в clients (BIGINT), поэтому через Telegram распознаётся
+    только КЛИЕНТ (нутрициолог работает через веб). Возвращает нормализованный
+    dict {id=client_id, role='client', name, telegram_id, email} или None.
+    """
+    try:
+        tg_id = int(telegram_id)
+    except (TypeError, ValueError):
+        return None
+    client = get_client_by_telegram_id(tg_id)
+    return _user_info_from_client(client) if client else None
+
+
+def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Резолвит пользователя по UUID для router.get_user_info (fallback после telegram).
+
+    Сначала пробуем clients.id (роль client, id = client_id для оркестратора).
+    Если не нашли — users.id (нутрициолог/observer, id = user_id). У таблицы users
+    нет имени — имя живёт в clients, поэтому для них name=None. None если не найден.
+    """
+    if not user_id:
+        return None
+
+    # 1. Клиент по clients.id
+    client = get_client_by_id(user_id)
+    if client:
+        return _user_info_from_client(client)
+
+    # 2. Пользователь по users.id (нутрициолог/observer)
+    supabase = _service_client()
+    user = _execute_single(
+        supabase.table("users").select("*").eq("id", user_id).single()
+    )
+    if not user:
+        return None
+    return {
+        "id": user.get("id"),
+        "role": user.get("role"),
+        "name": None,
+        "email": user.get("email"),
+    }
+
+
 def get_active_nutrition_plan(client_id: str) -> Optional[Dict[str, Any]]:
     supabase = _service_client()
     return _execute_single(
