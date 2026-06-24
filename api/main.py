@@ -185,6 +185,78 @@ def nutritionist_report(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+CLIENT_DOCS_BUCKET = "client-documents"
+
+
+@app.post("/documents/{document_id}/ingest")
+def ingest_client_document(
+    document_id: str,
+    user: Dict[str, Any] = Depends(require_role("client")),
+) -> Dict[str, Any]:
+    """
+    Векторизует уже загруженный документ клиента в client_documents (pgvector).
+
+    Фронт грузит файл напрямую в Storage и пишет document_metadata, затем зовёт
+    этот эндпоинт. Контент берётся из Storage по storage_url, режется на чанки,
+    эмбеддится (ada-002) и пишется под изоляцией client_id. Идемпотентно:
+    старые чанки документа удаляются перед записью новых.
+    """
+    client_id = user.get("client_id")
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client profile not found for this user",
+        )
+
+    from database import queries
+    from database.client import get_supabase_service_client
+    from utils.ingestion import extract_text, ingest_into_client_documents
+
+    doc = queries.get_document_metadata(document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Изоляция: документ должен принадлежать вызывающему клиенту.
+    if str(doc.get("client_id")) != str(client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your document")
+
+    storage_path = doc.get("storage_url")
+    if not storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Document has no storage_url"
+        )
+
+    # Скачивание из приватного бакета сервис-клиентом.
+    try:
+        sb = get_supabase_service_client()
+        file_bytes = sb.storage.from_(CLIENT_DOCS_BUCKET).download(storage_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Storage download failed: {e}"
+        )
+
+    try:
+        text = extract_text(file_bytes, doc.get("mime_type") or "", doc.get("file_name") or "")
+    except ValueError as e:
+        # Неподдерживаемый тип (например, скан-изображение без текстового слоя)
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+
+    if not text.strip():
+        return {"document_id": document_id, "chunks": 0, "note": "no_text_extracted"}
+
+    # Идемпотентность: переиндексация без дублей.
+    queries.delete_client_document_chunks(document_id)
+
+    try:
+        chunks = ingest_into_client_documents(client_id, document_id, text)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {e}"
+        )
+
+    return {"document_id": document_id, "chunks": chunks}
+
+
 @app.post("/clients", status_code=status.HTTP_201_CREATED)
 def create_client(
     body: CreateClientIn,

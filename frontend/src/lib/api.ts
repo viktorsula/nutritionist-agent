@@ -71,6 +71,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  /** Векторизовать загруженный документ клиента (chunks → pgvector). */
+  ingestDocument: (documentId: string) =>
+    request<{ document_id: string; chunks: number; note?: string }>(
+      `/documents/${encodeURIComponent(documentId)}/ingest`,
+      { method: "POST" },
+    ),
+
   /** Доступные типы отчётов {report_type: title}. */
   reportTypes: () => request<Record<string, string>>("/nutritionist/report-types"),
 

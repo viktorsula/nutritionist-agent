@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 
 const BUCKET = "client-documents";
 
@@ -62,17 +63,29 @@ export async function uploadDocuments(
     const up = await supabase.storage.from(BUCKET).upload(path, file);
     if (up.error) throw new Error(up.error.message);
 
-    const meta = await supabase.from("document_metadata").insert({
-      source: "client_upload",
-      client_id: clientId,
-      document_type: "client_document",
-      file_name: file.name,
-      mime_type: file.type || "application/octet-stream",
-      storage_url: path,
-      file_size_bytes: file.size,
-      metadata: { category, doc_date: docDate },
-    });
+    const meta = await supabase
+      .from("document_metadata")
+      .insert({
+        source: "client_upload",
+        client_id: clientId,
+        document_type: "client_document",
+        file_name: file.name,
+        mime_type: file.type || "application/octet-stream",
+        storage_url: path,
+        file_size_bytes: file.size,
+        metadata: { category, doc_date: docDate },
+      })
+      .select("id")
+      .single();
     if (meta.error) throw new Error(meta.error.message);
+
+    // Векторизация контента в client_documents (pgvector) — best-effort:
+    // загрузка уже успешна, сбой эмбеддинга не должен ронять весь процесс.
+    try {
+      await api.ingestDocument(meta.data.id as string);
+    } catch (e) {
+      console.warn("ingestDocument failed:", e);
+    }
   }
 }
 

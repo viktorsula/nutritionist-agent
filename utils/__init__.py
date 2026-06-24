@@ -8,6 +8,7 @@ Utils — вспомогательные модули для агентов
 - voice.py: Транскрипция голоса через Whisper ✅
 - web_access.py: Веб-поиск через серверный инструмент Claude (web_search) ✅
 - knowledge.py: Семантический поиск по pgvector (ada-002) ✅
+- ingestion.py: Наполнение векторной памяти (extract → chunk → embed → insert) ✅
 """
 
 from .llm import call_llm, get_model_config, list_available_providers, list_task_types
@@ -28,6 +29,12 @@ from .knowledge import (
     search_knowledge_base,
     search_client_documents,
     build_context_from_chunks,
+)
+from .ingestion import (
+    extract_text,
+    chunk_text,
+    ingest_into_knowledge_base,
+    ingest_into_client_documents,
 )
 from .vision import analyze_image, analyze_food_plate, extract_ingredient_names
 from .voice import transcribe_voice
@@ -57,6 +64,12 @@ __all__ = [
     'search_knowledge_base',
     'search_client_documents',
     'build_context_from_chunks',
+
+    # ingestion.py
+    'extract_text',
+    'chunk_text',
+    'ingest_into_knowledge_base',
+    'ingest_into_client_documents',
 
     # vision.py
     'analyze_image',

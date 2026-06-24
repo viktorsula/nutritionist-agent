@@ -283,6 +283,12 @@ def get_client_document_chunks(client_id: str) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def delete_client_document_chunks(document_id: str) -> None:
+    """Удаляет все чанки документа (для идемпотентной переиндексации)."""
+    supabase = _service_client()
+    supabase.table("client_documents").delete().eq("document_id", document_id).execute()
+
+
 def _vector_literal(embedding: List[float]) -> str:
     """
     Преобразует список float в pgvector-литерал '[0.1,0.2,...]'.
