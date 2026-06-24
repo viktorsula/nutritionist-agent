@@ -638,6 +638,41 @@ def get_conversations(
     return _extract_data(response) or []
 
 
+def count_client_dialog_messages(client_id: str) -> int:
+    """Количество реплик клиентского диалога (conversation_type='client_dialog')."""
+    supabase = _service_client()
+    response = (
+        supabase.table("conversations")
+        .select("id", count="exact")
+        .eq("client_id", client_id)
+        .eq("conversation_type", "client_dialog")
+        .execute()
+    )
+    return getattr(response, "count", 0) or 0
+
+
+def update_conversation_summary(
+    client_id: str, summary: str, message_count: int
+) -> Optional[Dict[str, Any]]:
+    """Сохраняет скользящую сводку диалога и маркер числа отражённых сообщений (миграция 009)."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    return _execute_single(
+        supabase.table("clients")
+        .update(
+            {
+                "conversation_summary": summary,
+                "summary_message_count": message_count,
+                "summary_updated_at": datetime.utcnow().isoformat(),
+            }
+        )
+        .eq("id", client_id)
+        .select("*")
+        .single()
+    )
+
+
 def get_conversation_thread(thread_id: str) -> List[Dict[str, Any]]:
     """Получить все сообщения из thread (для контекста)."""
     supabase = _service_client()

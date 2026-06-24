@@ -216,6 +216,9 @@ def load_context_node(state: ClientState) -> ClientState:
         # Заметки нутрициолога — всегда (внутренний контекст для агента)
         state['nutritionist_notes'] = client.get('nutritionist_notes')
 
+        # Скользящая сводка прошлых разговоров (долговременная память, миграция 009)
+        state['conversation_summary'] = client.get('conversation_summary') or ''
+
         # История диалога (последние 10), в хронологическом порядке,
         # с маппингом ролей БД (client/agent) → роли LLM (user/assistant)
         conversations = queries.get_conversations(client_id=client_id, limit=10)
@@ -451,6 +454,13 @@ def save_to_db_node(state: ClientState) -> ClientState:
 
     except Exception as e:
         logger.error(f"Error saving to DB: {e}")
+
+    # Обновление скользящей сводки (best-effort, раз в N сообщений; не валит ответ)
+    try:
+        from .summary import update_rolling_summary
+        update_rolling_summary(state)
+    except Exception as e:
+        logger.warning(f"Rolling summary update skipped: {e}")
 
     return state
 

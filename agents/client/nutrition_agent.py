@@ -191,6 +191,11 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
         wellness = _format_wellness(state.get('wellness_plan'))
         if wellness:
             prompt += "\n\n## План ЗОЖ клиента (назначен нутрициологом)\n" + wellness
+
+        # Долговременная память — сводка прошлых разговоров (rolling-summary)
+        summary = (state.get('conversation_summary') or '').strip()
+        if summary:
+            prompt += "\n\n## Память о клиенте (сводка прошлых разговоров)\n" + summary
         return prompt
     except Exception as e:
         logger.error(f"Error building nutrition system prompt: {e}")

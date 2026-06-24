@@ -113,9 +113,15 @@ def build_system_prompt(state: ClientState) -> str:
             language='русский'  # TODO: Определять из profile или channel
         )
 
-        # Доп. контекст по ТЗ (вес, задачи, заметки нутрициолога, план)
+        # Доп. контекст: сводка прошлых разговоров (долговременная память) + данные клиента
+        blocks: List[str] = []
+        summary = (state.get('conversation_summary') or '').strip()
+        if summary:
+            blocks.append("## Память о клиенте (сводка прошлых разговоров)\n" + summary)
         extra = build_context_block(state)
-        return prompt + ("\n\n" + extra if extra else "")
+        if extra:
+            blocks.append(extra)
+        return prompt + ("\n\n" + "\n\n".join(blocks) if blocks else "")
 
     except Exception as e:
         logger.error(f"Error building system prompt: {e}")

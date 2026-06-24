@@ -94,6 +94,9 @@ class ClientState(TypedDict, total=False):
     ]
     """
 
+    conversation_summary: str
+    """Скользящая сводка прошлых разговоров (rolling-summary, миграция 009). Долговременная память."""
+
     latest_measurement: Optional[Dict[str, Any]]
     """Последний замер тела из measurements: {measured_at, weight, neck, waist, hips}."""
 
