@@ -14,7 +14,7 @@ CRUD/Auth/Storage фронт делает напрямую в Supabase под RL
 import os
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -183,6 +183,110 @@ def nutritionist_report(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/nutritionist/knowledge")
+def knowledge_list(
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Список документов базы знаний нутрициолога."""
+    from database import queries
+
+    return {"documents": queries.list_knowledge_documents()}
+
+
+@app.post("/nutritionist/knowledge")
+async def knowledge_upload(
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Загружает труд/методичку в базу знаний (knowledge_base, pgvector).
+
+    Файл принимается напрямую (multipart): извлекаем текст, режем на чанки,
+    эмбеддим (ada-002) и пишем в knowledge_base. Оригинал в v1 не храним —
+    для RAG нужны только чанки. Доступно знаниям всех агентов через поиск.
+    """
+    from database import queries
+    from database.models import DocumentMetadata
+    from utils.ingestion import extract_text, ingest_into_knowledge_base
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    try:
+        text = extract_text(file_bytes, file.content_type or "", file.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No text extracted from document",
+        )
+
+    display = title or file.filename or "Документ"
+    rows = queries.insert_document_metadata(
+        DocumentMetadata(
+            source="knowledge_base",
+            document_type="knowledge",
+            title=display,
+            file_name=file.filename,
+            mime_type=file.content_type,
+            file_size_bytes=len(file_bytes),
+        )
+    )
+    document_id = (rows or [{}])[0].get("id")
+    if not document_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create document metadata",
+        )
+
+    try:
+        chunks = ingest_into_knowledge_base(document_id, text, source=display)
+    except Exception as e:
+        # Откатываем висячую запись метаданных, чтобы не плодить пустые документы.
+        queries.delete_document_metadata(document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {e}"
+        )
+
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user["user_id"],
+        action="add_knowledge",
+        entity_type="knowledge_base",
+        entity_id=document_id,
+        new_value={"title": display, "file_name": file.filename, "chunks": chunks},
+    )
+    return {"document_id": document_id, "title": display, "chunks": chunks}
+
+
+@app.delete("/nutritionist/knowledge/{document_id}")
+def knowledge_delete(
+    document_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, bool]:
+    """Удаляет документ базы знаний и его чанки."""
+    from database import queries
+
+    doc = queries.get_document_metadata(document_id)
+    if not doc or doc.get("source") != "knowledge_base":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge document not found")
+
+    queries.delete_knowledge_base_chunks(document_id)
+    queries.delete_document_metadata(document_id)
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user["user_id"],
+        action="delete_knowledge",
+        entity_type="knowledge_base",
+        entity_id=document_id,
+    )
+    return {"ok": True}
 
 
 CLIENT_DOCS_BUCKET = "client-documents"

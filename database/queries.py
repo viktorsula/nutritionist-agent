@@ -70,6 +70,31 @@ def get_document_metadata(document_id: str) -> Optional[Dict[str, Any]]:
     )
 
 
+def delete_document_metadata(document_id: str) -> None:
+    """Удаляет строку document_metadata (после удаления её чанков)."""
+    supabase = _service_client()
+    supabase.table("document_metadata").delete().eq("id", document_id).execute()
+
+
+def list_knowledge_documents() -> List[Dict[str, Any]]:
+    """Документы базы знаний нутрициолога (source='knowledge_base'), свежие сверху."""
+    supabase = _service_client()
+    response = (
+        supabase.table("document_metadata")
+        .select("id,title,file_name,mime_type,file_size_bytes,created_at")
+        .eq("source", "knowledge_base")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def delete_knowledge_base_chunks(document_id: str) -> None:
+    """Удаляет все чанки документа базы знаний (для переиндексации/удаления)."""
+    supabase = _service_client()
+    supabase.table("knowledge_base").delete().eq("document_id", document_id).execute()
+
+
 def insert_knowledge_base_chunk(chunk: KnowledgeBaseChunk) -> Any:
     supabase = _service_client()
     payload = {
