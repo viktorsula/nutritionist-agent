@@ -1,30 +1,36 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ЗАВТРА РОВНО ОТСЮДА (23 июня, конец сессии)
-Прод поднят на Render (бэкенд + фронт), OpenAI+Anthropic оплачены. ✅ **Белый экран фронта
-УСТРАНЁН — форма входа рендерится.** Причина была НЕ «пустой env», а неверный формат:
-`VITE_SUPABASE_URL` стоял как голый реф проекта `ggorlbhrrlqocnqvbxqr` вместо полного
-`https://ggorlbhrrlqocnqvbxqr.supabase.co` → `createClient("<ref>", …)` → `Invalid URL` →
-React не монтируется. Исправлено: полный https-URL + Manual Deploy (Clear cache).
+## ▶️ НАЧАТЬ ОТСЮДА (24 июня, конец сессии)
 
-**Осталось — интерактивный smoke-тест в браузере** (headless-проверки уже зелёные):
-1. https://nutritionist-agent-1-ljzi.onrender.com/ → форма входа (✅ рендерится).
-2. Вход нутрициологом → кабинет (3 панели).
-3. Создать клиента (оплата/режим/дата) → проверить приглашение.
-4. Чат-аналитика по клиенту (живой OpenAI+Claude) → панель «Аналитика».
-5. Отчёт по клиенту → правка → PDF/TXT.
+Сессия закрыла разрывы памяти (по «карте памяти») + анализы клиента + Telegram-webhook.
+Всё на ветке **`stage6-utils`** (7 коммитов, НЕ влита в main). Код статически зелёный
+(тесты + типы фронта), E2E — на проде. Детали — `docs/progress.md` (сессия 24 июня).
 
-**На будущее (деплой фронта):** `VITE_SUPABASE_URL` = ПОЛНЫЙ `https://<ref>.supabase.co`
-(с протоколом), не голый реф. Проверка без браузера: в JS-бандле есть строка
-`https://<ref>.supabase.co` (не только реф внутри JWT); `auth/v1/settings` с anon → 200;
-CORS бэкенда `Access-Control-Allow-Origin` = URL фронта.
+**⚠️ ПЕРЕД ДЕПЛОЕМ/E2E — применить миграции в Supabase (SQL Editor):**
+1. `docs/migrations/002_add_vector_search.sql` — RPC `match_*` (без неё RAG не ищет).
+2. `docs/migrations/009_conversation_summary.sql` — поля rolling-summary на `clients`.
+
+**⚠️ ENV бэкенда для Telegram (иначе бот просто выключен, прод не ломается):**
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL` (= `https://nutritionist-agent-gvxp.onrender.com/telegram/webhook`),
+`TELEGRAM_WEBHOOK_SECRET`.
+
+**Что проверить E2E после деплоя:**
+1. Документ клиента (веб): загрузка PDF → векторизация (`client_documents`) + анализы в `lab_results`.
+2. База знаний: «Настройки → База знаний» → загрузка труда → используется в ответах агента.
+3. Клиент: вес из диалога → график (`measurements`); «холестерин 5.2» → `lab_results`; фото бланка.
+4. Долгий диалог (>10 реплик) → сводка (`clients.conversation_summary`) подтягивается в контекст.
+5. Telegram: текст/фото/голос/PDF через webhook (после set_webhook).
+
+**Открытые задачи (не блокеры):** аудит правок настроек с фронта (№6); маппинг
+client-indicator → каноничные ключи нутрициолога (v1.1); актуализация ТЗ v1.3 → v1.4
+(React/FastAPI + web_search Claude + сегодняшняя память/анализы).
 
 URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
 `https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
 
 ---
 
-**Обновлено:** 23 июня 2026 — прод-фронт поднят (белый экран устранён), осталось smoke в браузере.
+**Обновлено:** 24 июня 2026 — память/анализы/Telegram-webhook на `stage6-utils`; ждут миграции + ENV + E2E.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)
 - **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с

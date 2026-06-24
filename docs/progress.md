@@ -1,9 +1,55 @@
 # Журнал прогресса проекта
 
 ## Статус: В разработке → ПРОД на Render (поднят, фронт рендерится)
-Последнее обновление: 23 июня 2026
-Сессия: Фаза 3 слита в main (PR #1–4) + продакшен-деплой на Render; белый экран фронта устранён
-Ветка: Фаза 3 в `main`; рабочая `stage6-utils` синхронизирована
+Последнее обновление: 24 июня 2026
+Сессия: память + анализы клиента + Telegram-webhook (по аудиту «карты памяти»)
+Ветка: рабочая `stage6-utils` (не влита в main; 7 коммитов за сессию)
+
+### Сессия 24 июня 2026 — память, анализы клиента, Telegram-webhook
+
+Сессия началась с аудита движения информации («карта памяти») — он вскрыл разрывы,
+которые и закрывали по плану (ранжированному по значимости). Все правки на `stage6-utils`.
+
+**Блок 1 — быстрые победы** (коммит `e76274e`):
+- Telegram-резолв роли восстановлен: `queries.get_user_by_telegram_id` + `get_user`
+  (router.get_user_info звал несуществующие функции → всегда user_not_found).
+- `wellness_plan` грузится в `load_context` и доходит до `nutrition_agent` (был мёртв).
+
+**Блок 2 — ingestion (keystone RAG)**: путь записи эмбеддингов раньше НИКТО не вызывал →
+`knowledge_base`/`client_documents` были пусты.
+- `utils/ingestion.py` (коммит `fed0fa2`): extract_text (PDF/текст) → chunk_text →
+  get_embedding (ada-002) → insert_*_chunk; тесты (13).
+- Документы клиента: `POST /documents/{id}/ingest` (скачивает из Storage, векторизует);
+  фронт зовёт ингест после загрузки.
+- База знаний нутрициолога (коммит `9997d87`): `POST/GET/DELETE /nutritionist/knowledge`
+  (multipart, оригинал не храним) + UI «Настройки → База знаний».
+
+**Вес → measurements** (коммит `3ed7546`): вес из диалога теперь точка временного ряда
+в `measurements` (а не событие `weight_logged`); алерт `weight_increase` сравнивает два
+последних замера (+ guard `_within_days`). Расщепление хранилища устранено, график ожил.
+
+**Приём анализов клиента** (коммит `0202e38`):
+- текст «холестерин 5.2» → diary тема `lab` → `lab_results` (source='client');
+- фото бланка → `vision.classify_image` + `analyze_lab_document` → `lab_results`;
+- PDF (веб) → `utils/labs.extract_labs_from_text` в ingest-эндпоинте (source='client_pdf').
+
+**Rolling-summary** (коммит `6d745c3`): долговременная память диалога вместо жёстких 10 реплик.
+- migration `009`: `clients.conversation_summary`/`summary_message_count`/`summary_updated_at`;
+- `agents/client/summary.py` (summary-буфер, обновление раз в 10 сообщений);
+- сводка инжектится в промпты dialog/nutrition поверх краткосрочного окна.
+
+**Блок Telegram** (коммит `eb0e5eb`):
+- T1: fix диспетчера (telegram_id вместо client.user_id) + общий `build_application()`;
+- T2: webhook в FastAPI (`api/telegram_webhook.py` + lifespan + `POST /telegram/webhook`),
+  ИНЕРТНО без `TELEGRAM_BOT_TOKEN` (прод не затронут);
+- C2: `document_agent` — PDF из Telegram → векторизация + анализы.
+
+**⏳ Осталось перед/при деплоем:**
+- применить миграции в Supabase: `002` (RPC vector search) и `009` (summary);
+- ENV бэкенда для Telegram: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`;
+- E2E-прогон (анализы/фото/PDF/голос; webhook) — на проде;
+- открытые: аудит правок настроек с фронта (№6); маппинг client-indicator → каноничные
+  ключи нутрициолога (v1.1); актуализация ТЗ под React/FastAPI (v1.3 → v1.4).
 
 ### Деплой 23 июня 2026 — белый экран фронта УСТРАНЁН ✅
 - **Реальная причина** (не «пустой env», как предполагалось 22 июня): `VITE_SUPABASE_URL` на
