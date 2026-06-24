@@ -36,7 +36,13 @@ from .ingestion import (
     ingest_into_knowledge_base,
     ingest_into_client_documents,
 )
-from .vision import analyze_image, analyze_food_plate, extract_ingredient_names
+from .vision import (
+    analyze_image,
+    analyze_food_plate,
+    extract_ingredient_names,
+    classify_image,
+    analyze_lab_document,
+)
 from .voice import transcribe_voice
 from .web_access import build_web_search_tool
 
@@ -75,6 +81,8 @@ __all__ = [
     'analyze_image',
     'analyze_food_plate',
     'extract_ingredient_names',
+    'classify_image',
+    'analyze_lab_document',
 
     # voice.py
     'transcribe_voice',

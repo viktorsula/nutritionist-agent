@@ -288,6 +288,32 @@ def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, An
     return _extract_data(response) or []
 
 
+def insert_lab_result(
+    client_id: str,
+    indicator: str,
+    value: Optional[float] = None,
+    unit: Optional[str] = None,
+    source: str = "client",
+    measured_at: Optional[str] = None,
+    document_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Добавляет числовой показатель анализа в lab_results. measured_at → сегодня по умолчанию."""
+    supabase = _service_client()
+    payload: Dict[str, Any] = {"client_id": client_id, "indicator": indicator, "source": source}
+    for key, val in (
+        ("value", value),
+        ("unit", unit),
+        ("measured_at", measured_at),
+        ("document_id", document_id),
+    ):
+        if val is not None:
+            payload[key] = val
+    rows = _extract_data(
+        supabase.table("lab_results").insert(payload).select("*").execute()
+    )
+    return (rows or [None])[0]
+
+
 def get_system_setting(key: str) -> Optional[Dict[str, Any]]:
     supabase = _service_client()
     return _execute_single(

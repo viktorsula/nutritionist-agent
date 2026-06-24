@@ -358,7 +358,28 @@ def ingest_client_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {e}"
         )
 
-    return {"document_id": document_id, "chunks": chunks}
+    # Best-effort: вытащить числовые показатели анализов в lab_results (source='client_pdf').
+    # Сбой извлечения не должен ронять успешную векторизацию.
+    labs_saved = 0
+    try:
+        from utils.labs import extract_labs_from_text
+
+        for lab in extract_labs_from_text(text):
+            queries.insert_lab_result(
+                client_id=client_id,
+                indicator=lab["indicator"],
+                value=lab["value"],
+                unit=lab.get("unit"),
+                source="client_pdf",
+                document_id=document_id,
+            )
+            labs_saved += 1
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning(f"lab extraction from document failed: {e}")
+
+    return {"document_id": document_id, "chunks": chunks, "labs": labs_saved}
 
 
 @app.post("/clients", status_code=status.HTTP_201_CREATED)

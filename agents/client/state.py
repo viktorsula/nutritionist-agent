@@ -113,6 +113,9 @@ class ClientState(TypedDict, total=False):
     Используется business_rules для проверок food_forbidden / food_incompatible.
     """
 
+    saved_labs: List[Dict[str, Any]]
+    """Записанные из диалога анализы (diary_agent, kind='lab'): [{indicator, value, unit}, ...]."""
+
     alerts: List[Dict[str, Any]]
     """
     Алерты из medical_rules.check_medical_alerts():

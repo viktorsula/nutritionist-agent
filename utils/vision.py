@@ -194,6 +194,75 @@ def analyze_food_plate(
     return parsed
 
 
+# ========================================
+# КЛАССИФИКАЦИЯ ТИПА ИЗОБРАЖЕНИЯ + АНАЛИЗЫ С ДОКУМЕНТА
+# ========================================
+
+IMAGE_KIND_PROMPT = """Определи, что на фото. Верни СТРОГО валидный JSON без markdown:
+{"kind": "food | document | other"}
+- food — еда, блюдо, тарелка, продукты.
+- document — документ: бланк/результаты анализов, выписка, таблица показателей,
+  скриншот с числовыми результатами анализов.
+- other — всё прочее.
+Только JSON."""
+
+
+def classify_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """
+    Грубо классифицирует изображение: 'food' | 'document' | 'other'.
+
+    При ошибке/неоднозначности → 'food' (исторический путь обработки фото).
+    """
+    try:
+        raw = analyze_image(image_bytes, IMAGE_KIND_PROMPT, mime_type=mime_type)
+        kind = (_safe_parse_json(raw) or {}).get("kind")
+        return kind if kind in ("food", "document", "other") else "food"
+    except Exception as e:
+        logger.warning(f"classify_image failed: {e}")
+        return "food"
+
+
+LAB_DOCUMENT_PROMPT = """Ты извлекаешь числовые показатели анализов с фото документа (бланк/выписка).
+
+Верни СТРОГО валидный JSON без markdown:
+{
+  "labs": [{"indicator": "название в нижнем регистре", "value": 0, "unit": "единицы или ''"}],
+  "measured_at": "YYYY-MM-DD или ''",
+  "confidence": "high|medium|low",
+  "notes": "короткий комментарий/сомнения"
+}
+Извлекай только явные числовые показатели (например: холестерин, глюкоза, гемоглобин).
+Если документ нечитаем или это не анализы — верни labs: []."""
+
+
+def analyze_lab_document(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:
+    """
+    Извлекает числовые показатели анализов с фото документа.
+
+    Returns:
+        {"labs": [{"indicator","value","unit"}], "measured_at": str,
+         "confidence": str, "notes": str, "raw": str}
+        При ошибке парсинга — labs=[], причина в notes.
+    """
+    raw = analyze_image(image_bytes, LAB_DOCUMENT_PROMPT, mime_type=mime_type)
+    parsed = _safe_parse_json(raw)
+    if parsed is None:
+        logger.warning("analyze_lab_document: не удалось распарсить JSON из ответа модели")
+        return {
+            "labs": [],
+            "measured_at": "",
+            "confidence": "low",
+            "notes": "Не удалось распознать документ автоматически.",
+            "raw": raw,
+        }
+    parsed.setdefault("labs", [])
+    parsed.setdefault("measured_at", "")
+    parsed.setdefault("confidence", "medium")
+    parsed.setdefault("notes", "")
+    parsed["raw"] = raw
+    return parsed
+
+
 def extract_ingredient_names(food_analysis: Dict[str, Any]) -> List[str]:
     """
     Достаёт плоский список названий ингредиентов из результата analyze_food_plate().
