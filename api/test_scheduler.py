@@ -2,12 +2,15 @@
 Тесты планировщика уведомлений (api/scheduler.py) — чистая логика без сети.
 """
 
+import os
 import unittest
 from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 import pytz
 
 from api import scheduler as S
+from utils import notify
 
 
 class TestIsDue(unittest.TestCase):
@@ -50,6 +53,74 @@ class TestMessageFor(unittest.TestCase):
     def test_unknown_type_defaults_to_reminder(self):
         self.assertEqual(S._message_for("whatever"), S.NOTIFICATION_TEMPLATES["reminder"])
         self.assertEqual(S._message_for(None), S.NOTIFICATION_TEMPLATES["reminder"])
+
+
+class TestFormatAlert(unittest.TestCase):
+    def test_format_includes_client_severity_detail(self):
+        ev = {
+            "event_type": "bad_wellbeing",
+            "severity": "medium",
+            "payload_json": {"reason": "болит голова"},
+            "clients": {"name": "Марина"},
+        }
+        text = notify.format_alert(ev)
+        self.assertIn("Плохое самочувствие", text)
+        self.assertIn("Марина", text)
+        self.assertIn("болит голова", text)
+
+    def test_format_unknown_type_and_no_detail(self):
+        ev = {"event_type": "weird", "severity": "high", "payload_json": {}, "clients": {}}
+        text = notify.format_alert(ev)
+        self.assertIn("weird", text)
+        self.assertIn("high", text)
+
+    def test_chat_id_from_env(self):
+        with patch.dict(os.environ, {"NUTRITIONIST_TELEGRAM_ID": "  555  "}):
+            self.assertEqual(notify.nutritionist_chat_id(), "555")
+        with patch.dict(os.environ, {"NUTRITIONIST_TELEGRAM_ID": ""}, clear=False):
+            self.assertIsNone(notify.nutritionist_chat_id())
+
+
+class TestRunNutritionistAlerts(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        S._alert_guard.clear()
+
+    async def _run(self, events, *, configured=True, chat_id="555"):
+        bot = AsyncMock()
+        env = {"NUTRITIONIST_TELEGRAM_ID": chat_id} if chat_id is not None else {}
+        with patch("api.telegram_webhook.is_configured", return_value=configured), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_recent_alert_events", return_value=events), \
+             patch.dict(os.environ, env, clear=False):
+            if chat_id is None:
+                os.environ.pop("NUTRITIONIST_TELEGRAM_ID", None)
+            await S.run_nutritionist_alerts()
+        return bot
+
+    async def test_sends_each_event_once(self):
+        events = [
+            {"id": "e1", "event_type": "bad_wellbeing", "severity": "medium",
+             "payload_json": {"reason": "тошнит"}, "clients": {"name": "Иван"}},
+            {"id": "e2", "event_type": "weight_increase", "severity": "high",
+             "payload_json": {}, "clients": {"name": "Ольга"}},
+        ]
+        bot = await self._run(events)
+        self.assertEqual(bot.send_message.call_count, 2)
+        # повторный проход тех же событий — дедуп, ничего не шлём
+        bot2 = await self._run(events)
+        self.assertEqual(bot2.send_message.call_count, 0)
+
+    async def test_skips_when_no_chat_id(self):
+        events = [{"id": "e1", "event_type": "bad_wellbeing", "severity": "medium",
+                   "payload_json": {}, "clients": {}}]
+        bot = await self._run(events, chat_id=None)
+        bot.send_message.assert_not_called()
+
+    async def test_skips_when_bot_not_configured(self):
+        events = [{"id": "e1", "event_type": "bad_wellbeing", "severity": "medium",
+                   "payload_json": {}, "clients": {}}]
+        bot = await self._run(events, configured=False)
+        bot.send_message.assert_not_called()
 
 
 if __name__ == "__main__":

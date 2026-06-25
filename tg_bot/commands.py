@@ -7,7 +7,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database.queries import get_client_by_telegram_id
+from database.queries import get_client_by_telegram_id, get_user_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     first_name = update.effective_user.first_name or ""
 
     logger.info(f"Команда /start от telegram_id={telegram_id}, username={username}")
+
+    # Нутрициолог (по NUTRITIONIST_TELEGRAM_ID) — отдельное приветствие
+    user = get_user_by_telegram_id(telegram_id)
+    if user and user.get("role") == "nutritionist":
+        message = (
+            "👋 Здравствуйте! Это ваш агент-ассистент.\n\n"
+            "В этом чате можно работать так же, как в кабинете:\n"
+            "• задать аналитический вопрос по клиенту или базе\n"
+            "• дать команду (задача, план, статус — с подтверждением)\n\n"
+            "Сюда же я буду присылать важные алерты по клиентам.\n"
+            "Используйте /help для списка команд."
+        )
+        await update.message.reply_text(message, parse_mode="Markdown")
+        return
 
     # Проверяем есть ли клиент в БД
     client = get_client_by_telegram_id(telegram_id)

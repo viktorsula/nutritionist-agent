@@ -26,8 +26,11 @@ logger = logging.getLogger(__name__)
 
 _scheduler = None
 _sent_guard: set = set()  # ключи "client_id:type:YYYY-MM-DD HH:MM" — анти-дубль
+_alert_guard: set = set()  # id уже отправленных нутрициологу событий — анти-дубль
 
 CHECK_INTERVAL_SECONDS = 60
+# Окно выборки свежих алертов (минут). Чуть больше интервала прохода — на случай джиттера.
+ALERT_LOOKBACK_MINUTES = 5
 
 NOTIFICATION_TEMPLATES = {
     "morning": "Доброе утро! ☀️ Как самочувствие? Что планируете на завтрак?",
@@ -120,6 +123,56 @@ async def run_due_notifications() -> None:
             logger.warning(f"scheduler: отправка не удалась client={s.get('client_id')}: {e}")
 
 
+async def run_nutritionist_alerts() -> None:
+    """
+    Один проход: пушит свежие критичные события (алерты) в Telegram нутрициологу.
+
+    Источник — client_events (high/critical + bad_wellbeing). Дедуп по id события.
+    Тихо пропускается, если бот не настроен или не задан NUTRITIONIST_TELEGRAM_ID
+    (события всё равно остаются в веб-панели «Алерты» — это дублирующий канал).
+    """
+    from api.telegram_webhook import is_configured, get_bot
+    from utils.notify import nutritionist_chat_id, format_alert
+
+    if not is_configured():
+        return
+
+    chat_id = nutritionist_chat_id()
+    if not chat_id:
+        return  # некому слать — нутрициолог не привязал Telegram
+
+    bot = get_bot()
+    if bot is None:
+        return
+
+    from database import queries
+
+    try:
+        events = queries.get_recent_alert_events(ALERT_LOOKBACK_MINUTES)
+    except Exception as e:
+        logger.warning(f"scheduler: не удалось получить алерты: {e}")
+        return
+
+    for ev in events or []:
+        ev_id = ev.get("id")
+        if not ev_id or ev_id in _alert_guard:
+            continue
+        try:
+            await bot.send_message(chat_id=chat_id, text=format_alert(ev))
+            _alert_guard.add(ev_id)
+            if len(_alert_guard) > 5000:  # не растём бесконечно
+                _alert_guard.clear()
+            logger.info(f"scheduler: алерт нутрициологу отправлен event={ev_id}")
+        except Exception as e:
+            logger.warning(f"scheduler: отправка алерта не удалась event={ev_id}: {e}")
+
+
+async def run_scheduler_pass() -> None:
+    """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
+    await run_due_notifications()
+    await run_nutritionist_alerts()
+
+
 def start_scheduler() -> None:
     """Запускает AsyncIOScheduler в текущем event loop (вызывать из FastAPI lifespan)."""
     global _scheduler
@@ -137,7 +190,7 @@ def start_scheduler() -> None:
     try:
         _scheduler = AsyncIOScheduler(timezone="UTC")
         _scheduler.add_job(
-            run_due_notifications,
+            run_scheduler_pass,
             "interval",
             seconds=CHECK_INTERVAL_SECONDS,
             id="due_notifications",
