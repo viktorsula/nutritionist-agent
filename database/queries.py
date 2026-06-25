@@ -586,6 +586,24 @@ def update_system_setting(key: str, value: Any, updated_by: Optional[str] = None
     )
 
 
+def upsert_system_setting(key: str, value: Any, updated_by: Optional[str] = None) -> Any:
+    """Создать/обновить настройку (upsert по key) — для записи с фронта через бэкенд."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    row = {
+        "key": key,
+        "value": value,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    if updated_by:
+        row["updated_by"] = updated_by
+
+    return _extract_data(
+        supabase.table("system_settings").upsert(row, on_conflict="key").select("*").execute()
+    )
+
+
 # =============================================
 # ФУНКЦИИ ДЛЯ AGENTS
 # =============================================

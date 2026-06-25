@@ -73,6 +73,11 @@ class SavePromptIn(BaseModel):
     description: str | None = None
 
 
+class SaveSettingIn(BaseModel):
+    key: str = Field(..., min_length=1)
+    value: Any = None  # произвольный JSON (список/объект/число/строка)
+
+
 class GenerateReportIn(BaseModel):
     client_id: str = Field(..., min_length=1)
     report_type: str = Field("recommendations")
@@ -163,6 +168,36 @@ def nutritionist_query(
         message_type="text",
         metadata={},
     )
+
+
+@app.post("/nutritionist/setting")
+def save_setting(
+    body: SaveSettingIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, bool]:
+    """
+    Сохраняет настройку system_settings через бэкенд (upsert) + пишет audit_log.
+
+    Раньше фронт писал настройки напрямую в Supabase (мимо аудита, разрыв №6).
+    Теперь запись идёт здесь: фиксируем кто/что менял (old/new) под ролью нутрициолога.
+    """
+    from database import queries
+
+    try:
+        old_value = queries.get_setting(body.key)
+        queries.upsert_system_setting(body.key, body.value, updated_by=user["user_id"])
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="update_setting",
+            entity_type="settings",
+            entity_id=body.key,
+            old_value={"value": old_value},
+            new_value={"value": body.value},
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/nutritionist/prompts")

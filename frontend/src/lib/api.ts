@@ -80,6 +80,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  /** Сохранить настройку system_settings (через бэкенд: upsert + audit_log). */
+  saveSetting: (key: string, value: unknown) =>
+    request<{ ok: boolean }>("/nutritionist/setting", {
+      method: "POST",
+      body: JSON.stringify({ key, value }),
+    }),
+
   /** Список промптов {name: {source, ...}}. */
   promptsList: () => request<Record<string, { source: string }>>("/nutritionist/prompts"),
 
