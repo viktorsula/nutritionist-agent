@@ -2,47 +2,50 @@
 
 ## ▶️ НАЧАТЬ ОТСЮДА (25 июня)
 
-Сессия 24 июня закрыла разрывы памяти + анализы клиента + Telegram-webhook + APScheduler.
-Сессия 25 июня: **запушила всё на `origin/stage6-utils`** (вчера 9 коммитов висели только
-локально!), закоммитила фичу **аудита настроек №6**, добавила ТЗ v1.4 в git, синхронизировала доки,
-**влила `origin/main`** (шаблоны писем + заметка о сбросе пароля) — ветка готова к merge в main.
-Ветка **`stage6-utils`** — на remote, НЕ влита в main. **Бэкенд-набор зелёный: 93 passed, 0 failed**
-(починены 5 стале-тестов: `/clients` 422 → +paid; analytics-директива; failover-трейсинг).
+Сессия 25 июня: спасла оборванную работу 24 июня (9 коммитов висели локально → запушены),
+закрыла **аудит настроек №6**, добавила **ТЗ v1.4** в git, починила 5 стале-тестов,
+**влила `stage6-utils → main` (PR #14)**. Затем реализован **двусторонний Telegram-канал
+нутрициолога** (диалог с агентом как в вебе + пуш алертов) — **PR #15 открыт, ждёт merge**.
+**Бэкенд-набор зелёный: 100 passed, 0 failed.**
 
 ✅ **СБРОС ПАРОЛЯ РАБОТАЕТ (23 июня, PR #5–#9)** — по КОДУ из письма (не по ссылке: её прокликивает
 сканер Gmail). Нужны в Supabase: Custom SMTP (Resend) + шаблон Reset Password с `{{ .Token }}`.
 E2E проверен на проде. Шаблоны — `docs/email_templates/`. Детали — `docs/DEPLOY.md` (4b/4c), [[project_deploy_state]].
 
 **✅ Миграции 001–009 ПРИМЕНЕНЫ** (002 RPC `match_*` и 009 rolling-summary проверены
-интроспекцией БД 25 июня). Блокер миграций снят.
+интроспекцией БД 25 июня).
 
-**⚠️ ОСТАЛОСЬ перед merge в main — ENV бэкенда для Telegram** (иначе бот просто выключен,
-прод не ломается):
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL` (= `https://nutritionist-agent-gvxp.onrender.com/telegram/webhook`),
-`TELEGRAM_WEBHOOK_SECRET`. + E2E-прогон + merge `stage6-utils → main`.
+**▶️ PR #15 ОТКРЫТ** (`feat/nutritionist-telegram → main`,
+https://github.com/viktorsula/nutritionist-agent/pull/15): двусторонний Telegram-канал
+нутрициолога. Ветка от `main`, 1 коммит, 100 passed. **Дальше: смержить PR #15 → редеплой.**
 
-**▶️ PR #14 ОТКРЫТ** (`stage6-utils → main`, https://github.com/viktorsula/nutritionist-agent/pull/14):
-main — предок, слияние чистое, 93 passed. После merge Render задеплоит telegram-код — тогда
-прописать ENV Telegram (см. ниже) и прогнать E2E. Ветка `docs-email-templates` уже в main — можно удалить.
+**⚙️ ENV Telegram (Render, бэкенд `nutritionist-agent-gvxp`):**
+Прописаны: `TELEGRAM_BOT_TOKEN`, `NUTRITIONIST_TELEGRAM_ID`, `TELEGRAM_WEBHOOK_URL`.
+Осталось вставить: **`TELEGRAM_WEBHOOK_SECRET`** (сгенерён, лежит в scratchpad).
+`NUTRITIONIST_TELEGRAM_ID` теперь РАБОТАЕТ — двусторонний канал нутрициолога + пуш алертов
+(см. [[project_nutritionist_telegram_channel]]). Вебхук ставится автоматически при старте.
 
 **Что проверить E2E после деплоя:**
 1. Документ клиента (веб): загрузка PDF → векторизация (`client_documents`) + анализы в `lab_results`.
 2. База знаний: «Настройки → База знаний» → загрузка труда → используется в ответах агента.
 3. Клиент: вес из диалога → график (`measurements`); «холестерин 5.2» → `lab_results`; фото бланка.
 4. Долгий диалог (>10 реплик) → сводка (`clients.conversation_summary`) подтягивается в контекст.
-5. Telegram: текст/фото/голос/PDF через webhook (после set_webhook).
+5. Telegram-КЛИЕНТ: текст/фото/голос/PDF (нужен `clients.telegram_id` = ID из `/start`).
+6. Telegram-НУТРИЦИОЛОГ: `/start` → приветствие; аналитический вопрос/команда → ответ как в вебе;
+   критичный алерт по клиенту (high/critical/bad_wellbeing) приходит в личку.
 
-**Открытые задачи (не блокеры):** ~~аудит правок настроек с фронта (№6)~~ ✅ закрыто;
-~~актуализация ТЗ v1.3 → v1.4~~ ✅ в git; ~~стале-тесты (`/clients` 422 и др.)~~ ✅ починены
-(93 passed); маппинг client-indicator → каноничные ключи нутрициолога (v1.1).
+**Открытые задачи (не блокеры):** ~~№6 аудит настроек~~ ✅; ~~ТЗ v1.3 → v1.4~~ ✅; ~~стале-тесты~~ ✅;
+маппинг client-indicator → каноничные ключи нутрициолога (v1.1). Ветки `stage6-utils` и
+`docs-email-templates` уже в main — можно удалить.
 
 URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
 `https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
 
 ---
 
-**Обновлено:** 25 июня 2026 — `stage6-utils` запушена; аудит настроек №6 + ТЗ v1.4 в git;
-миграции 001–009 применены. Осталось: ENV Telegram + E2E + merge в main.
+**Обновлено:** 25 июня 2026 (вечер) — PR #14 влит в main; PR #15 (Telegram-канал нутрициолога)
+открыт; 100 passed; ENV Telegram частично прописаны (осталось `TELEGRAM_WEBHOOK_SECRET`).
+Осталось: merge PR #15 + E2E Telegram.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)
 - **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с
