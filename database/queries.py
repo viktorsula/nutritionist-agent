@@ -70,6 +70,31 @@ def get_document_metadata(document_id: str) -> Optional[Dict[str, Any]]:
     )
 
 
+def delete_document_metadata(document_id: str) -> None:
+    """Удаляет строку document_metadata (после удаления её чанков)."""
+    supabase = _service_client()
+    supabase.table("document_metadata").delete().eq("id", document_id).execute()
+
+
+def list_knowledge_documents() -> List[Dict[str, Any]]:
+    """Документы базы знаний нутрициолога (source='knowledge_base'), свежие сверху."""
+    supabase = _service_client()
+    response = (
+        supabase.table("document_metadata")
+        .select("id,title,file_name,mime_type,file_size_bytes,created_at")
+        .eq("source", "knowledge_base")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def delete_knowledge_base_chunks(document_id: str) -> None:
+    """Удаляет все чанки документа базы знаний (для переиндексации/удаления)."""
+    supabase = _service_client()
+    supabase.table("knowledge_base").delete().eq("document_id", document_id).execute()
+
+
 def insert_knowledge_base_chunk(chunk: KnowledgeBaseChunk) -> Any:
     supabase = _service_client()
     payload = {
@@ -112,6 +137,64 @@ def get_client_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
     )
 
 
+def _user_info_from_client(client: Dict[str, Any]) -> Dict[str, Any]:
+    """Нормализует строку clients к контракту router.get_user_info (роль client)."""
+    return {
+        "id": client.get("id"),
+        "role": "client",
+        "name": client.get("name"),
+        "telegram_id": client.get("telegram_id"),
+        "email": client.get("email"),
+    }
+
+
+def get_user_by_telegram_id(telegram_id: Any) -> Optional[Dict[str, Any]]:
+    """
+    Резолвит пользователя по Telegram ID для router.get_user_info.
+
+    telegram_id хранится в clients (BIGINT), поэтому через Telegram распознаётся
+    только КЛИЕНТ (нутрициолог работает через веб). Возвращает нормализованный
+    dict {id=client_id, role='client', name, telegram_id, email} или None.
+    """
+    try:
+        tg_id = int(telegram_id)
+    except (TypeError, ValueError):
+        return None
+    client = get_client_by_telegram_id(tg_id)
+    return _user_info_from_client(client) if client else None
+
+
+def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Резолвит пользователя по UUID для router.get_user_info (fallback после telegram).
+
+    Сначала пробуем clients.id (роль client, id = client_id для оркестратора).
+    Если не нашли — users.id (нутрициолог/observer, id = user_id). У таблицы users
+    нет имени — имя живёт в clients, поэтому для них name=None. None если не найден.
+    """
+    if not user_id:
+        return None
+
+    # 1. Клиент по clients.id
+    client = get_client_by_id(user_id)
+    if client:
+        return _user_info_from_client(client)
+
+    # 2. Пользователь по users.id (нутрициолог/observer)
+    supabase = _service_client()
+    user = _execute_single(
+        supabase.table("users").select("*").eq("id", user_id).single()
+    )
+    if not user:
+        return None
+    return {
+        "id": user.get("id"),
+        "role": user.get("role"),
+        "name": None,
+        "email": user.get("email"),
+    }
+
+
 def get_active_nutrition_plan(client_id: str) -> Optional[Dict[str, Any]]:
     supabase = _service_client()
     return _execute_single(
@@ -146,6 +229,48 @@ def get_latest_measurement(client_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
+def get_recent_measurements(client_id: str, limit: int = 2) -> List[Dict[str, Any]]:
+    """Последние замеры клиента (свежие сверху, по времени записи) — для динамики/алерта веса."""
+    supabase = _service_client()
+    response = (
+        supabase.table("measurements")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def insert_measurement(
+    client_id: str,
+    weight: Optional[float] = None,
+    measured_at: Optional[str] = None,
+    neck: Optional[float] = None,
+    waist: Optional[float] = None,
+    hips: Optional[float] = None,
+    notes: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Добавляет замер тела клиента (вес/объёмы) в measurements. measured_at → сегодня по умолчанию."""
+    supabase = _service_client()
+    payload: Dict[str, Any] = {"client_id": client_id}
+    for key, value in (
+        ("weight", weight),
+        ("measured_at", measured_at),
+        ("neck", neck),
+        ("waist", waist),
+        ("hips", hips),
+        ("notes", notes),
+    ):
+        if value is not None:
+            payload[key] = value
+    rows = _extract_data(
+        supabase.table("measurements").insert(payload).select("*").execute()
+    )
+    return (rows or [None])[0]
+
+
 def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Недавние числовые анализы клиента из lab_results (миграция 003),
@@ -161,6 +286,32 @@ def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, An
         .execute()
     )
     return _extract_data(response) or []
+
+
+def insert_lab_result(
+    client_id: str,
+    indicator: str,
+    value: Optional[float] = None,
+    unit: Optional[str] = None,
+    source: str = "client",
+    measured_at: Optional[str] = None,
+    document_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Добавляет числовой показатель анализа в lab_results. measured_at → сегодня по умолчанию."""
+    supabase = _service_client()
+    payload: Dict[str, Any] = {"client_id": client_id, "indicator": indicator, "source": source}
+    for key, val in (
+        ("value", value),
+        ("unit", unit),
+        ("measured_at", measured_at),
+        ("document_id", document_id),
+    ):
+        if val is not None:
+            payload[key] = val
+    rows = _extract_data(
+        supabase.table("lab_results").insert(payload).select("*").execute()
+    )
+    return (rows or [None])[0]
 
 
 def get_system_setting(key: str) -> Optional[Dict[str, Any]]:
@@ -223,6 +374,12 @@ def get_client_document_chunks(client_id: str) -> List[Dict[str, Any]]:
         .execute()
     )
     return _extract_data(response) or []
+
+
+def delete_client_document_chunks(document_id: str) -> None:
+    """Удаляет все чанки документа (для идемпотентной переиндексации)."""
+    supabase = _service_client()
+    supabase.table("client_documents").delete().eq("document_id", document_id).execute()
 
 
 def _vector_literal(embedding: List[float]) -> str:
@@ -429,6 +586,24 @@ def update_system_setting(key: str, value: Any, updated_by: Optional[str] = None
     )
 
 
+def upsert_system_setting(key: str, value: Any, updated_by: Optional[str] = None) -> Any:
+    """Создать/обновить настройку (upsert по key) — для записи с фронта через бэкенд."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    row = {
+        "key": key,
+        "value": value,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    if updated_by:
+        row["updated_by"] = updated_by
+
+    return _extract_data(
+        supabase.table("system_settings").upsert(row, on_conflict="key").select("*").execute()
+    )
+
+
 # =============================================
 # ФУНКЦИИ ДЛЯ AGENTS
 # =============================================
@@ -479,6 +654,41 @@ def get_conversations(
 
     response = query.execute()
     return _extract_data(response) or []
+
+
+def count_client_dialog_messages(client_id: str) -> int:
+    """Количество реплик клиентского диалога (conversation_type='client_dialog')."""
+    supabase = _service_client()
+    response = (
+        supabase.table("conversations")
+        .select("id", count="exact")
+        .eq("client_id", client_id)
+        .eq("conversation_type", "client_dialog")
+        .execute()
+    )
+    return getattr(response, "count", 0) or 0
+
+
+def update_conversation_summary(
+    client_id: str, summary: str, message_count: int
+) -> Optional[Dict[str, Any]]:
+    """Сохраняет скользящую сводку диалога и маркер числа отражённых сообщений (миграция 009)."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    return _execute_single(
+        supabase.table("clients")
+        .update(
+            {
+                "conversation_summary": summary,
+                "summary_message_count": message_count,
+                "summary_updated_at": datetime.utcnow().isoformat(),
+            }
+        )
+        .eq("id", client_id)
+        .select("*")
+        .single()
+    )
 
 
 def get_conversation_thread(thread_id: str) -> List[Dict[str, Any]]:

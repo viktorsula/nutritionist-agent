@@ -1,35 +1,48 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ЗАВТРА РОВНО ОТСЮДА (23 июня, конец сессии)
-Прод поднят на Render (бэкенд + фронт), OpenAI+Anthropic оплачены. ✅ **Белый экран фронта
-УСТРАНЁН — форма входа рендерится.** Причина была НЕ «пустой env», а неверный формат:
-`VITE_SUPABASE_URL` стоял как голый реф проекта `ggorlbhrrlqocnqvbxqr` вместо полного
-`https://ggorlbhrrlqocnqvbxqr.supabase.co` → `createClient("<ref>", …)` → `Invalid URL` →
-React не монтируется. Исправлено: полный https-URL + Manual Deploy (Clear cache).
+## ▶️ НАЧАТЬ ОТСЮДА (25 июня)
 
-✅ **СБРОС ПАРОЛЯ РАБОТАЕТ (23 июня, PR #5–#9).** По КОДУ из письма (не по ссылке — её
-прокликивает сканер Gmail). Требует в Supabase: Custom SMTP (Resend) + шаблон Reset Password
-с `{{ .Token }}`. Полный цикл проверен E2E реальным браузером на проде. Детали — `docs/DEPLOY.md`
-(4b/4c) и [[project_deploy_state]].
+Сессия 24 июня закрыла разрывы памяти + анализы клиента + Telegram-webhook + APScheduler.
+Сессия 25 июня: **запушила всё на `origin/stage6-utils`** (вчера 9 коммитов висели только
+локально!), закоммитила фичу **аудита настроек №6**, добавила ТЗ v1.4 в git, синхронизировала доки,
+**влила `origin/main`** (шаблоны писем + заметка о сбросе пароля) — ветка готова к merge в main.
+Ветка **`stage6-utils`** — на remote, НЕ влита в main. **Бэкенд-набор зелёный: 93 passed, 0 failed**
+(починены 5 стале-тестов: `/clients` 422 → +paid; analytics-директива; failover-трейсинг).
 
-**Осталось — интерактивный smoke-тест в браузере** (headless-проверки уже зелёные):
-1. https://nutritionist-agent-1-ljzi.onrender.com/ → форма входа (✅ рендерится).
-2. Вход нутрициологом → кабинет (3 панели).
-3. Создать клиента (оплата/режим/дата) → проверить приглашение.
-4. Чат-аналитика по клиенту (живой OpenAI+Claude) → панель «Аналитика».
-5. Отчёт по клиенту → правка → PDF/TXT.
+✅ **СБРОС ПАРОЛЯ РАБОТАЕТ (23 июня, PR #5–#9)** — по КОДУ из письма (не по ссылке: её прокликивает
+сканер Gmail). Нужны в Supabase: Custom SMTP (Resend) + шаблон Reset Password с `{{ .Token }}`.
+E2E проверен на проде. Шаблоны — `docs/email_templates/`. Детали — `docs/DEPLOY.md` (4b/4c), [[project_deploy_state]].
 
-**На будущее (деплой фронта):** `VITE_SUPABASE_URL` = ПОЛНЫЙ `https://<ref>.supabase.co`
-(с протоколом), не голый реф. Проверка без браузера: в JS-бандле есть строка
-`https://<ref>.supabase.co` (не только реф внутри JWT); `auth/v1/settings` с anon → 200;
-CORS бэкенда `Access-Control-Allow-Origin` = URL фронта.
+**✅ Миграции 001–009 ПРИМЕНЕНЫ** (002 RPC `match_*` и 009 rolling-summary проверены
+интроспекцией БД 25 июня). Блокер миграций снят.
+
+**⚠️ ОСТАЛОСЬ перед merge в main — ENV бэкенда для Telegram** (иначе бот просто выключен,
+прод не ломается):
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL` (= `https://nutritionist-agent-gvxp.onrender.com/telegram/webhook`),
+`TELEGRAM_WEBHOOK_SECRET`. + E2E-прогон + merge `stage6-utils → main`.
+
+**▶️ PR #14 ОТКРЫТ** (`stage6-utils → main`, https://github.com/viktorsula/nutritionist-agent/pull/14):
+main — предок, слияние чистое, 93 passed. После merge Render задеплоит telegram-код — тогда
+прописать ENV Telegram (см. ниже) и прогнать E2E. Ветка `docs-email-templates` уже в main — можно удалить.
+
+**Что проверить E2E после деплоя:**
+1. Документ клиента (веб): загрузка PDF → векторизация (`client_documents`) + анализы в `lab_results`.
+2. База знаний: «Настройки → База знаний» → загрузка труда → используется в ответах агента.
+3. Клиент: вес из диалога → график (`measurements`); «холестерин 5.2» → `lab_results`; фото бланка.
+4. Долгий диалог (>10 реплик) → сводка (`clients.conversation_summary`) подтягивается в контекст.
+5. Telegram: текст/фото/голос/PDF через webhook (после set_webhook).
+
+**Открытые задачи (не блокеры):** ~~аудит правок настроек с фронта (№6)~~ ✅ закрыто;
+~~актуализация ТЗ v1.3 → v1.4~~ ✅ в git; ~~стале-тесты (`/clients` 422 и др.)~~ ✅ починены
+(93 passed); маппинг client-indicator → каноничные ключи нутрициолога (v1.1).
 
 URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
 `https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
 
 ---
 
-**Обновлено:** 23 июня 2026 — прод-фронт поднят (белый экран устранён), осталось smoke в браузере.
+**Обновлено:** 25 июня 2026 — `stage6-utils` запушена; аудит настроек №6 + ТЗ v1.4 в git;
+миграции 001–009 применены. Осталось: ENV Telegram + E2E + merge в main.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)
 - **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с

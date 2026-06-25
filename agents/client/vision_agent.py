@@ -26,7 +26,14 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from utils.llm import call_llm
-from utils.vision import analyze_food_plate, extract_ingredient_names
+import re
+
+from utils.vision import (
+    analyze_food_plate,
+    extract_ingredient_names,
+    classify_image,
+    analyze_lab_document,
+)
 from prompts import load_prompt
 from .state import ClientState
 from .food_analysis import analyze_against_plan, determine_food_routing, highest_severity
@@ -57,6 +64,17 @@ def vision_node(state: ClientState) -> ClientState:
             "или просто опиши словами, что и как приготовлено."
         )
         return state
+
+    # 1b. Тип изображения: документ-анализы обрабатываем отдельной веткой,
+    # еда/прочее — пищевым путём (исторически).
+    try:
+        kind = classify_image(image_bytes, mime_type=mime_type)
+    except Exception as e:
+        logger.warning(f"Vision classify failed, fallback to food: {e}")
+        kind = 'food'
+
+    if kind == 'document':
+        return _handle_lab_document(state, image_bytes, mime_type)
 
     # 2. Распознавание состава
     try:
@@ -225,6 +243,84 @@ def _fallback_ack(food_analysis: Dict[str, Any]) -> str:
         f"{ingredients}\n"
         "Если что-то распозналось неточно — напиши, поправлю."
     )
+
+
+# ==========================================
+# ВЕТКА: ДОКУМЕНТ-АНАЛИЗЫ (фото бланка → lab_results)
+# ==========================================
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str) -> ClientState:
+    """Фото распознано как документ-анализы: извлекаем показатели в lab_results."""
+    from database import queries
+
+    state['agent_used'] = 'vision_agent_labs'
+
+    try:
+        result = analyze_lab_document(image_bytes, mime_type=mime_type)
+    except Exception as e:
+        logger.error(f"Vision lab-document recognition error: {e}", exc_info=True)
+        state['agent_response'] = (
+            "Не получилось разобрать документ 🙈 Пришли фото почётче при хорошем "
+            "освещении — или просто напиши показатели текстом (например, «холестерин 5.2»)."
+        )
+        state['agent_used'] = 'vision_agent_error'
+        state['error'] = str(e)
+        return state
+
+    labs = result.get('labs') or []
+    measured_at = result.get('measured_at') if _DATE_RE.match(str(result.get('measured_at') or '')) else None
+
+    saved: List[Dict[str, Any]] = []
+    for item in labs:
+        if not isinstance(item, dict):
+            continue
+        indicator = str(item.get('indicator') or '').strip().lower()
+        value = _to_float(item.get('value'))
+        if not indicator or value is None:
+            continue
+        unit = (str(item.get('unit')).strip() or None) if item.get('unit') else None
+        try:
+            queries.insert_lab_result(
+                client_id=state['client_id'],
+                indicator=indicator,
+                value=value,
+                unit=unit,
+                source='client',
+                measured_at=measured_at,
+            )
+            saved.append({"indicator": indicator, "value": value, "unit": unit})
+        except Exception as e:
+            logger.error(f"Vision failed to insert lab result '{indicator}': {e}")
+
+    if not saved:
+        state['agent_response'] = (
+            "Похоже, на фото документ, но числовые показатели разобрать не удалось 🙈 "
+            "Пришли фото почётче — или напиши показатели текстом."
+        )
+        return state
+
+    state['saved_labs'] = saved
+    recorded = ", ".join(
+        f"{l['indicator']} {l['value']}{(' ' + l['unit']) if l.get('unit') else ''}" for l in saved
+    )
+    state['agent_response'] = (
+        f"Записал результаты анализов в твою карту ✅\n{recorded}\n"
+        "Нутрициолог их увидит. Если что-то распозналось неточно — поправь текстом."
+    )
+    return state
+
+
+def _to_float(value: Any) -> Optional[float]:
+    """Приводит значение к float (поддержка '5,2'); иначе None."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(',', '.').strip())
+    except (ValueError, TypeError):
+        return None
 
 
 # ==========================================

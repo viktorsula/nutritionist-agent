@@ -47,8 +47,10 @@ async def _dispatch_to_router(
     telegram_id = update.effective_user.id
 
     try:
+        # Для Telegram роутер резолвит роль/клиента по telegram_id
+        # (agents.router.get_user_info → queries.get_user_by_telegram_id).
         result = route_message(
-            user_id=str(client.user_id),
+            user_id=str(telegram_id),
             message=message,
             channel="telegram",
             message_type=message_type,
@@ -218,6 +220,55 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "message_id": update.message.message_id,
             "audio_bytes": audio_bytes,
             "audio_name": audio_name,
+        },
+    )
+
+
+async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Обработка присланного документа (PDF/текст), напр. бланк анализов.
+    Скачивает файл → bytes → document_agent через граф (message_type='document').
+    """
+    telegram_id = update.effective_user.id
+    username = update.effective_user.username or "unknown"
+
+    logger.info(f"Документ от telegram_id={telegram_id}")
+
+    client = await _ensure_registered(update)
+    if not client:
+        return
+
+    await update.message.chat.send_action("typing")
+
+    doc = update.message.document
+    if doc is None:
+        await update.message.reply_text(
+            "❌ Не удалось прочитать документ. Попробуйте отправить ещё раз."
+        )
+        return
+
+    try:
+        tg_file = await doc.get_file()
+        file_bytes = bytes(await tg_file.download_as_bytearray())
+    except Exception as e:
+        logger.exception(f"Не удалось скачать документ telegram_id={telegram_id}: {e}")
+        await update.message.reply_text(
+            "❌ Не удалось загрузить документ. Попробуйте отправить ещё раз."
+        )
+        return
+
+    await _dispatch_to_router(
+        update,
+        client,
+        message=update.message.caption or "",
+        message_type="document",
+        metadata={
+            "telegram_id": telegram_id,
+            "username": username,
+            "message_id": update.message.message_id,
+            "file_bytes": file_bytes,
+            "mime_type": doc.mime_type or "application/octet-stream",
+            "file_name": doc.file_name or "document",
         },
     )
 

@@ -100,14 +100,14 @@ class TestApi(unittest.TestCase):
 
     def test_create_client_invalid_email(self):
         app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
-        r = self.client.post("/clients", json={"email": "bademail", "name": "Иван"})
+        r = self.client.post("/clients", json={"email": "bademail", "name": "Иван", "paid": False})
         self.assertEqual(r.status_code, 400)
 
     def test_create_client_ok(self):
         app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
         created = {"auth_id": "au-9", "user_id": "u-9", "client_id": "c-9", "email": "a@b.com"}
         with patch("database.auth.invite_client_account", return_value=created) as m:
-            r = self.client.post("/clients", json={"email": "a@b.com", "name": "Иван"})
+            r = self.client.post("/clients", json={"email": "a@b.com", "name": "Иван", "paid": False})
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.json()["client_id"], "c-9")
         self.assertEqual(m.call_args.kwargs["actor_user_id"], "u-2")

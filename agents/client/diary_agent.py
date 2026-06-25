@@ -9,7 +9,7 @@ Diary Agent — дневник: фиксация того, что клиент �
 Поток:
 1. Извлечь структуру одним LLM-вызовом (JSON): {kind, ingredients, weight_kg, wellbeing}.
 2. Ветвление по kind:
-   - weight    → событие weight_logged + проверка алерта weight_increase;
+   - weight    → запись в measurements + проверка алерта weight_increase;
    - wellbeing → событие bad_wellbeing + уведомление нутрициолога;
    - meal      → анализ состава против рациона + событие calories_logged;
    - other     → мягкий уточняющий ответ.
@@ -54,6 +54,8 @@ def diary_node(state: ClientState) -> ClientState:
         outcome = _handle_wellbeing(state, extracted, mode)
     elif kind == 'meal':
         outcome = _handle_meal(state, extracted, mode)
+    elif kind == 'lab':
+        outcome = _handle_lab(state, extracted, mode)
     else:
         outcome = 'other'
 
@@ -69,10 +71,11 @@ EXTRACTION_PROMPT = """Ты — парсер сообщений клиента �
 
 Верни СТРОГО валидный JSON без markdown, в формате:
 {
-  "kind": "meal | weight | wellbeing | other",
+  "kind": "meal | weight | wellbeing | lab | other",
   "ingredients": ["продукт1", "продукт2"],   // только для meal, иначе []
   "weight_kg": 0,                              // только для weight (число), иначе null
-  "wellbeing": {"answer": "", "reason": ""}    // только для wellbeing, иначе null
+  "wellbeing": {"answer": "", "reason": ""},   // только для wellbeing, иначе null
+  "labs": [{"indicator": "", "value": 0, "unit": ""}]  // только для lab, иначе []
 }
 
 Правила:
@@ -80,6 +83,9 @@ EXTRACTION_PROMPT = """Ты — парсер сообщений клиента �
 - weight — клиент сообщает свой вес. Извлеки число в кг (поддержи "82", "81.5 кг", "вешу 80").
 - wellbeing — клиент описывает самочувствие. answer кратко ("хорошо"/"плохо"/"нормально"),
   reason — причина, если указана.
+- lab — клиент сообщает результаты анализов (показатель + числовое значение): например
+  "холестерин 5.2", "глюкоза 4.8 ммоль/л". Для каждого: indicator (название как сказал клиент,
+  в нижнем регистре), value (число), unit (единицы, если указаны, иначе "").
 - other — всё остальное (вопросы, общий разговор).
 Не добавляй ничего, кроме JSON."""
 
@@ -124,15 +130,16 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
     if weight is None:
         return 'other'
 
+    # Вес — это точка временного ряда → measurements (для графиков/динамики),
+    # а НЕ событие. Событие в client_events пишем только если сработает алерт (ниже).
     try:
-        queries.log_client_event(
+        queries.insert_measurement(
             client_id=client_id,
-            event_type='weight_logged',
-            severity=None,
-            payload={"weight": weight, "channel": state.get('channel')},
+            weight=weight,
+            notes=f"channel={state.get('channel')}",
         )
     except Exception as e:
-        logger.error(f"Diary failed to log weight: {e}")
+        logger.error(f"Diary failed to insert measurement: {e}")
 
     # Проверка алерта weight_increase (сравнивает события за 24ч)
     try:
@@ -148,7 +155,7 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
         state['alerts'] = (state.get('alerts') or []) + alerts
         state['routing'] = determine_food_routing(state['alerts'], mode)
         # Персистим алерт как событие с severity, чтобы он попал в панель
-        # алертов нутрициолога (weight_logged выше пишется без severity).
+        # алертов нутрициолога (сам вес выше уходит в measurements, не в события).
         try:
             top = alerts[0]
             queries.log_client_event(
@@ -243,6 +250,51 @@ def _handle_meal(state: ClientState, extracted: Dict[str, Any], mode: str) -> st
     return 'meal'
 
 
+def _handle_lab(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
+    """Фиксирует названные клиентом результаты анализов в lab_results (source='client')."""
+    from database import queries
+
+    client_id = state['client_id']
+    labs = extracted.get('labs') or []
+
+    saved: List[Dict[str, Any]] = []
+    for item in labs:
+        if not isinstance(item, dict):
+            continue
+        indicator = str(item.get('indicator') or '').strip().lower()
+        value = _to_float(item.get('value'))
+        if not indicator or value is None:
+            continue
+        unit = (str(item.get('unit')).strip() or None) if item.get('unit') else None
+        try:
+            queries.insert_lab_result(
+                client_id=client_id,
+                indicator=indicator,
+                value=value,
+                unit=unit,
+                source='client',
+            )
+            saved.append({"indicator": indicator, "value": value, "unit": unit})
+        except Exception as e:
+            logger.error(f"Diary failed to insert lab result '{indicator}': {e}")
+
+    if not saved:
+        return 'other'
+
+    state['saved_labs'] = saved
+    return 'lab'
+
+
+def _to_float(value: Any) -> Optional[float]:
+    """Аккуратно приводит значение к float (поддержка '5,2' и '5.2'); иначе None."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(',', '.').strip())
+    except (ValueError, TypeError):
+        return None
+
+
 # ==========================================
 # ОТВЕТ КЛИЕНТУ (LLM)
 # ==========================================
@@ -300,6 +352,13 @@ def _build_facts_message(state: ClientState, extracted: Dict[str, Any], outcome:
     elif outcome == 'wellbeing':
         wb = extracted.get('wellbeing') or {}
         lines.append(f"Самочувствие: {wb.get('answer', '')}; причина: {wb.get('reason', '') or '—'}")
+    elif outcome == 'lab':
+        labs = state.get('saved_labs') or []
+        recorded = ", ".join(
+            f"{l['indicator']} {l['value']}{(' ' + l['unit']) if l.get('unit') else ''}" for l in labs
+        )
+        lines.append(f"Записанные анализы: {recorded}")
+        lines.append("Не интерпретируй медицински — просто подтверди, что внёс в карту.")
 
     alerts = state.get('alerts') or []
     if alerts:
@@ -316,6 +375,7 @@ def _fallback_ack(outcome: str) -> str:
         'meal': "Спасибо, записал твой приём пищи ✅ Если что-то не так — поправь.",
         'weight': "Записал твой вес ✅ Продолжай отмечать — так виднее динамика.",
         'wellbeing': "Спасибо, что поделился самочувствием 🙏 Я всё зафиксировал.",
+        'lab': "Записал результаты анализов в твою карту ✅ Нутрициолог их увидит.",
         'other': "Не совсем понял 🙂 Хочешь записать приём пищи, вес или самочувствие?",
     }
     return acks.get(outcome, acks['other'])

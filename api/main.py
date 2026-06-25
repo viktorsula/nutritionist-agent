@@ -12,15 +12,32 @@ CRUD/Auth/Storage фронт делает напрямую в Supabase под RL
 """
 
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user, require_role
 
-app = FastAPI(title="Nutritionist Agent API", version="1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Жизненный цикл: Telegram-бот + планировщик уведомлений на старте, остановка на выходе."""
+    from api.telegram_webhook import startup_telegram, shutdown_telegram
+    from api.scheduler import start_scheduler, shutdown_scheduler
+
+    await startup_telegram()
+    start_scheduler()
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
+        await shutdown_telegram()
+
+
+app = FastAPI(title="Nutritionist Agent API", version="1.0", lifespan=lifespan)
 
 # CORS: список origin фронта через переменную окружения (через запятую).
 _origins = [
@@ -56,6 +73,11 @@ class SavePromptIn(BaseModel):
     description: str | None = None
 
 
+class SaveSettingIn(BaseModel):
+    key: str = Field(..., min_length=1)
+    value: Any = None  # произвольный JSON (список/объект/число/строка)
+
+
 class GenerateReportIn(BaseModel):
     client_id: str = Field(..., min_length=1)
     report_type: str = Field("recommendations")
@@ -78,6 +100,30 @@ class CreateClientIn(BaseModel):
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> Dict[str, bool]:
+    """Приём апдейтов Telegram (webhook). Без настроенного бота — 503."""
+    from api.telegram_webhook import process_webhook_update, webhook_secret_ok
+
+    if not webhook_secret_ok(x_telegram_bot_api_secret_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid secret token")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+
+    ok = await process_webhook_update(data)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram bot not configured"
+        )
+    return {"ok": True}
 
 
 @app.get("/me")
@@ -122,6 +168,36 @@ def nutritionist_query(
         message_type="text",
         metadata={},
     )
+
+
+@app.post("/nutritionist/setting")
+def save_setting(
+    body: SaveSettingIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, bool]:
+    """
+    Сохраняет настройку system_settings через бэкенд (upsert) + пишет audit_log.
+
+    Раньше фронт писал настройки напрямую в Supabase (мимо аудита, разрыв №6).
+    Теперь запись идёт здесь: фиксируем кто/что менял (old/new) под ролью нутрициолога.
+    """
+    from database import queries
+
+    try:
+        old_value = queries.get_setting(body.key)
+        queries.upsert_system_setting(body.key, body.value, updated_by=user["user_id"])
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="update_setting",
+            entity_type="settings",
+            entity_id=body.key,
+            old_value={"value": old_value},
+            new_value={"value": body.value},
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.get("/nutritionist/prompts")
@@ -183,6 +259,203 @@ def nutritionist_report(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@app.get("/nutritionist/knowledge")
+def knowledge_list(
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Список документов базы знаний нутрициолога."""
+    from database import queries
+
+    return {"documents": queries.list_knowledge_documents()}
+
+
+@app.post("/nutritionist/knowledge")
+async def knowledge_upload(
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Загружает труд/методичку в базу знаний (knowledge_base, pgvector).
+
+    Файл принимается напрямую (multipart): извлекаем текст, режем на чанки,
+    эмбеддим (ada-002) и пишем в knowledge_base. Оригинал в v1 не храним —
+    для RAG нужны только чанки. Доступно знаниям всех агентов через поиск.
+    """
+    from database import queries
+    from database.models import DocumentMetadata
+    from utils.ingestion import extract_text, ingest_into_knowledge_base
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    try:
+        text = extract_text(file_bytes, file.content_type or "", file.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No text extracted from document",
+        )
+
+    display = title or file.filename or "Документ"
+    rows = queries.insert_document_metadata(
+        DocumentMetadata(
+            source="knowledge_base",
+            document_type="knowledge",
+            title=display,
+            file_name=file.filename,
+            mime_type=file.content_type,
+            file_size_bytes=len(file_bytes),
+        )
+    )
+    document_id = (rows or [{}])[0].get("id")
+    if not document_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create document metadata",
+        )
+
+    try:
+        chunks = ingest_into_knowledge_base(document_id, text, source=display)
+    except Exception as e:
+        # Откатываем висячую запись метаданных, чтобы не плодить пустые документы.
+        queries.delete_document_metadata(document_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {e}"
+        )
+
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user["user_id"],
+        action="add_knowledge",
+        entity_type="knowledge_base",
+        entity_id=document_id,
+        new_value={"title": display, "file_name": file.filename, "chunks": chunks},
+    )
+    return {"document_id": document_id, "title": display, "chunks": chunks}
+
+
+@app.delete("/nutritionist/knowledge/{document_id}")
+def knowledge_delete(
+    document_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, bool]:
+    """Удаляет документ базы знаний и его чанки."""
+    from database import queries
+
+    doc = queries.get_document_metadata(document_id)
+    if not doc or doc.get("source") != "knowledge_base":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge document not found")
+
+    queries.delete_knowledge_base_chunks(document_id)
+    queries.delete_document_metadata(document_id)
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user["user_id"],
+        action="delete_knowledge",
+        entity_type="knowledge_base",
+        entity_id=document_id,
+    )
+    return {"ok": True}
+
+
+CLIENT_DOCS_BUCKET = "client-documents"
+
+
+@app.post("/documents/{document_id}/ingest")
+def ingest_client_document(
+    document_id: str,
+    user: Dict[str, Any] = Depends(require_role("client")),
+) -> Dict[str, Any]:
+    """
+    Векторизует уже загруженный документ клиента в client_documents (pgvector).
+
+    Фронт грузит файл напрямую в Storage и пишет document_metadata, затем зовёт
+    этот эндпоинт. Контент берётся из Storage по storage_url, режется на чанки,
+    эмбеддится (ada-002) и пишется под изоляцией client_id. Идемпотентно:
+    старые чанки документа удаляются перед записью новых.
+    """
+    client_id = user.get("client_id")
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client profile not found for this user",
+        )
+
+    from database import queries
+    from database.client import get_supabase_service_client
+    from utils.ingestion import extract_text, ingest_into_client_documents
+
+    doc = queries.get_document_metadata(document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Изоляция: документ должен принадлежать вызывающему клиенту.
+    if str(doc.get("client_id")) != str(client_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your document")
+
+    storage_path = doc.get("storage_url")
+    if not storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Document has no storage_url"
+        )
+
+    # Скачивание из приватного бакета сервис-клиентом.
+    try:
+        sb = get_supabase_service_client()
+        file_bytes = sb.storage.from_(CLIENT_DOCS_BUCKET).download(storage_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Storage download failed: {e}"
+        )
+
+    try:
+        text = extract_text(file_bytes, doc.get("mime_type") or "", doc.get("file_name") or "")
+    except ValueError as e:
+        # Неподдерживаемый тип (например, скан-изображение без текстового слоя)
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
+
+    if not text.strip():
+        return {"document_id": document_id, "chunks": 0, "note": "no_text_extracted"}
+
+    # Идемпотентность: переиндексация без дублей.
+    queries.delete_client_document_chunks(document_id)
+
+    try:
+        chunks = ingest_into_client_documents(client_id, document_id, text)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Ingestion failed: {e}"
+        )
+
+    # Best-effort: вытащить числовые показатели анализов в lab_results (source='client_pdf').
+    # Сбой извлечения не должен ронять успешную векторизацию.
+    labs_saved = 0
+    try:
+        from utils.labs import extract_labs_from_text
+
+        for lab in extract_labs_from_text(text):
+            queries.insert_lab_result(
+                client_id=client_id,
+                indicator=lab["indicator"],
+                value=lab["value"],
+                unit=lab.get("unit"),
+                source="client_pdf",
+                document_id=document_id,
+            )
+            labs_saved += 1
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning(f"lab extraction from document failed: {e}")
+
+    return {"document_id": document_id, "chunks": chunks, "labs": labs_saved}
 
 
 @app.post("/clients", status_code=status.HTTP_201_CREATED)

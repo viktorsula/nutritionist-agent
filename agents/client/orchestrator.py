@@ -34,6 +34,7 @@ from .dialog_agent import dialog_node
 from .vision_agent import vision_node
 from .diary_agent import diary_node
 from .nutrition_agent import nutrition_node
+from .document_agent import document_node
 from utils.llm import call_llm
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,7 @@ def create_client_graph():
     workflow.add_node("diary_agent", diary_node)
     workflow.add_node("nutrition_agent", nutrition_node)
     workflow.add_node("dialog_agent", dialog_node)
+    workflow.add_node("document_agent", document_node)
     workflow.add_node("format_response", format_response_node)
     workflow.add_node("save_to_db", save_to_db_node)
 
@@ -143,11 +145,12 @@ def create_client_graph():
             "diary": "diary_agent",
             "nutrition": "nutrition_agent",
             "dialog": "dialog_agent",
+            "document": "document_agent",
         },
     )
 
     # Все агенты сходятся в форматирование и сохранение
-    for agent in ("vision_agent", "diary_agent", "nutrition_agent", "dialog_agent"):
+    for agent in ("vision_agent", "diary_agent", "nutrition_agent", "dialog_agent", "document_agent"):
         workflow.add_edge(agent, "format_response")
 
     workflow.add_edge("format_response", "save_to_db")
@@ -193,6 +196,13 @@ def load_context_node(state: ClientState) -> ClientState:
         # Активный план питания — всегда
         state['active_plan'] = queries.get_active_nutrition_plan(client_id)
 
+        # Активный план ЗОЖ (сон/активность/восстановление/стресс) — «как жить»
+        try:
+            state['wellness_plan'] = queries.get_wellness_plan(client_id)
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить план ЗОЖ: {e}")
+            state['wellness_plan'] = None
+
         # Активные задачи клиента — всегда
         state['tasks'] = queries.get_pending_tasks(client_id)
 
@@ -208,6 +218,9 @@ def load_context_node(state: ClientState) -> ClientState:
 
         # Заметки нутрициолога — всегда (внутренний контекст для агента)
         state['nutritionist_notes'] = client.get('nutritionist_notes')
+
+        # Скользящая сводка прошлых разговоров (долговременная память, миграция 009)
+        state['conversation_summary'] = client.get('conversation_summary') or ''
 
         # История диалога (последние 10), в хронологическом порядке,
         # с маппингом ролей БД (client/agent) → роли LLM (user/assistant)
@@ -289,6 +302,11 @@ def route_node(state: ClientState) -> ClientState:
         state['route'] = 'vision'
         return state
 
+    # Документ (PDF/текст) → document_agent
+    if message_type == 'document':
+        state['route'] = 'document'
+        return state
+
     # Текст → классификация интента
     state['route'] = _classify_text(state.get('message', ''))
     logger.info(f"Routed client {state['client_id']} to '{state['route']}'")
@@ -299,7 +317,8 @@ CLASSIFIER_PROMPT = """Ты — маршрутизатор сообщений к
 
 Верни СТРОГО валидный JSON без markdown: {"route": "diary | nutrition | dialog"}
 
-- diary — клиент сообщает ФАКТ о себе: что поел/ест, свой вес, своё самочувствие.
+- diary — клиент сообщает ФАКТ о себе: что поел/ест, свой вес, своё самочувствие,
+  А ТАКЖЕ результаты своих анализов с числовым значением ("холестерин 5.2", "глюкоза 4.8").
 - nutrition — ПРОСЬБА о рекомендации/анализе по питанию: что съесть, меню, можно ли
   продукт, как улучшить рацион, вопрос про назначенный план или цель.
 - dialog — общий разговор, поддержка, благодарность, А ТАКЖЕ просьба НАЗВАТЬ его
@@ -443,6 +462,13 @@ def save_to_db_node(state: ClientState) -> ClientState:
 
     except Exception as e:
         logger.error(f"Error saving to DB: {e}")
+
+    # Обновление скользящей сводки (best-effort, раз в N сообщений; не валит ответ)
+    try:
+        from .summary import update_rolling_summary
+        update_rolling_summary(state)
+    except Exception as e:
+        logger.warning(f"Rolling summary update skipped: {e}")
 
     return state
 

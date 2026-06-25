@@ -4,6 +4,7 @@ import { CatalogEditor } from "./settings/CatalogEditor";
 import { JsonSetting } from "./settings/JsonSetting";
 import { TrustedSources } from "./settings/TrustedSources";
 import { PromptEditor } from "./settings/PromptEditor";
+import { KnowledgeBase } from "./settings/KnowledgeBase";
 
 /** Сворачиваемая секция настроек. */
 function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
@@ -39,6 +40,11 @@ export function SettingsPanel() {
       <Section title={t("settings.sources.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.sources.hint")}</p>
         <TrustedSources />
+      </Section>
+
+      <Section title={t("settings.knowledge.title")}>
+        <p className="mb-2 text-xs text-gray-500">{t("settings.knowledge.hint")}</p>
+        <KnowledgeBase />
       </Section>
 
       <Section title={t("settings.llm.title")}>

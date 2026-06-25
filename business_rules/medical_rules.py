@@ -24,6 +24,7 @@ from database.queries import (
     get_client_profile,
     get_active_nutrition_plan,
     get_client_events,
+    get_recent_measurements,
     get_conversations,
     get_system_setting
 )
@@ -172,6 +173,17 @@ def check_medical_alerts(
     return alerts
 
 
+def _within_days(earlier: Any, later: Any, max_days: int) -> bool:
+    """True, если две даты (YYYY-MM-DD или ISO) различаются не более чем на max_days.
+    При неразборчивых датах — не блокируем алерт (возвращаем True)."""
+    try:
+        d1 = datetime.fromisoformat(str(earlier)[:10])
+        d2 = datetime.fromisoformat(str(later)[:10])
+        return abs((d2 - d1).days) <= max_days
+    except Exception:
+        return True
+
+
 def _check_weight_increase(client_id: str) -> Optional[Dict[str, Any]]:
     """Проверка резкого увеличения веса"""
     try:
@@ -185,37 +197,37 @@ def _check_weight_increase(client_id: str) -> Optional[Dict[str, Any]]:
             system_threshold = get_system_setting('weight_increase_threshold_kg')
             threshold_kg = float(system_threshold['value']) if system_threshold else 1.0
 
-        # Получить события веса за последние 24 часа
-        yesterday = (datetime.utcnow() - timedelta(days=1)).isoformat()
-        weight_events = get_client_events(
-            client_id=client_id,
-            event_type='weight_logged',
-            start_date=yesterday
-        )
-
-        if not weight_events or len(weight_events) < 2:
+        # Вес теперь живёт в measurements (временной ряд). Сравниваем два
+        # последних замера: текущий (свежий) против предыдущего.
+        recent = get_recent_measurements(client_id, limit=2)
+        if not recent or len(recent) < 2:
             return None
 
-        # Сравнить первый и последний вес
-        weights = [e['payload_json'].get('weight') for e in weight_events if e.get('payload_json')]
-        weights = [w for w in weights if w is not None]
-
-        if len(weights) < 2:
+        # get_recent_measurements отдаёт свежие сверху: [0]=текущий, [1]=предыдущий
+        current = recent[0].get('weight')
+        previous = recent[1].get('weight')
+        if current is None or previous is None:
             return None
 
-        weight_change = weights[-1] - weights[0]
+        # Алерт — про резкий скачок «за день». При разрежённых замерах (разрыв
+        # в несколько дней) большой набор веса — не дневной спайк, не алертим.
+        max_gap_days = 3
+        if not _within_days(recent[1].get('measured_at'), recent[0].get('measured_at'), max_gap_days):
+            return None
+
+        weight_change = current - previous
 
         if weight_change > threshold_kg:
             return {
                 "type": "weight_increase",
                 "severity": "high" if weight_change > threshold_kg * 1.5 else "medium",
                 "details": {
-                    "previous_weight": weights[0],
-                    "current_weight": weights[-1],
+                    "previous_weight": previous,
+                    "current_weight": current,
                     "change_kg": round(weight_change, 2),
                     "threshold_kg": threshold_kg
                 },
-                "message": f"Зафиксировано увеличение веса на {round(weight_change, 2)} кг за последние 24 часа (порог: {threshold_kg} кг).",
+                "message": f"Зафиксировано увеличение веса на {round(weight_change, 2)} кг между последними замерами (порог: {threshold_kg} кг).",
                 "timestamp": datetime.utcnow().isoformat()
             }
 
