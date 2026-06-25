@@ -1,0 +1,219 @@
+ТЕХНИЧЕСКОЕ ЗАДАНИЕ
+Агент-ассистент нутрициолога
+Версия 1.4 — Актуализированная
+Июнь 2026
+Статус: В разработке. Прод на Render (бэкенд + фронт). Ветка stage6-utils.
+
+================================================================
+ИСТОРИЯ ВЕРСИЙ ТЗ (хронология изменений)
+================================================================
+v1.0 / v1.1 — первичная концепция: роли, режимы, ежедневный диалог, фото еды, голос (v1.1).
+v1.2 (июнь 2026, «Финальная, готово к разработке») — полные роли/права, онбординг
+     клиента, 11 таблиц БД, 5 типов алертов, business_rules, стек (Streamlit + Telegram +
+     LangGraph + Groq/Claude/Gemini). Файл: technical_specification.docx.
+v1.3 (июнь 2026, «Актуализированная») — БД готова: +Блок 5 (pgvector: document_metadata,
+     knowledge_base, client_documents) → 14 таблиц + VIEW + триггеры; голос (Whisper)
+     перенесён в MVP v1.0; добавлен LangFuse. Файл: technical_specification_V1.3.docx.
+v1.4 (24 июня 2026, ЭТОТ документ) — синхронизация с фактической реализацией:
+     • ФРОНТ: уход со Streamlit на React SPA (Vite/TS) + FastAPI-бэкенд (api/), Supabase под RLS.
+     • ВЕБ-ПОИСК: Tavily заменён на серверный инструмент Claude web_search (allowed_domains
+       из trusted_sources). Зависимость и ключ Tavily убраны.
+     • ПАМЯТЬ/RAG доведены до рабочего состояния: подключён ingestion (chunk→embed→pgvector);
+       добавлена rolling-summary (долговременная память диалога).
+     • ДАННЫЕ КЛИЕНТА: вес → таблица measurements (временной ряд); приём анализов клиента
+       (текст/фото/PDF) → lab_results; per-client показатели анализов.
+     • КАНАЛ Telegram: переведён на webhook внутри FastAPI (а не отдельный воркер/polling).
+     • РАСПИСАНИЯ: для v1 принято решение использовать встроенный планировщик (APScheduler)
+       вместо n8n (n8n — опция v2). [решение зафиксировано, реализация — открытая задача]
+     • МИГРАЦИИ БД 001–009 (см. раздел 4).
+     Старые файлы ТЗ (v1.2, v1.3) сохранены для истории.
+
+================================================================
+1. НАЗНАЧЕНИЕ СИСТЕМЫ
+================================================================
+Агент-ассистент нутрициолога — ИИ-система, автоматизирующая рутину нутрициолога: сбор
+данных о клиентах, ежедневный мониторинг, составление рационов, аналитику показателей
+здоровья и коммуникацию с клиентами через Telegram и веб-кабинет.
+
+Ключевая ценность: нутрициолог освобождается от рутины и концентрируется на
+профессиональных решениях; клиент получает персонального ИИ-ассистента 24/7.
+
+================================================================
+2. РОЛИ И ПРАВА ДОСТУПА
+================================================================
+- Нутрициолог — владелец системы (v1.0 — один). Полный доступ. Единственный источник
+  назначений (планы, задачи, пороги алертов). Работает через веб-кабинет.
+- Клиент — доступ только к своим данным. Исполнитель и информатор. Основной канал — Telegram;
+  также веб-кабинет (анкета, график веса/анализов, чат, загрузка документов).
+- Observer — зарезервировано для v2.0 (клиники). В v1.0 в интерфейсах отключено.
+
+Принцип: Нутрициолог = источник назначений; Агент = аналитик/советник; Клиент = исполнитель.
+Изоляция данных — на уровне БД (Supabase RLS): клиент физически не видит чужие данные.
+
+================================================================
+3. АРХИТЕКТУРА СИСТЕМЫ
+================================================================
+Каналы → Маршрутизатор → Business Rules → Оркестратор (LangGraph) → LLM → Память (Supabase) → ответ.
+
+- Каналы:
+  • Telegram (python-telegram-bot) — webhook внутри FastAPI (POST /telegram/webhook).
+  • Веб-кабинет — React SPA (Vite/TypeScript), общается с FastAPI (агент) и напрямую с
+    Supabase под RLS (CRUD/Auth/Storage).
+- Маршрутизатор: agents/router.py — резолвит роль/пользователя (web: по JWT через
+  database/auth.py; telegram: по telegram_id) и направляет в ветку клиента/нутрициолога.
+- Business Rules: детерминированный слой ДО LLM (доступ, оплата, расписание, 5 алертов).
+- Оркестратор: LangGraph (однопроходные графы; durable-память — в Postgres, не в checkpointer).
+  • Клиент: ingest(голос→текст) → load_context → route → [vision|diary|nutrition|dialog|document]
+    → format_response → save_to_db (+ rolling-summary).
+  • Нутрициолог: parse_request → [analytics|management|help] → format_response → save_to_db.
+- LLM-слой (utils/llm.py): мультипровайдер + взаимозамена (failover) по task_type.
+  Groq llama-3.3-70b (диалог), Claude Sonnet (аналитика/нутри-анализ), Gemini 1.5 Flash
+  (vision), OpenAI (эмбеддинги ada-002 + Whisper). Конфиг моделей — в system_settings.llm_config.
+- Мониторинг: LangFuse (трейсинг каждого вызова LLM; graceful no-op без ключей).
+
+================================================================
+4. БАЗА ДАННЫХ (Supabase: PostgreSQL + pgvector + Storage)
+================================================================
+Ядро v1.3 — 14 таблиц + VIEW client_registry_view + триггеры версионирования планов.
+
+Блоки:
+1) users, clients, client_profiles, wellness_plans
+2) conversations, client_events
+3) nutrition_plans (+supplements_json, версионирование), tasks
+4) notification_schedule, audit_logs, system_settings
+5) document_metadata, knowledge_base (pgvector), client_documents (pgvector)
+
+Миграции (docs/migrations/), применяются в Supabase SQL Editor:
+- 001 observer-роль
+- 002 RPC векторного поиска (match_knowledge_base / match_client_documents)  ⏳ применить
+- 003 анкета + measurements (вес/объёмы) + lab_results (числовые анализы)
+- 004 RLS-политики
+- 005 Storage-бакет client-documents
+- 006 tracked_lab_indicators (per-client показатели для графиков)
+- 007 client_paid_until (тариф/дата оплаты)
+- 008 client_reports (отчёты по клиенту)
+- 009 rolling-summary: clients.conversation_summary / summary_message_count / summary_updated_at  ⏳ применить
+
+Дополнительные таблицы (миграции 003/008): measurements, lab_results, client_reports.
+
+================================================================
+5. ПАМЯТЬ И ЗНАНИЯ (RAG) — ключевой раздел v1.4
+================================================================
+Принцип: durable-память живёт в Postgres и перечитывается на каждый запрос (граф состояние
+между запросами не персистит — однопроходные графы).
+
+Виды памяти:
+- Диалоговая: conversations (история). Краткосрочно — последние 10 реплик в контекст;
+  долгосрочно — rolling-summary (clients.conversation_summary), обновляется summary-буфером
+  (~раз в 10 сообщений) и инжектится в промпты dialog/nutrition.
+- Событийная: client_events (severity) — калории, самочувствие, сработавшие алерты.
+- Измерения/анализы: measurements (вес/объёмы — временной ряд для графиков);
+  lab_results (числовые показатели; source: nutritionist | client | client_pdf).
+- Назначения: nutrition_plans, wellness_plans, tasks; заметки — clients.nutritionist_notes.
+- Векторная (RAG): knowledge_base (труды нутрициолога) и client_documents (документы клиента),
+  эмбеддинги OpenAI ada-002 (1536), поиск через RPC match_* (cosine).
+- Конфиг/аудит: system_settings (пороги, trusted_sources, llm_config, промпты), audit_logs.
+
+Ingestion (наполнение RAG): utils/ingestion.py — extract_text (PDF/текст) → chunk_text →
+get_embedding → insert_*_chunk.
+- Документы клиента: фронт грузит в Storage → POST /documents/{id}/ingest векторизует +
+  извлекает показатели в lab_results.
+- База знаний нутрициолога: POST/GET/DELETE /nutritionist/knowledge (UI «Настройки → База знаний»).
+
+Приём данных клиента (структурирование «на входе»):
+- Текст: классификатор → diary (еда/вес/самочувствие/анализы) | nutrition | dialog.
+- Фото: classify_image → еда (analyze_food_plate) | документ-анализы (analyze_lab_document).
+- Голос: Whisper → текст.
+- Документ (PDF): извлечение текста → векторизация (client_documents) + анализы (lab_results).
+
+================================================================
+6. СИСТЕМА АЛЕРТОВ (5 типов)
+================================================================
+Пороги настраивает нутрициолог: глобально (system_settings) и индивидуально (client_profiles).
+- weight_increase   — вес выше порога; источник: measurements (сравнение двух последних замеров).
+- food_incompatible — несочетаемые продукты; источник: knowledge_base (pgvector).
+- food_forbidden    — запрещённый продукт; источник: nutrition_plans (ограничения).
+- no_response       — нет ответа N часов; источник: conversations.
+- bad_wellbeing     — «нехорошо» + причина на чек-ин; источник: client_events.
+Сработавший алерт фиксируется событием с severity (попадает в панель «Алерты» нутрициолога).
+
+================================================================
+7. BUSINESS RULES (детерминированный слой)
+================================================================
+business_rules/: access_rules (доступ, режимы full_program/ai_support), medical_rules
+(5 алертов + маршрутизация), notification_rules (timezone-aware расписание). Обрабатывают
+критические ситуации кодом ДО вызова LLM.
+
+================================================================
+8. КАНАЛЫ И ПРИЁМ ДАННЫХ
+================================================================
+- Telegram: текст / фото / голос / документ (PDF) — webhook → router → граф клиента.
+- Веб-кабинет клиента: анкета, график веса/анализов (с нормами), чат, загрузка документов.
+- Веб-кабинет нутрициолога: 3 панели (инструменты/центр/чат), реестр+карточка клиента,
+  редакторы планов/задач/ЗОЖ, аналитика-RAG, отчёты (PDF/TXT), настройки (каталог/пороги/
+  источники/llm/промпты/база знаний).
+
+================================================================
+9. ТЕХНИЧЕСКИЙ СТЕК
+================================================================
+- Фронт: React + Vite + TypeScript (react-query, i18n, Tailwind). [было: Streamlit]
+- Бэкенд API: FastAPI + uvicorn (api/), Docker на Render.
+- Мессенджер: python-telegram-bot (webhook).
+- Оркестрация: LangGraph (>=1.0).
+- LLM: Groq llama-3.3-70b; Claude Sonnet; Gemini 1.5 Flash; OpenAI (ada-002 + Whisper).
+- Веб-поиск: серверный инструмент Claude web_search (allowed_domains из trusted_sources). [было: Tavily]
+- БД: Supabase (PostgreSQL + pgvector + Storage + Auth + RLS).
+- Расписания: APScheduler (встроенный) — решение v1 вместо n8n (n8n — опция v2). [открытая задача]
+- Мониторинг: LangFuse. Деплой: Render. CI/код: GitHub.
+
+================================================================
+10. СТРУКТУРА ПРОЕКТА (факт)
+================================================================
+api/            — FastAPI: main.py (эндпоинты), auth.py, telegram_webhook.py
+frontend/       — React SPA (Vite/TS): features/{client,nutritionist,questionnaire}, lib/api.ts, i18n
+agents/         — router.py; client/{orchestrator,dialog,nutrition,diary,vision,document,summary,food_analysis,state};
+                  nutritionist/{orchestrator,analytics,management,reports,state}
+business_rules/ — access_rules, medical_rules, notification_rules
+utils/          — llm, knowledge, ingestion, labs, vision, voice, web_access, helpers
+tg_bot/         — bot.py (build_application/polling), handlers.py, commands.py
+prompts/        — client/*, nutritionist/* (.md, БД-приоритет)
+monitoring/     — langfuse.py
+database/       — client.py, models.py, queries.py, auth.py
+docs/           — schema.sql, progress.md, migrations/, ТЗ (v1.2/v1.3/v1.4), DEPLOY.md
+
+================================================================
+11. БЕЗОПАСНОСТЬ
+================================================================
+- Авторизация через Supabase Auth (JWT). Бэкенд проверяет токен service-клиентом и резолвит
+  роль/клиента из БД (не из тела запроса).
+- RLS: клиент физически не получает чужие данные. Векторный поиск по client_documents изолирован.
+- Секреты — только в окружении (Codespaces/Render), НИКОГДА в коде; запрет load_dotenv().
+- Полный аудит изменений в audit_logs. Медданные не передаются третьим сторонам.
+- Telegram webhook защищён секретом (X-Telegram-Bot-Api-Secret-Token).
+
+================================================================
+12. ГРАНИЦА MVP v1.0 — СОСТОЯНИЕ
+================================================================
+Готово (код, ветка stage6-utils; статически зелёное, E2E — на проде):
+- Веб-кабинеты клиента и нутрициолога (React+FastAPI под RLS).
+- Ветка клиента: диалог, дневник (еда/вес/самочувствие/анализы), фото еды, голос, документы.
+- Ветка нутрициолога: аналитика-RAG, управление (с подтверждением), отчёты, настройки, база знаний.
+- Память/RAG: ingestion + rolling-summary + measurements/lab_results.
+- Telegram через webhook (инертно без ENV).
+- 5 алертов, расписание (правила), версионирование планов, LangFuse.
+
+Осталось перед релизом:
+- Применить миграции 002 и 009 в Supabase.
+- ENV Telegram (TELEGRAM_BOT_TOKEN / WEBHOOK_URL / WEBHOOK_SECRET); set webhook.
+- E2E-прогон всех каналов; влить stage6-utils → main.
+
+================================================================
+13. ОТКРЫТЫЕ ЗАДАЧИ / ДОРОЖНАЯ КАРТА
+================================================================
+- APScheduler: реализация уведомлений по расписанию (решение принято; код — TODO).
+- Аудит правок настроек с фронта (запись в audit_logs).
+- Маппинг client-indicator (свободный текст клиента) → каноничные ключи показателей нутрициолога.
+- v1.1: анализ фото холодильника; арабский/урду; OCR-парсер PDF-бланков в lab_results.
+- v2.0: роль observer (клиники); n8n как альтернатива планировщику при росте сложности.
+
+Версия 1.4 | Июнь 2026 | Виктор Сула, Дубай
