@@ -21,6 +21,10 @@ E2E проверен на проде. Шаблоны — `docs/email_templates/`
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL` (= `https://nutritionist-agent-gvxp.onrender.com/telegram/webhook`),
 `TELEGRAM_WEBHOOK_SECRET`. + E2E-прогон + merge `stage6-utils → main`.
 
+**▶️ PR #14 ОТКРЫТ** (`stage6-utils → main`, https://github.com/viktorsula/nutritionist-agent/pull/14):
+main — предок, слияние чистое, 93 passed. После merge Render задеплоит telegram-код — тогда
+прописать ENV Telegram (см. ниже) и прогнать E2E. Ветка `docs-email-templates` уже в main — можно удалить.
+
 **Что проверить E2E после деплоя:**
 1. Документ клиента (веб): загрузка PDF → векторизация (`client_documents`) + анализы в `lab_results`.
 2. База знаний: «Настройки → База знаний» → загрузка труда → используется в ответах агента.
