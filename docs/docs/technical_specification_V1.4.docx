@@ -2,7 +2,8 @@
 Агент-ассистент нутрициолога
 Версия 1.4 — Актуализированная
 Июнь 2026
-Статус: В разработке. Прод на Render (бэкенд + фронт). Ветка stage6-utils.
+Статус: В разработке. Прод на Render (бэкенд + фронт). Ветка stage6-utils
+(запушена; миграции 001–009 применены; ждёт ENV Telegram + E2E + merge в main).
 
 ================================================================
 ИСТОРИЯ ВЕРСИЙ ТЗ (хронология изменений)
@@ -23,8 +24,8 @@ v1.4 (24 июня 2026, ЭТОТ документ) — синхронизаци�
      • ДАННЫЕ КЛИЕНТА: вес → таблица measurements (временной ряд); приём анализов клиента
        (текст/фото/PDF) → lab_results; per-client показатели анализов.
      • КАНАЛ Telegram: переведён на webhook внутри FastAPI (а не отдельный воркер/polling).
-     • РАСПИСАНИЯ: для v1 принято решение использовать встроенный планировщик (APScheduler)
-       вместо n8n (n8n — опция v2). [решение зафиксировано, реализация — открытая задача]
+     • РАСПИСАНИЯ: для v1 — встроенный планировщик APScheduler вместо n8n (n8n — опция v2).
+       РЕАЛИЗОВАНО: api/scheduler.py (AsyncIOScheduler, timezone-aware, инертно без бота).
      • МИГРАЦИИ БД 001–009 (см. раздел 4).
      Старые файлы ТЗ (v1.2, v1.3) сохранены для истории.
 
@@ -85,14 +86,14 @@ v1.4 (24 июня 2026, ЭТОТ документ) — синхронизаци�
 
 Миграции (docs/migrations/), применяются в Supabase SQL Editor:
 - 001 observer-роль
-- 002 RPC векторного поиска (match_knowledge_base / match_client_documents)  ⏳ применить
+- 002 RPC векторного поиска (match_knowledge_base / match_client_documents)  ✅ применена
 - 003 анкета + measurements (вес/объёмы) + lab_results (числовые анализы)
 - 004 RLS-политики
 - 005 Storage-бакет client-documents
 - 006 tracked_lab_indicators (per-client показатели для графиков)
 - 007 client_paid_until (тариф/дата оплаты)
 - 008 client_reports (отчёты по клиенту)
-- 009 rolling-summary: clients.conversation_summary / summary_message_count / summary_updated_at  ⏳ применить
+- 009 rolling-summary: clients.conversation_summary / summary_message_count / summary_updated_at  ✅ применена
 
 Дополнительные таблицы (миграции 003/008): measurements, lab_results, client_reports.
 
@@ -163,7 +164,7 @@ business_rules/: access_rules (доступ, режимы full_program/ai_suppor
 - LLM: Groq llama-3.3-70b; Claude Sonnet; Gemini 1.5 Flash; OpenAI (ada-002 + Whisper).
 - Веб-поиск: серверный инструмент Claude web_search (allowed_domains из trusted_sources). [было: Tavily]
 - БД: Supabase (PostgreSQL + pgvector + Storage + Auth + RLS).
-- Расписания: APScheduler (встроенный) — решение v1 вместо n8n (n8n — опция v2). [открытая задача]
+- Расписания: APScheduler (встроенный) — решение v1 вместо n8n (n8n — опция v2). [реализовано: api/scheduler.py]
 - Мониторинг: LangFuse. Деплой: Render. CI/код: GitHub.
 
 ================================================================
@@ -203,15 +204,15 @@ docs/           — schema.sql, progress.md, migrations/, ТЗ (v1.2/v1.3/v1.4),
 - 5 алертов, расписание (правила), версионирование планов, LangFuse.
 
 Осталось перед релизом:
-- Применить миграции 002 и 009 в Supabase.
+- Миграции 002 и 009 — ПРИМЕНЕНЫ ✅ (проверено интроспекцией БД 25 июня).
 - ENV Telegram (TELEGRAM_BOT_TOKEN / WEBHOOK_URL / WEBHOOK_SECRET); set webhook.
 - E2E-прогон всех каналов; влить stage6-utils → main.
 
 ================================================================
 13. ОТКРЫТЫЕ ЗАДАЧИ / ДОРОЖНАЯ КАРТА
 ================================================================
-- APScheduler: реализация уведомлений по расписанию (решение принято; код — TODO).
-- Аудит правок настроек с фронта (запись в audit_logs).
+- APScheduler: уведомления по расписанию — РЕАЛИЗОВАНО (api/scheduler.py + тесты); включается ENV.
+- Аудит правок настроек с фронта — РЕАЛИЗОВАНО (POST /nutritionist/setting → audit_logs, разрыв №6 закрыт).
 - Маппинг client-indicator (свободный текст клиента) → каноничные ключи показателей нутрициолога.
 - v1.1: анализ фото холодильника; арабский/урду; OCR-парсер PDF-бланков в lab_results.
 - v2.0: роль observer (клиники); n8n как альтернатива планировщику при росте сложности.

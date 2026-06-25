@@ -1,18 +1,20 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ОТСЮДА (24 июня, конец сессии)
+## ▶️ НАЧАТЬ ОТСЮДА (25 июня)
 
-Сессия закрыла разрывы памяти (по «карте памяти») + анализы клиента + Telegram-webhook.
-Всё на ветке **`stage6-utils`** (7 коммитов, НЕ влита в main). Код статически зелёный
-(тесты + типы фронта), E2E — на проде. Детали — `docs/progress.md` (сессия 24 июня).
+Сессия 24 июня закрыла разрывы памяти + анализы клиента + Telegram-webhook + APScheduler.
+Сессия 25 июня: **запушила всё на `origin/stage6-utils`** (вчера 9 коммитов висели только
+локально!), закоммитила фичу **аудита настроек №6**, добавила ТЗ v1.4 в git, синхронизировала доки.
+Ветка **`stage6-utils`** — на remote, НЕ влита в main. Код статически зелёный
+(scheduler 8/8; ⚠️ 2 предсуществующих падения `api/test_api.py::/clients` 422 — отдельно).
 
-**⚠️ ПЕРЕД ДЕПЛОЕМ/E2E — применить миграции в Supabase (SQL Editor):**
-1. `docs/migrations/002_add_vector_search.sql` — RPC `match_*` (без неё RAG не ищет).
-2. `docs/migrations/009_conversation_summary.sql` — поля rolling-summary на `clients`.
+**✅ Миграции 001–009 ПРИМЕНЕНЫ** (002 RPC `match_*` и 009 rolling-summary проверены
+интроспекцией БД 25 июня). Блокер миграций снят.
 
-**⚠️ ENV бэкенда для Telegram (иначе бот просто выключен, прод не ломается):**
+**⚠️ ОСТАЛОСЬ перед merge в main — ENV бэкенда для Telegram** (иначе бот просто выключен,
+прод не ломается):
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL` (= `https://nutritionist-agent-gvxp.onrender.com/telegram/webhook`),
-`TELEGRAM_WEBHOOK_SECRET`.
+`TELEGRAM_WEBHOOK_SECRET`. + E2E-прогон + merge `stage6-utils → main`.
 
 **Что проверить E2E после деплоя:**
 1. Документ клиента (веб): загрузка PDF → векторизация (`client_documents`) + анализы в `lab_results`.
@@ -21,16 +23,17 @@
 4. Долгий диалог (>10 реплик) → сводка (`clients.conversation_summary`) подтягивается в контекст.
 5. Telegram: текст/фото/голос/PDF через webhook (после set_webhook).
 
-**Открытые задачи (не блокеры):** аудит правок настроек с фронта (№6); маппинг
-client-indicator → каноничные ключи нутрициолога (v1.1); актуализация ТЗ v1.3 → v1.4
-(React/FastAPI + web_search Claude + сегодняшняя память/анализы).
+**Открытые задачи (не блокеры):** ~~аудит правок настроек с фронта (№6)~~ ✅ закрыто;
+~~актуализация ТЗ v1.3 → v1.4~~ ✅ в git; маппинг client-indicator → каноничные ключи
+нутрициолога (v1.1); 2 предсуществующих падения `api/test_api.py` (`/clients` 422).
 
 URL: фронт `https://nutritionist-agent-1-ljzi.onrender.com`, бэкенд
 `https://nutritionist-agent-gvxp.onrender.com`. Runbook: `docs/DEPLOY.md`.
 
 ---
 
-**Обновлено:** 24 июня 2026 — память/анализы/Telegram-webhook на `stage6-utils`; ждут миграции + ENV + E2E.
+**Обновлено:** 25 июня 2026 — `stage6-utils` запушена; аудит настроек №6 + ТЗ v1.4 в git;
+миграции 001–009 применены. Осталось: ENV Telegram + E2E + merge в main.
 
 ## 🔜 СЛЕДУЮЩЕЕ (22 июня)
 - **Кабинет нутрициолога (React)** — Фаза 3 собрана: 3 панели (инструменты/центр/чат с
