@@ -120,14 +120,17 @@ class TestCallLlmIntegration(unittest.TestCase):
         mock_groq.side_effect = RuntimeError("api down")
 
         with patch("monitoring.trace_llm_call") as mock_trace:
+            # Все кандидаты падают (groq мокнут на сбой, резервы не сконфигурированы) →
+            # LLMUnavailableError (подкласс RuntimeError) после перебора цепочки failover.
             with self.assertRaises(RuntimeError):
                 llm.call_llm(
                     task_type="dialog",
                     messages=[{"role": "user", "content": "привет"}],
                 )
 
-        mock_trace.assert_called_once()
-        self.assertEqual(mock_trace.call_args.kwargs["error"], "api down")
+        # Трейсится КАЖДАЯ попытка (failover, 20 июня), а не одна; первая — groq с "api down".
+        mock_trace.assert_called()
+        self.assertEqual(mock_trace.call_args_list[0].kwargs["error"], "api down")
 
 
 def run_tests():

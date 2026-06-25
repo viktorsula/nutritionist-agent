@@ -216,7 +216,10 @@ class TestAnalytics(unittest.TestCase):
 
         analytics_node(state)
 
-        self.assertEqual(state["agent_response"], "Анализ: динамика стабильна.")
+        # Сырой анализ LLM уходит в панель «Аналитика» (state["analysis"]);
+        # agent_response — директива вида (агент наполняет центр, фича 22 июня).
+        self.assertEqual(state["analysis"]["markdown"], "Анализ: динамика стабильна.")
+        self.assertIn("Аналитика", state["agent_response"])
         self.assertEqual(state["agent_used"], "analytics_agent")
         mock_summary.assert_called_once()
 
@@ -237,7 +240,8 @@ class TestAnalytics(unittest.TestCase):
 
         analytics_node(state)
 
-        self.assertEqual(state["agent_response"], "По базе: 3 клиента.")
+        self.assertEqual(state["analysis"]["markdown"], "По базе: 3 клиента.")
+        self.assertIn("Аналитика", state["agent_response"])
         mock_clients.assert_called_once()
 
 
