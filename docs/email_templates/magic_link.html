@@ -1,0 +1,11 @@
+<!--
+  Supabase → Authentication → Emails → Templates → Magic Link
+  Письмо для входа по коду («Войти по коду» = signInWithOtp).
+  ТОЛЬКО код ({{ .Token }}), без ссылки — иначе приходит magic-ссылка,
+  а UI просит код (тупик), плюс ссылку прокликивает сканер почты.
+-->
+<h2>Код для входа</h2>
+<p>Ваш код для входа:</p>
+<p style="font-size:32px;font-weight:bold;letter-spacing:4px;color:#2e7d32">{{ .Token }}</p>
+<p>Введите его на странице входа в разделе «Войти по коду».</p>
+<p style="color:#888;font-size:12px">Если вы не запрашивали вход — проигнорируйте письмо.</p>
