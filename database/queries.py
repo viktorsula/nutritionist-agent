@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, List, Optional
 
 from postgrest.exceptions import APIError
@@ -148,18 +149,48 @@ def _user_info_from_client(client: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def get_nutritionist_user() -> Optional[Dict[str, Any]]:
+    """
+    Возвращает пользователя-нутрициолога (в v1.0 он один) из таблицы users.
+
+    Нормализованный dict {id=user_id, role='nutritionist', name=None, email} или None.
+    Используется для распознавания нутрициолога в Telegram (его telegram_id не в clients).
+    """
+    supabase = _service_client()
+    rows = _extract_data(
+        supabase.table("users").select("*").eq("role", "nutritionist").limit(1).execute()
+    )
+    user = rows[0] if rows else None
+    if not user:
+        return None
+    return {
+        "id": user.get("id"),
+        "role": "nutritionist",
+        "name": None,
+        "email": user.get("email"),
+    }
+
+
 def get_user_by_telegram_id(telegram_id: Any) -> Optional[Dict[str, Any]]:
     """
     Резолвит пользователя по Telegram ID для router.get_user_info.
 
-    telegram_id хранится в clients (BIGINT), поэтому через Telegram распознаётся
-    только КЛИЕНТ (нутрициолог работает через веб). Возвращает нормализованный
-    dict {id=client_id, role='client', name, telegram_id, email} или None.
+    Нутрициолог распознаётся по NUTRITIONIST_TELEGRAM_ID (его telegram_id не хранится
+    в clients) → роль 'nutritionist', полноценный диалог с агентом через Telegram, как в вебе.
+    Иначе — поиск среди клиентов (telegram_id в clients, BIGINT). Возвращает нормализованный
+    dict {id, role, name, telegram_id?, email} или None.
     """
     try:
         tg_id = int(telegram_id)
     except (TypeError, ValueError):
         return None
+
+    nutri_tg = (os.environ.get("NUTRITIONIST_TELEGRAM_ID") or "").strip()
+    if nutri_tg and str(tg_id) == nutri_tg:
+        nutri = get_nutritionist_user()
+        if nutri:
+            return nutri
+
     client = get_client_by_telegram_id(tg_id)
     return _user_info_from_client(client) if client else None
 
@@ -503,6 +534,27 @@ def log_client_event(
     return _extract_data(
         supabase.table("client_events").insert(data).select("*").execute()
     )
+
+
+def get_recent_alert_events(minutes: int = 5) -> List[Dict[str, Any]]:
+    """
+    Свежие события-алерты за последние N минут — для пуша нутрициологу в Telegram.
+
+    Берём severity high/critical ИЛИ event_type='bad_wellbeing' (medium, но важно для врача).
+    Джойним имя клиента. Дедупликация по event.id — на стороне планировщика.
+    """
+    from datetime import datetime, timedelta
+
+    supabase = _service_client()
+    since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+    return _extract_data(
+        supabase.table("client_events")
+        .select("id, client_id, event_type, severity, event_date, payload_json, clients(name)")
+        .gte("event_date", since)
+        .or_("severity.in.(high,critical),event_type.eq.bad_wellbeing")
+        .order("event_date", desc=True)
+        .execute()
+    ) or []
 
 
 def get_client_events(

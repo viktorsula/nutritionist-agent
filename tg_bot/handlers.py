@@ -7,7 +7,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database.queries import get_client_by_telegram_id
+from database.queries import get_user_by_telegram_id
 from agents import route_message
 
 logger = logging.getLogger(__name__)
@@ -15,18 +15,21 @@ logger = logging.getLogger(__name__)
 
 async def _ensure_registered(update: Update):
     """
-    Проверяет регистрацию клиента по telegram_id.
-    Если клиент не найден — отправляет инструкцию и возвращает None.
+    Проверяет, что отправитель известен системе (клиент ИЛИ нутрициолог).
+
+    Нутрициолог распознаётся по NUTRITIONIST_TELEGRAM_ID и ведёт с агентом такой же
+    диалог, как в вебе (аналитика/управление). Клиент — по telegram_id в clients.
+    Если не найден — отправляет инструкцию и возвращает None.
     """
     telegram_id = update.effective_user.id
-    client = get_client_by_telegram_id(telegram_id)
-    if not client:
+    user = get_user_by_telegram_id(telegram_id)
+    if not user:
         await update.message.reply_text(
             "❌ Вы не зарегистрированы в системе.\n"
             "Используйте /start для получения инструкций."
         )
         return None
-    return client
+    return user
 
 
 async def _dispatch_to_router(
