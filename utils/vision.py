@@ -28,6 +28,8 @@ try:
 except ImportError:
     genai = None
 
+from prompts import load_prompt
+
 logger = logging.getLogger(__name__)
 
 
@@ -101,41 +103,6 @@ def analyze_image(
 # АНАЛИЗ ФОТО ТАРЕЛКИ (КБЖУ) — UC-2
 # ========================================
 
-FOOD_PLATE_PROMPT = """Ты — нутрициолог-эксперт. Проанализируй фото блюда.
-
-ГЛАВНАЯ ЗАДАЧА — максимально точно определить СОСТАВ блюда:
-- какие продукты/ингредиенты на тарелке;
-- в каком виде и форме приготовления каждый (сырой, варёный, жареный, тушёный,
-  запечённый, на пару, копчёный, маринованный и т.п.);
-- примерный объём/количество порции каждого ингредиента.
-Это первично — состав нужен для проверки аллергий, ограничений и сочетаемости.
-
-ВТОРИЧНО — приблизительно оцени КБЖУ (калории, белки, жиры, углеводы) на всю порцию.
-КБЖУ может быть грубой оценкой; не жертвуй точностью состава ради чисел.
-
-Верни СТРОГО валидный JSON без markdown-обёртки, в формате:
-{
-  "dish_name": "название блюда",
-  "ingredients": [
-    {
-      "name": "продукт",
-      "form": "сырой|варёный|жареный|тушёный|запечённый|на пару|другое",
-      "approx_amount": "например, ~150 г / 1 шт / горсть",
-      "category": "белок|овощ|фрукт|злак|молочное|жир|соус|напиток|другое"
-    }
-  ],
-  "nutrition": {
-    "items": [
-      {"name": "продукт", "calories": 0, "protein": 0, "fats": 0, "carbs": 0}
-    ],
-    "total": {"calories": 0, "protein": 0, "fats": 0, "carbs": 0}
-  },
-  "confidence": "high|medium|low",
-  "notes": "короткий комментарий, сомнения по распознаванию"
-}
-Если на фото нет еды — верни ingredients: [] и notes с пояснением."""
-
-
 def analyze_food_plate(
     image_bytes: bytes,
     mime_type: str = "image/jpeg",
@@ -164,7 +131,7 @@ def analyze_food_plate(
         }
         При ошибке парсинга — ingredients=[], в notes причина, в raw — ответ модели.
     """
-    raw = analyze_image(image_bytes, FOOD_PLATE_PROMPT, mime_type=mime_type)
+    raw = analyze_image(image_bytes, load_prompt("system/vision_food_plate"), mime_type=mime_type)
 
     parsed = _safe_parse_json(raw)
 
@@ -198,15 +165,6 @@ def analyze_food_plate(
 # КЛАССИФИКАЦИЯ ТИПА ИЗОБРАЖЕНИЯ + АНАЛИЗЫ С ДОКУМЕНТА
 # ========================================
 
-IMAGE_KIND_PROMPT = """Определи, что на фото. Верни СТРОГО валидный JSON без markdown:
-{"kind": "food | document | other"}
-- food — еда, блюдо, тарелка, продукты.
-- document — документ: бланк/результаты анализов, выписка, таблица показателей,
-  скриншот с числовыми результатами анализов.
-- other — всё прочее.
-Только JSON."""
-
-
 def classify_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     """
     Грубо классифицирует изображение: 'food' | 'document' | 'other'.
@@ -214,25 +172,12 @@ def classify_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     При ошибке/неоднозначности → 'food' (исторический путь обработки фото).
     """
     try:
-        raw = analyze_image(image_bytes, IMAGE_KIND_PROMPT, mime_type=mime_type)
+        raw = analyze_image(image_bytes, load_prompt("system/vision_image_kind"), mime_type=mime_type)
         kind = (_safe_parse_json(raw) or {}).get("kind")
         return kind if kind in ("food", "document", "other") else "food"
     except Exception as e:
         logger.warning(f"classify_image failed: {e}")
         return "food"
-
-
-LAB_DOCUMENT_PROMPT = """Ты извлекаешь числовые показатели анализов с фото документа (бланк/выписка).
-
-Верни СТРОГО валидный JSON без markdown:
-{
-  "labs": [{"indicator": "название в нижнем регистре", "value": 0, "unit": "единицы или ''"}],
-  "measured_at": "YYYY-MM-DD или ''",
-  "confidence": "high|medium|low",
-  "notes": "короткий комментарий/сомнения"
-}
-Извлекай только явные числовые показатели (например: холестерин, глюкоза, гемоглобин).
-Если документ нечитаем или это не анализы — верни labs: []."""
 
 
 def analyze_lab_document(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:
@@ -244,7 +189,7 @@ def analyze_lab_document(image_bytes: bytes, mime_type: str = "image/jpeg") -> D
          "confidence": str, "notes": str, "raw": str}
         При ошибке парсинга — labs=[], причина в notes.
     """
-    raw = analyze_image(image_bytes, LAB_DOCUMENT_PROMPT, mime_type=mime_type)
+    raw = analyze_image(image_bytes, load_prompt("system/vision_lab_document"), mime_type=mime_type)
     parsed = _safe_parse_json(raw)
     if parsed is None:
         logger.warning("analyze_lab_document: не удалось распарсить JSON из ответа модели")

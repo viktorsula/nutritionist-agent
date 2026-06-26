@@ -16,6 +16,7 @@ import logging
 from typing import Any, Dict, List
 
 from utils.llm import call_llm
+from prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,6 @@ RECENT_FETCH_CAP = 40
 
 MAX_SUMMARY_CHARS = 1500
 """Ограничение длины сводки (держим компактной для промпта)."""
-
-_SUMMARY_PROMPT = """Ты ведёшь краткую память о клиенте нутрициолога для будущих разговоров.
-
-Обнови сводку, объединив ПРЕДЫДУЩУЮ сводку и НОВЫЕ реплики. Сохраняй только durable-факты,
-полезные надолго: цели, пищевые предпочтения и ограничения, аллергии, привычки, регулярные
-жалобы/симптомы, договорённости и решения, эмоциональный настрой/мотивацию. Не пересказывай
-дословно, не выдумывай. Пиши сжато по-русски (до ~1200 знаков), маркированным списком.
-
-Верни ТОЛЬКО текст обновлённой сводки, без преамбул."""
 
 
 def build_rolling_summary(previous_summary: str, new_messages: List[str]) -> str:
@@ -51,7 +43,7 @@ def build_rolling_summary(previous_summary: str, new_messages: List[str]) -> str
         response = call_llm(
             task_type="dialog",
             messages=[
-                {"role": "system", "content": _SUMMARY_PROMPT},
+                {"role": "system", "content": load_prompt("system/client_summary")},
                 {"role": "user", "content": user_content},
             ],
         )

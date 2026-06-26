@@ -165,7 +165,7 @@ const resources = {
         },
         prompts: {
           title: "Редактор промптов",
-          hint: "Правка системных промптов агентов. Сохранение в БД имеет приоритет над файлом .md.",
+          hint: "Коммуникационные промпты правит нутрициолог (приоритет БД над .md). Системные — read-only, их меняет разработчик.",
           source: "Источник",
           description: "Описание изменения (необязательно)",
           save: "Сохранить промпт",
@@ -174,6 +174,10 @@ const resources = {
           load_error: "Не удалось загрузить промпт",
           list_error: "Не удалось получить список промптов",
           save_error: "Не удалось сохранить промпт",
+          group_communication: "Коммуникационные",
+          group_system: "Системные",
+          readonly_badge: "Только чтение",
+          readonly_note: "Системный промпт — редактируется только разработчиком в файлах.",
         },
         knowledge: {
           title: "База знаний",
@@ -582,7 +586,7 @@ const resources = {
         },
         prompts: {
           title: "Prompt editor",
-          hint: "Edit agent system prompts. Saving to DB takes priority over the .md file.",
+          hint: "Communication prompts are editable by the nutritionist (DB overrides .md). System prompts are read-only — changed by the developer.",
           source: "Source",
           description: "Change description (optional)",
           save: "Save prompt",
@@ -591,6 +595,10 @@ const resources = {
           load_error: "Failed to load prompt",
           list_error: "Failed to list prompts",
           save_error: "Failed to save prompt",
+          group_communication: "Communication",
+          group_system: "System",
+          readonly_badge: "Read-only",
+          readonly_note: "System prompt — editable only by the developer in files.",
         },
         knowledge: {
           title: "Knowledge base",

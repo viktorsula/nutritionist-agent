@@ -29,6 +29,8 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 
+from prompts import load_prompt
+
 from .state import ClientState, create_initial_state, extract_response
 from .dialog_agent import dialog_node
 from .vision_agent import vision_node
@@ -313,23 +315,6 @@ def route_node(state: ClientState) -> ClientState:
     return state
 
 
-CLASSIFIER_PROMPT = """Ты — маршрутизатор сообщений клиента нутрициолога. Определи тип сообщения.
-
-Верни СТРОГО валидный JSON без markdown: {"route": "diary | nutrition | dialog"}
-
-- diary — клиент сообщает ФАКТ о себе: что поел/ест, свой вес, своё самочувствие,
-  А ТАКЖЕ результаты своих анализов с числовым значением ("холестерин 5.2", "глюкоза 4.8").
-- nutrition — ПРОСЬБА о рекомендации/анализе по питанию: что съесть, меню, можно ли
-  продукт, как улучшить рацион, вопрос про назначенный план или цель.
-- dialog — общий разговор, поддержка, благодарность, А ТАКЖЕ просьба НАЗВАТЬ его
-  собственные данные/показатели (вес, объёмы тела, результаты анализов — например
-  холестерин, глюкоза — динамика/прогресс). Всё остальное тоже сюда.
-
-Если клиент просто спрашивает «какой у меня вес/холестерин/показатель» — это dialog.
-
-Только JSON, ничего больше."""
-
-
 def _classify_text(message: str) -> str:
     """Грубая классификация текстового сообщения через дешёвый LLM (Groq)."""
     message = (message or '').strip()
@@ -340,7 +325,7 @@ def _classify_text(message: str) -> str:
         response = call_llm(
             task_type='dialog',
             messages=[
-                {"role": "system", "content": CLASSIFIER_PROMPT},
+                {"role": "system", "content": load_prompt("system/client_router")},
                 {"role": "user", "content": message},
             ],
         )

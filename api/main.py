@@ -13,7 +13,7 @@ CRUD/Auth/Storage фронт делает напрямую в Supabase под RL
 
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -201,11 +201,16 @@ def save_setting(
 
 
 @app.get("/nutritionist/prompts")
-def prompts_list(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> Dict[str, Any]:
-    """Список доступных промптов {name: {source, ...}} — файлы + переопределения из БД."""
-    from prompts import list_available_prompts
+def prompts_list(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> List[Dict[str, Any]]:
+    """
+    Реестр промптов с понятными названиями, разделом и источником значения.
 
-    return list_available_prompts()
+    Раздел communication — нутрициолог правит сам; system — только разработчик
+    (на фронте показывается read-only). См. prompts/registry.py.
+    """
+    from prompts import list_prompts_with_meta
+
+    return list_prompts_with_meta()
 
 
 @app.get("/nutritionist/prompt")
@@ -227,8 +232,18 @@ def prompt_save(
     body: SavePromptIn,
     user: Dict[str, Any] = Depends(require_role("nutritionist")),
 ) -> Dict[str, bool]:
-    """Сохраняет промпт в БД (system_settings.prompts), приоритет над файлом."""
-    from prompts import save_prompt
+    """Сохраняет промпт в БД (system_settings.prompts), приоритет над файлом.
+
+    Системные промпты (раздел system) — read-only через веб: их правит только
+    разработчик в файлах. Попытка сохранить такой промпт → 403.
+    """
+    from prompts import save_prompt, is_editable
+
+    if not is_editable(body.name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Этот промпт системный и редактируется только разработчиком (read-only).",
+        )
 
     try:
         save_prompt(body.name, body.text, description=body.description)

@@ -17,24 +17,12 @@ import re
 from typing import Any, Dict, List, Optional
 
 from utils.llm import call_llm
+from prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 6000
 """Ограничение длины текста для извлечения (стоимость/латентность)."""
-
-_LABS_PROMPT = """Ты извлекаешь числовые показатели анализов из текста медицинского документа.
-
-Верни СТРОГО валидный JSON без markdown:
-{"labs": [{"indicator": "название в нижнем регистре", "value": 0, "unit": "единицы или ''"}]}
-
-Правила:
-- Бери только фактические числовые РЕЗУЛЬТАТЫ показателей (например: холестерин, глюкоза,
-  гемоглобин, ттг). НЕ путай результат с референсным диапазоном/нормой.
-- indicator — короткое название показателя в нижнем регистре.
-- value — число (результат). unit — единицы измерения, если есть, иначе "".
-- Если показателей нет — labs: [].
-Только JSON."""
 
 
 def extract_labs_from_text(text: str, max_chars: int = MAX_TEXT_CHARS) -> List[Dict[str, Any]]:
@@ -53,7 +41,7 @@ def extract_labs_from_text(text: str, max_chars: int = MAX_TEXT_CHARS) -> List[D
         response = call_llm(
             task_type="dialog",
             messages=[
-                {"role": "system", "content": _LABS_PROMPT},
+                {"role": "system", "content": load_prompt("system/labs_extraction")},
                 {"role": "user", "content": text[:max_chars]},
             ],
         )

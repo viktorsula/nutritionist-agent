@@ -29,6 +29,8 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, END
 
+from prompts import load_prompt
+
 from utils.llm import call_llm
 from database import queries
 from .state import (
@@ -178,19 +180,6 @@ def parse_request_node(state: NutritionistState) -> NutritionistState:
     return state
 
 
-CLASSIFIER_PROMPT = """Ты — маршрутизатор запросов нутрициолога. Определи намерение.
-
-Верни СТРОГО валидный JSON без markdown:
-{"intent": "analytics | management | help", "client_name": "<имя или null>", "period_days": <число или null>}
-
-- analytics — запрос аналитики/сводки/отчёта/динамики/статистики по клиенту или базе.
-- management — команда создать/изменить: план, задачу, статус клиента, доверенный источник.
-- help — общий вопрос, неясный запрос, приветствие.
-
-client_name — имя клиента, если упомянуто (иначе null). period_days — период в днях, если указан.
-Только JSON."""
-
-
 def _classify_request(message: str) -> Dict[str, Any]:
     """Классификация запроса нутрициолога через дешёвый LLM (Groq)."""
     if not message:
@@ -199,7 +188,7 @@ def _classify_request(message: str) -> Dict[str, Any]:
         response = call_llm(
             task_type="dialog",
             messages=[
-                {"role": "system", "content": CLASSIFIER_PROMPT},
+                {"role": "system", "content": load_prompt("system/nutritionist_router")},
                 {"role": "user", "content": message},
             ],
         )

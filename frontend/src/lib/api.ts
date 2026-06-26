@@ -38,6 +38,17 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Запись реестра промптов (см. бэкенд prompts/registry.py). */
+export interface PromptMeta {
+  key: string;
+  label_ru: string;
+  label_en: string;
+  section: "communication" | "system";
+  llm: string;
+  source: "db" | "file";
+  editable: boolean;
+}
+
 export interface KnowledgeDoc {
   id: string;
   title: string | null;
@@ -87,8 +98,8 @@ export const api = {
       body: JSON.stringify({ key, value }),
     }),
 
-  /** Список промптов {name: {source, ...}}. */
-  promptsList: () => request<Record<string, { source: string }>>("/nutritionist/prompts"),
+  /** Реестр промптов с понятными названиями, разделом и источником значения. */
+  promptsList: () => request<PromptMeta[]>("/nutritionist/prompts"),
 
   /** Текущий текст промпта. */
   promptLoad: (name: string) =>
