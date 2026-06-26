@@ -26,15 +26,6 @@ REPORT_TYPES: Dict[str, Dict[str, str]] = {
     },
 }
 
-_SYSTEM_PROMPT = (
-    "Ты ассистент нутрициолога. Заполни шаблон отчёта данными конкретного клиента. "
-    "Сохраняй структуру и заголовки шаблона, подставляй реальные данные вместо "
-    "плейсхолдеров в фигурных скобках. Не выдумывай факты, которых нет в данных — "
-    "если данных нет, пиши «нет данных». Тон профессиональный. Отвечай на русском, "
-    "верни только готовый текст отчёта (markdown), без пояснений."
-)
-
-
 def list_report_types() -> Dict[str, str]:
     """{report_type: title} — для выбора на фронте."""
     return {k: v["title"] for k, v in REPORT_TYPES.items()}
@@ -63,7 +54,7 @@ def generate_report(client_id: str, report_type: str) -> Dict[str, Any]:
     resp = call_llm(
         task_type="analytics",
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": load_prompt("nutritionist/reports/recommendations_system")},
             {"role": "user", "content": user_prompt},
         ],
     )

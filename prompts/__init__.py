@@ -250,9 +250,20 @@ def get_prompt_history(prompt_name: str) -> list:
     return []
 
 
+from prompts.registry import (
+    prompt_registry,
+    get_prompt_meta,
+    is_editable,
+    list_prompts_with_meta,
+)
+
 __all__ = [
     'load_prompt',
     'save_prompt',
     'list_available_prompts',
-    'get_prompt_history'
+    'get_prompt_history',
+    'prompt_registry',
+    'get_prompt_meta',
+    'is_editable',
+    'list_prompts_with_meta',
 ]

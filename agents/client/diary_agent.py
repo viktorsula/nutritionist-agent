@@ -67,29 +67,6 @@ def diary_node(state: ClientState) -> ClientState:
 # ИЗВЛЕЧЕНИЕ СТРУКТУРЫ (LLM → JSON)
 # ==========================================
 
-EXTRACTION_PROMPT = """Ты — парсер сообщений клиента нутрициолога. Определи, о чём сообщение, и извлеки данные.
-
-Верни СТРОГО валидный JSON без markdown, в формате:
-{
-  "kind": "meal | weight | wellbeing | lab | other",
-  "ingredients": ["продукт1", "продукт2"],   // только для meal, иначе []
-  "weight_kg": 0,                              // только для weight (число), иначе null
-  "wellbeing": {"answer": "", "reason": ""},   // только для wellbeing, иначе null
-  "labs": [{"indicator": "", "value": 0, "unit": ""}]  // только для lab, иначе []
-}
-
-Правила:
-- meal — клиент описывает, что съел/ест/планирует съесть. Выдели продукты простыми названиями.
-- weight — клиент сообщает свой вес. Извлеки число в кг (поддержи "82", "81.5 кг", "вешу 80").
-- wellbeing — клиент описывает самочувствие. answer кратко ("хорошо"/"плохо"/"нормально"),
-  reason — причина, если указана.
-- lab — клиент сообщает результаты анализов (показатель + числовое значение): например
-  "холестерин 5.2", "глюкоза 4.8 ммоль/л". Для каждого: indicator (название как сказал клиент,
-  в нижнем регистре), value (число), unit (единицы, если указаны, иначе "").
-- other — всё остальное (вопросы, общий разговор).
-Не добавляй ничего, кроме JSON."""
-
-
 def _extract(state: ClientState) -> Dict[str, Any]:
     """Извлекает структуру из сообщения клиента через LLM (с безопасным fallback)."""
     message = (state.get('message') or '').strip()
@@ -100,7 +77,7 @@ def _extract(state: ClientState) -> Dict[str, Any]:
         response = call_llm(
             task_type='dialog',
             messages=[
-                {"role": "system", "content": EXTRACTION_PROMPT},
+                {"role": "system", "content": load_prompt("system/diary_extraction")},
                 {"role": "user", "content": message},
             ],
         )

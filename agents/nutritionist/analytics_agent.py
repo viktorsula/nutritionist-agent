@@ -101,17 +101,6 @@ def _client_analytics(state: NutritionistState) -> NutritionistState:
 
 # ---- Шаг 1: PLAN ----
 
-_PLAN_PROMPT = """Ты планируешь аналитику для нутрициолога. По запросу определи тему,
-смежные (взаимозависимые) вопросы и поисковые запросы для базы знаний и документов клиента.
-
-Верни СТРОГО валидный JSON без markdown:
-{"topic": "<короткий заголовок темы>",
- "questions": ["<смежный вопрос>", "..."],
- "search_queries": ["<запрос для векторного поиска>", "..."]}
-
-Только JSON."""
-
-
 def _plan_request(request: str) -> Dict[str, Any]:
     """Определяет тему, смежные вопросы и поисковые запросы (Groq)."""
     if not request:
@@ -120,7 +109,7 @@ def _plan_request(request: str) -> Dict[str, Any]:
         resp = call_llm(
             task_type="dialog",
             messages=[
-                {"role": "system", "content": _PLAN_PROMPT},
+                {"role": "system", "content": load_prompt("system/analytics_plan")},
                 {"role": "user", "content": request},
             ],
         )
