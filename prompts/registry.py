@@ -70,6 +70,13 @@ PROMPTS: List[Dict[str, str]] = [
         "section": SECTION_COMMUNICATION,
         "llm": "Claude",
     },
+    {
+        "key": "client/ack_received",
+        "label_ru": "Подтверждение получения («Принято»)",
+        "label_en": "Receipt acknowledgement",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Groq",
+    },
     # ── Системные (правит разработчик; read-only для нутрициолога) ───────────
     {
         "key": "nutritionist/management_system",
@@ -77,6 +84,13 @@ PROMPTS: List[Dict[str, str]] = [
         "label_en": "Command parser",
         "section": SECTION_SYSTEM,
         "llm": "Claude",
+    },
+    {
+        "key": "system/intake_determiner",
+        "label_ru": "Определитель темы сообщения",
+        "label_en": "Intake topic determiner",
+        "section": SECTION_SYSTEM,
+        "llm": "Groq",
     },
     {
         "key": "system/client_router",
