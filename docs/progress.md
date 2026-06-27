@@ -1,8 +1,44 @@
 # Журнал прогресса проекта
 
-## Статус: В разработке → ПРОД на Render (Telegram-канал нутрициолога живой)
-Последнее обновление: 25 июня 2026 (конец дня)
-Сессия: спасение работы + Telegram-канал нутрициолога + анализ промпт-архитектуры
+## Статус: В разработке → ПРОД на Render (Шаг 1 приёма входящих задеплоен)
+Последнее обновление: 27 июня 2026
+Сессия: переделка приёма входящих клиента — Шаг 1 (PR #18 влит в main, задеплоен на Render)
+
+### Сессия 27 июня 2026 — Приём входящих, ШАГ 1 (влит, задеплоен)
+
+Переделка приёма входящих сообщений клиента: исправлены две структурные ошибки —
+маршрутизация «модальность вперёд темы» и отсутствие понятия «ход». Реализован Шаг 1
+(под-шаги 0–1.6); PR #18 влит в `main` (merge `0ea30a9`, код `87e8a46`), задеплоен на
+Render (Live). Бэкенд-набор **152 passed**.
+
+**Таксономия 8→3** (`agents/client/branches.py`): верхний уровень `intake`(ack) /
+`profile`(answer, fallback) / `advice`(answer); нижний — под-типы хранения intake
+(meal/water/weight/wellbeing/labs/document). Определитель `intake_determiner.md` переписан
+(3 ветки + якоря + few-shot).
+
+**Граф пересобран линейно** (`orchestrator.py`):
+ingest → determine → load_context(по веткам) → dispatch(сегменты) → format_response → save_to_db.
+Удалены `route_node`/`_classify_text`.
+- ingest: `classify_image` поднят в нормализацию (food|lab_document|fridge|other) → `state['image_kind']`.
+- load_context: контекст ПО ВЕТКАМ (intake — лёгкий+алерты; profile — +история/сводка/задачи/ЗОЖ/анализы; advice — +сводка).
+- dispatch: дедуп по ветке; intake → persist без тёплого ответа (`ack_only`), захват → квитанция, неудача → clarify; profile/advice → полный ответ.
+- format_response: предупреждения → clarify → answer → квитанция «✓ Записал: …».
+
+**Уточнение клиента (`clarify`)** — третий исход: определитель шлёт при «не разобрать»,
+intake-неудача захвата тоже → clarify (промпт `client/clarify_request.md`). Данные «наугад» не пишем.
+
+**Данные клиента:** вода → `client_events: water_logged` (`diary._handle_water`); тип приёма пищи
+(`food_analysis.resolve_meal_type`) в `calories_logged` (diary + vision).
+
+**Совет (advice):** фото холодильника → `utils.vision.analyze_fridge` (UC-3, промпт `system/vision_fridge.md`)
+→ продукты + meal_type в промпт `nutrition_agent` («советуй только из имеющегося, в рамках плана»).
+
+**Тесты:** `test_intake` / `test_orchestrator` / `test_orchestrator_integration` (end-to-end на моках) /
+`test_diary` / `test_nutrition`.
+
+**⏳ E2E на проде** — гоняет Виктор через Telegram (чеклист 10 кейсов в `РАБОЧИЙ.md`).
+**Дальше:** Фаза 2 (turn-буфер debounce 6–10с + media_group/альбомы), Фаза 3 (цель воды в плане +
+алерты воды/еды + end-of-day напоминания + окна приёмов + оживить no_response).
 
 ### Сессия 25 июня 2026 (часть 2) — Telegram-канал нутрициолога + анализ промптов
 
