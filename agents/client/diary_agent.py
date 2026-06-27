@@ -26,7 +26,12 @@ from typing import Any, Dict, List, Optional
 from utils.llm import call_llm
 from prompts import load_prompt
 from .state import ClientState
-from .food_analysis import analyze_against_plan, determine_food_routing, highest_severity
+from .food_analysis import (
+    analyze_against_plan,
+    determine_food_routing,
+    highest_severity,
+    resolve_meal_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,8 @@ def diary_node(state: ClientState) -> ClientState:
 
     if kind == 'weight':
         outcome = _handle_weight(state, extracted, mode)
+    elif kind == 'water':
+        outcome = _handle_water(state, extracted, mode)
     elif kind == 'wellbeing':
         outcome = _handle_wellbeing(state, extracted, mode)
     elif kind == 'meal':
@@ -59,8 +66,28 @@ def diary_node(state: ClientState) -> ClientState:
     else:
         outcome = 'other'
 
+    # Под-тип захвата для квитанции (lab → labs; 'other' = не захватили → None → clarify).
+    state['intake_subtype'] = _SUBTYPE_OF.get(outcome)
+
+    # ack_only + успешный захват → тёплый ответ не нужен (заменит квитанция).
+    # При неудаче (outcome 'other') строим поясняющий текст — клиент его увидит (clarify).
+    if state.get('ack_only') and state['intake_subtype'] is not None:
+        state['agent_response'] = ''
+        return state
+
     state['agent_response'] = _build_response(state, extracted, outcome)
     return state
+
+
+# Нормализация outcome обработчика → ключ под-типа INTAKE_SUBTYPES (для квитанции).
+_SUBTYPE_OF = {
+    'meal': 'meal',
+    'water': 'water',
+    'weight': 'weight',
+    'wellbeing': 'wellbeing',
+    'lab': 'labs',
+    'other': None,
+}
 
 
 # ==========================================
@@ -151,6 +178,28 @@ def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> 
     return 'weight'
 
 
+def _handle_water(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
+    """Фиксирует выпитую воду как событие water_logged (мл). Дневная норма/алерт — Фаза 3."""
+    from database import queries
+
+    ml = _to_float(extracted.get('water_ml'))
+    if ml is None or ml <= 0:
+        return 'other'
+
+    try:
+        queries.log_client_event(
+            client_id=state['client_id'],
+            event_type='water_logged',
+            severity=None,
+            payload={"water_ml": ml, "channel": state.get('channel')},
+        )
+    except Exception as e:
+        logger.error(f"Diary failed to log water: {e}")
+        return 'other'
+
+    return 'water'
+
+
 def _handle_wellbeing(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
     """Фиксирует самочувствие; при негативном — уведомляет нутрициолога."""
     from database import queries
@@ -206,6 +255,8 @@ def _handle_meal(state: ClientState, extracted: Dict[str, Any], mode: str) -> st
         state['alerts'] = (state.get('alerts') or []) + alerts
         state['routing'] = determine_food_routing(state['alerts'], mode)
 
+    meal_type = resolve_meal_type(state.get('message', ''), extracted.get('meal_type'))
+
     try:
         queries.log_client_event(
             client_id=client_id,
@@ -213,6 +264,7 @@ def _handle_meal(state: ClientState, extracted: Dict[str, Any], mode: str) -> st
             severity=highest_severity(alerts),
             payload={
                 "source": "text",
+                "meal_type": meal_type,
                 "ingredients": ingredients,
                 "deviations": [
                     {"type": a.get('type'), "severity": a.get('severity'), "message": a.get('message')}

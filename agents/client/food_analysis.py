@@ -13,9 +13,44 @@ Food Analysis — общий анализ состава еды против р�
 """
 
 import logging
-from typing import Any, Dict, List
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack", "all_day")
+
+
+def resolve_meal_type(text: str = "", explicit: Optional[str] = None) -> str:
+    """
+    Тип приёма пищи: breakfast | lunch | dinner | snack | all_day.
+
+    Приоритет: явное значение (из extraction) → явные маркеры в тексте →
+    по времени суток (сервера; TODO: timezone клиента).
+    """
+    if explicit in MEAL_TYPES:
+        return explicit
+
+    low = (text or "").lower()
+    if any(w in low for w in ("на весь день", "весь день", "рацион на день", "за день")):
+        return "all_day"
+    if any(w in low for w in ("завтрак", "с утра", "утром")):
+        return "breakfast"
+    if "обед" in low:
+        return "lunch"
+    if any(w in low for w in ("ужин", "вечером")):
+        return "dinner"
+    if any(w in low for w in ("перекус", "снек")):
+        return "snack"
+
+    hour = datetime.now().hour
+    if hour < 12:
+        return "breakfast"
+    if hour < 17:
+        return "lunch"
+    if hour < 22:
+        return "dinner"
+    return "snack"
 
 
 def analyze_against_plan(

@@ -3,13 +3,14 @@ Intake — определитель темы входящего «хода» к�
 
 Ход (turn) = одна или несколько частей: текст / фото / голос / PDF (за окно сбора —
 Фаза 2; пока ход может состоять из одной части). Определитель разбивает ход на
-СЕГМЕНТЫ по темам (ветки из branches.py) и решает, нужен ли содержательный ответ
-(ack | answer).
+СЕГМЕНТЫ по 3 верхнеуровневым веткам (intake | profile | advice, см. branches.py)
+и решает, нужен ли содержательный ответ (ack | answer). Под-тип хранения внутри
+intake (куда сохранять) определяется позже, детерминированно, в обработчике.
 
 Контракт результата:
     {
       "segments": [
-        {"branch": "meal|labs|weight|wellbeing|nutrition_q|own_data|dialog|document",
+        {"branch": "intake | profile | advice",
          "parts": [<индексы частей хода>],
          "needs_answer": "ack" | "answer"}
       ],
@@ -29,6 +30,7 @@ from prompts import load_prompt
 from .branches import (
     ACK,
     ANSWER,
+    CLARIFY,
     FALLBACK_BRANCH,
     default_answer,
     is_valid_branch,
@@ -91,10 +93,21 @@ def determine_turn(parts: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     segments = _validate_segments(parsed.get("segments"), n)
     if not segments:
-        segments = [{"branch": FALLBACK_BRANCH, "parts": list(range(n)), "needs_answer": ANSWER}]
+        # Не смогли разобрать ход (пусто/ошибка LLM) → не угадываем, спрашиваем клиента.
+        segments = [{"branch": FALLBACK_BRANCH, "parts": list(range(n)), "needs_answer": CLARIFY}]
 
-    needs_answer = ANSWER if any(s["needs_answer"] == ANSWER for s in segments) else ACK
+    needs_answer = _aggregate_needs(segments)
     return {"segments": segments, "needs_answer": needs_answer}
+
+
+def _aggregate_needs(segments: List[Dict[str, Any]]) -> str:
+    """Агрегат по ходу: answer > clarify > ack."""
+    values = {s["needs_answer"] for s in segments}
+    if ANSWER in values:
+        return ANSWER
+    if CLARIFY in values:
+        return CLARIFY
+    return ACK
 
 
 def _validate_segments(raw: Any, n: int) -> List[Dict[str, Any]]:
@@ -116,7 +129,7 @@ def _validate_segments(raw: Any, n: int) -> List[Dict[str, Any]]:
             parts = list(range(n))
 
         needs = seg.get("needs_answer")
-        if needs not in (ACK, ANSWER):
+        if needs not in (ACK, ANSWER, CLARIFY):
             needs = default_answer(branch)
 
         result.append({"branch": branch, "parts": parts, "needs_answer": needs})

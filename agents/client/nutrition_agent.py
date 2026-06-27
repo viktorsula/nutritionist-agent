@@ -44,9 +44,11 @@ def nutrition_node(state: ClientState) -> ClientState:
     state['agent_used'] = 'nutrition_agent'
 
     try:
+        # Фото холодильника/полок (ветка advice) → распознаём продукты для совета.
+        fridge = _gather_fridge(state)
         knowledge_context = _gather_knowledge(state)
-        system_prompt = _build_system_prompt(state, knowledge_context)
-        messages = _build_messages(state, system_prompt)
+        system_prompt = _build_system_prompt(state, knowledge_context, fridge)
+        messages = _build_messages(state, system_prompt, fridge)
 
         # Веб-источники: серверный инструмент Claude web_search с whitelist
         # доверенных доменов (нутрициолог ведёт список в system_settings).
@@ -128,6 +130,55 @@ def _gather_knowledge(state: ClientState) -> str:
     return "\n\n".join(parts)
 
 
+def _gather_fridge(state: ClientState) -> Optional[Dict[str, Any]]:
+    """
+    Если ход — фото продуктов (холодильник/полки), распознаёт их (Gemini) для совета.
+
+    Возвращает {"products": [...], "meal_type": str} или None (не фото / не распозналось).
+    """
+    if state.get('message_type') != 'photo':
+        return None
+
+    metadata = state.get('metadata') or {}
+    image_bytes = metadata.get('image_bytes')
+    if not image_bytes:
+        return None
+
+    try:
+        from utils.vision import analyze_fridge
+
+        result = analyze_fridge(image_bytes, mime_type=metadata.get('mime_type', 'image/jpeg'))
+    except Exception as e:
+        logger.warning(f"analyze_fridge failed: {e}")
+        return None
+
+    products = [str(p).strip() for p in (result.get('products') or []) if p]
+    if not products:
+        return None
+
+    state['food_items'] = products
+    from .food_analysis import resolve_meal_type
+    return {"products": products, "meal_type": resolve_meal_type(state.get('message', ''))}
+
+
+def _format_fridge_block(fridge: Dict[str, Any]) -> str:
+    """Блок-инструкция для LLM: советовать ТОЛЬКО из имеющихся продуктов, в рамках плана."""
+    products = ", ".join(fridge.get('products') or [])
+    meal_labels = {
+        "breakfast": "завтрак", "lunch": "обед", "dinner": "ужин",
+        "snack": "перекус", "all_day": "рацион на весь день",
+    }
+    meal = meal_labels.get(fridge.get('meal_type'), "приём пищи")
+    return (
+        "## Доступные продукты клиента (распознаны с фото)\n"
+        f"{products}\n"
+        f"Приём пищи: {meal}\n"
+        "Предложи 2–3 варианта блюд ТОЛЬКО из этих продуктов (плюс базовые специи/масло/вода), "
+        "в рамках плана питания, ограничений и аллергий. Не предлагай того, чего нет в списке. "
+        "Если из имеющегося в рамках плана собрать сложно — честно скажи и подскажи, что докупить."
+    )
+
+
 def _get_trusted_domains() -> List[str]:
     """
     Читает system_settings.trusted_sources и возвращает список доменов.
@@ -162,7 +213,11 @@ def _get_trusted_domains() -> List[str]:
 # ПОСТРОЕНИЕ ПРОМПТА И СООБЩЕНИЙ
 # ==========================================
 
-def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
+def _build_system_prompt(
+    state: ClientState,
+    knowledge_context: str,
+    fridge: Optional[Dict[str, Any]] = None,
+) -> str:
     profile = state.get('client_profile') or {}
     plan = state.get('active_plan') or {}
 
@@ -196,6 +251,10 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
         summary = (state.get('conversation_summary') or '').strip()
         if summary:
             prompt += "\n\n## Память о клиенте (сводка прошлых разговоров)\n" + summary
+
+        # Совет из имеющихся продуктов (фото холодильника/полок) — UC-3.
+        if fridge:
+            prompt += "\n\n" + _format_fridge_block(fridge)
         return prompt
     except Exception as e:
         logger.error(f"Error building nutrition system prompt: {e}")
@@ -206,7 +265,11 @@ def _build_system_prompt(state: ClientState, knowledge_context: str) -> str:
         )
 
 
-def _build_messages(state: ClientState, system_prompt: str) -> List[Dict[str, str]]:
+def _build_messages(
+    state: ClientState,
+    system_prompt: str,
+    fridge: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
     messages = [{"role": "system", "content": system_prompt}]
 
     # История диалога (последние 10 сообщений)
@@ -214,7 +277,12 @@ def _build_messages(state: ClientState, system_prompt: str) -> List[Dict[str, st
     for msg in history[-10:]:
         messages.append({"role": msg['role'], "content": msg['content']})
 
-    messages.append({"role": "user", "content": state.get('message', '')})
+    # Фото продуктов без подписи — синтезируем явную просьбу о совете.
+    user_text = (state.get('message') or '').strip()
+    if not user_text and fridge:
+        user_text = "Я прислал фото продуктов. Подскажи, что можно из них приготовить."
+
+    messages.append({"role": "user", "content": user_text})
     return messages
 
 

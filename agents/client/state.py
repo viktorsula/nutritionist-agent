@@ -32,6 +32,9 @@ class ClientState(TypedDict, total=False):
     message_type: str
     """Тип сообщения: 'text' | 'photo' | 'voice' | 'document'"""
 
+    image_kind: str
+    """Тип фото, распознанный в нормализации (ingest): 'food' | 'lab_document' | 'fridge' | 'other'."""
+
     metadata: Dict[str, Any]
     """Дополнительные данные (фото, аудио, файлы)"""
 
@@ -108,7 +111,35 @@ class ClientState(TypedDict, total=False):
     # ==========================================
 
     route: str
-    """Выбранная оркестратором ветка: 'vision' | 'diary' | 'nutrition' | 'dialog'."""
+    """[legacy] Выбранная оркестратором ветка. Заменено определителем (segments)."""
+
+    segments: List[Dict[str, Any]]
+    """
+    Сегменты хода от определителя темы (intake.determine_turn):
+    [{"branch": "intake|profile|advice", "parts": [int], "needs_answer": "ack|answer"}].
+    """
+
+    needs_answer: str
+    """Агрегат по ходу: 'answer', если хоть один сегмент требует ответа, иначе 'ack'."""
+
+    segment_results: List[Dict[str, Any]]
+    """
+    Результаты обработки сегментов (узел dispatch), для склейки в format_response:
+    [{"branch": str, "needs_answer": "ack|answer|clarify", "text": str, "label": str}].
+    """
+
+    ack_only: bool
+    """
+    Флаг для обработчиков intake: при УСПЕШНОМ захвате данных НЕ генерировать тёплый
+    LLM-ответ (его заменит квитанция). При неудаче захвата обработчик всё равно отдаёт
+    КОНКРЕТНЫЙ уточняющий текст («пришли ещё раз / это вес или еда?»), который покажется клиенту.
+    """
+
+    intake_subtype: Optional[str]
+    """
+    Под-тип захваченной входящей информации (meal|water|weight|wellbeing|labs|document)
+    — для квитанции «✓ Записал: …». None, если захват НЕ удался → сегмент уходит в clarify.
+    """
 
     food_items: List[str]
     """
