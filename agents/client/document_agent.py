@@ -96,6 +96,11 @@ def document_node(state: ClientState) -> ClientState:
         logger.warning(f"Document lab extraction failed: {e}")
 
     state['saved_labs'] = saved
+    state['intake_subtype'] = 'document'
+
+    if state.get('ack_only'):
+        state['agent_response'] = ''
+        return state
 
     # 4. Ответ клиенту
     parts = ["Документ получил и сохранил в твою карту ✅"]

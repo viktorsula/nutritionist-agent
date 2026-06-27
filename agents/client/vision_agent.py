@@ -36,7 +36,12 @@ from utils.vision import (
 )
 from prompts import load_prompt
 from .state import ClientState
-from .food_analysis import analyze_against_plan, determine_food_routing, highest_severity
+from .food_analysis import (
+    analyze_against_plan,
+    determine_food_routing,
+    highest_severity,
+    resolve_meal_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +70,18 @@ def vision_node(state: ClientState) -> ClientState:
         )
         return state
 
-    # 1b. Тип изображения: документ-анализы обрабатываем отдельной веткой,
-    # еда/прочее — пищевым путём (исторически).
-    try:
-        kind = classify_image(image_bytes, mime_type=mime_type)
-    except Exception as e:
-        logger.warning(f"Vision classify failed, fallback to food: {e}")
-        kind = 'food'
+    # 1b. Тип изображения. Если фото уже распознано в нормализации (ingest) —
+    # переиспользуем (без повторного вызова Gemini); иначе классифицируем здесь.
+    kind = state.get('image_kind')
+    if not kind:
+        try:
+            kind = classify_image(image_bytes, mime_type=mime_type)
+        except Exception as e:
+            logger.warning(f"Vision classify failed, fallback to food: {e}")
+            kind = 'food'
 
-    if kind == 'document':
+    # Документ-анализы — отдельной веткой; еда / холодильник / прочее — пищевым путём.
+    if kind == 'lab_document':
         return _handle_lab_document(state, image_bytes, mime_type)
 
     # 2. Распознавание состава
@@ -111,13 +119,17 @@ def vision_node(state: ClientState) -> ClientState:
     # Маршрутизация (уведомлять ли нутрициолога об отклонениях)
     state['routing'] = determine_food_routing(state['alerts'], mode)
 
-    # 5. Ответ клиенту (тёплый, через LLM; предупреждения добавит format_response)
+    # 5. Память: зафиксировать приём пищи
+    _log_meal_event(state, food_analysis, alerts)
+    state['intake_subtype'] = 'meal'
+
+    # 6. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
+    if state.get('ack_only'):
+        state['agent_response'] = ''
+        return state
+
     outcome = 'recognized_deviation' if alerts else 'recognized_ok'
     state['agent_response'] = _build_response(state, food_analysis, outcome)
-
-    # 6. Память: зафиксировать приём пищи
-    _log_meal_event(state, food_analysis, alerts)
-
     return state
 
 
@@ -303,6 +315,12 @@ def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str)
         return state
 
     state['saved_labs'] = saved
+    state['intake_subtype'] = 'labs'
+
+    if state.get('ack_only'):
+        state['agent_response'] = ''
+        return state
+
     recorded = ", ".join(
         f"{l['indicator']} {l['value']}{(' ' + l['unit']) if l.get('unit') else ''}" for l in saved
     )
@@ -339,6 +357,7 @@ def _log_meal_event(
 
     payload = {
         "dish_name": food_analysis.get('dish_name', ''),
+        "meal_type": resolve_meal_type(state.get('message', '')),
         "ingredients": food_analysis.get('ingredients', []),
         "nutrition": food_analysis.get('nutrition', {}),
         "confidence": food_analysis.get('confidence', ''),

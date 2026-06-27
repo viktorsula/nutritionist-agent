@@ -165,19 +165,45 @@ def analyze_food_plate(
 # КЛАССИФИКАЦИЯ ТИПА ИЗОБРАЖЕНИЯ + АНАЛИЗЫ С ДОКУМЕНТА
 # ========================================
 
+IMAGE_KINDS = ("food", "lab_document", "fridge", "other")
+"""Типы фото для определителя темы: еда / бланк анализов / холодильник-полки / прочее."""
+
+
 def classify_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     """
-    Грубо классифицирует изображение: 'food' | 'document' | 'other'.
+    Грубо классифицирует изображение: 'food' | 'lab_document' | 'fridge' | 'other'.
 
-    При ошибке/неоднозначности → 'food' (исторический путь обработки фото).
+    Используется в нормализации (ingest) ДО определителя темы — чтобы тип фото был
+    известен при выборе ветки. При ошибке/неоднозначности → 'food' (самый частый кейс).
     """
     try:
         raw = analyze_image(image_bytes, load_prompt("system/vision_image_kind"), mime_type=mime_type)
         kind = (_safe_parse_json(raw) or {}).get("kind")
-        return kind if kind in ("food", "document", "other") else "food"
+        return kind if kind in IMAGE_KINDS else "food"
     except Exception as e:
         logger.warning(f"classify_image failed: {e}")
         return "food"
+
+
+def analyze_fridge(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:
+    """
+    Распознаёт продукты на фото холодильника/полок (UC-3) — из чего можно приготовить.
+
+    Returns:
+        {"products": [str, ...], "confidence": str, "notes": str, "raw": str}
+        При ошибке парсинга — products=[], причина в notes.
+    """
+    raw = analyze_image(image_bytes, load_prompt("system/vision_fridge"), mime_type=mime_type)
+    parsed = _safe_parse_json(raw)
+    if parsed is None:
+        logger.warning("analyze_fridge: не удалось распарсить JSON из ответа модели")
+        return {"products": [], "confidence": "low",
+                "notes": "Не удалось распознать продукты автоматически.", "raw": raw}
+    parsed.setdefault("products", [])
+    parsed.setdefault("confidence", "medium")
+    parsed.setdefault("notes", "")
+    parsed["raw"] = raw
+    return parsed
 
 
 def analyze_lab_document(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:

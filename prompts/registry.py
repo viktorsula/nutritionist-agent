@@ -70,6 +70,20 @@ PROMPTS: List[Dict[str, str]] = [
         "section": SECTION_COMMUNICATION,
         "llm": "Claude",
     },
+    {
+        "key": "client/ack_received",
+        "label_ru": "Подтверждение получения («Принято»)",
+        "label_en": "Receipt acknowledgement",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Groq",
+    },
+    {
+        "key": "client/clarify_request",
+        "label_ru": "Уточняющий вопрос клиенту",
+        "label_en": "Clarifying question",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Groq",
+    },
     # ── Системные (правит разработчик; read-only для нутрициолога) ───────────
     {
         "key": "nutritionist/management_system",
@@ -77,6 +91,13 @@ PROMPTS: List[Dict[str, str]] = [
         "label_en": "Command parser",
         "section": SECTION_SYSTEM,
         "llm": "Claude",
+    },
+    {
+        "key": "system/intake_determiner",
+        "label_ru": "Определитель темы сообщения",
+        "label_en": "Intake topic determiner",
+        "section": SECTION_SYSTEM,
+        "llm": "Groq",
     },
     {
         "key": "system/client_router",
@@ -117,6 +138,13 @@ PROMPTS: List[Dict[str, str]] = [
         "key": "system/vision_lab_document",
         "label_ru": "Распознавание анализов (фото)",
         "label_en": "Lab photo recognition",
+        "section": SECTION_SYSTEM,
+        "llm": "Gemini",
+    },
+    {
+        "key": "system/vision_fridge",
+        "label_ru": "Распознавание продуктов (холодильник)",
+        "label_en": "Fridge products recognition",
         "section": SECTION_SYSTEM,
         "llm": "Gemini",
     },
