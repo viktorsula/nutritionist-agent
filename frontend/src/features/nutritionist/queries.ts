@@ -9,6 +9,7 @@ export interface RegistryRow {
   access_status: string | null;
   paid_until: string | null;
   nutritionist_notes: string | null;
+  telegram_id?: number | null;
   client_profiles: { goals: string | null; weight: number | null; target_weight: number | null } | null;
 }
 
@@ -82,7 +83,7 @@ export function useClientRow(clientId: string) {
       const { data, error } = await supabase
         .from("clients")
         .select(
-          "id,name,client_status,payment_status,access_status,paid_until,nutritionist_notes,client_profiles(goals,weight,target_weight)",
+          "id,name,client_status,payment_status,access_status,paid_until,nutritionist_notes,telegram_id,client_profiles(goals,weight,target_weight)",
         )
         .eq("id", clientId)
         .maybeSingle();

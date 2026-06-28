@@ -12,7 +12,9 @@ CRUD/Auth/Storage фронт делает напрямую в Supabase под RL
 """
 
 import os
+import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
@@ -86,6 +88,7 @@ class GenerateReportIn(BaseModel):
 class CreateClientIn(BaseModel):
     email: str = Field(..., min_length=3)
     name: str = Field(..., min_length=1)
+    phone: str | None = None                   # необязательный телефон клиента
     timezone: str = "Asia/Dubai"
     language: str = "ru"
     paid: bool = Field(...)                    # оплачено / не оплачено
@@ -505,6 +508,7 @@ def create_client(
         return invite_client_account(
             email=body.email,
             name=body.name,
+            phone=(body.phone or "").strip() or None,
             timezone=body.timezone,
             language=body.language,
             actor_user_id=user["user_id"],
@@ -514,3 +518,79 @@ def create_client(
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# Срок годности ссылки привязки Telegram (дней).
+TELEGRAM_LINK_TTL_DAYS = 14
+
+
+def _telegram_deep_link(token: str) -> str:
+    """Собирает t.me/<bot>?start=<token> из TELEGRAM_BOT_USERNAME (или '' если не задан)."""
+    username = (os.environ.get("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+    return f"https://t.me/{username}?start={token}" if username else ""
+
+
+@app.post("/clients/{client_id}/telegram-link")
+def create_telegram_link(
+    client_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Создаёт (перевыпускает) одноразовую ссылку привязки Telegram для клиента.
+
+    Старый токен затирается (прежняя ссылка перестаёт работать). Ссылку нутрициолог
+    отправляет клиенту; клиент кликает → бот привязывает его telegram_id.
+    """
+    from database import queries
+
+    client = queries.get_client_by_id(client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    token = secrets.token_urlsafe(24)
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=TELEGRAM_LINK_TTL_DAYS)
+    ).isoformat()
+    queries.set_client_link_token(client_id, token, expires_at)
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user.get("user_id"),
+        action="create_telegram_link",
+        entity_type="client",
+        entity_id=client_id,
+        new_value={"expires_at": expires_at},
+    )
+
+    deep_link = _telegram_deep_link(token)
+    return {
+        "token": token,
+        "deep_link": deep_link,
+        "expires_at": expires_at,
+        "configured": bool(deep_link),
+    }
+
+
+@app.delete("/clients/{client_id}/telegram-link")
+def delete_telegram_link(
+    client_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Отвязывает Telegram от клиента (обнуляет telegram_id и активный токен).
+
+    Используется, если по ссылке привязался не тот человек: отвязать → создать новую ссылку.
+    """
+    from database import queries
+
+    client = queries.get_client_by_id(client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    queries.unlink_client_telegram(client_id)
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user.get("user_id"),
+        action="unlink_telegram",
+        entity_type="client",
+        entity_id=client_id,
+        old_value={"telegram_id": client.get("telegram_id")},
+    )
+    return {"ok": True}

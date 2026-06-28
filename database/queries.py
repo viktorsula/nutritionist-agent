@@ -195,6 +195,87 @@ def get_user_by_telegram_id(telegram_id: Any) -> Optional[Dict[str, Any]]:
     return _user_info_from_client(client) if client else None
 
 
+# =============================================
+# ПРИВЯЗКА TELEGRAM (самопривязка по одноразовому токену, Вариант B)
+# =============================================
+
+
+def set_client_link_token(
+    client_id: str, token: str, expires_at: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """
+    Записывает (перевыпускает) одноразовый токен привязки Telegram клиенту.
+
+    expires_at — ISO-8601 строка (UTC) или None. Перезапись затирает прежний токен —
+    старая ссылка перестаёт работать.
+    """
+    supabase = _service_client()
+    return _extract_data(
+        supabase.table("clients")
+        .update(
+            {
+                "telegram_link_token": token,
+                "telegram_link_token_expires_at": expires_at,
+            }
+        )
+        .eq("id", client_id)
+        .execute()
+    )
+
+
+def get_client_by_link_token(token: str) -> Optional[Dict[str, Any]]:
+    """Возвращает строку clients по токену привязки (или None). Срок годности проверяет вызывающий."""
+    if not token:
+        return None
+    supabase = _service_client()
+    return _execute_single(
+        supabase.table("clients")
+        .select("*")
+        .eq("telegram_link_token", token)
+        .single()
+    )
+
+
+def link_client_telegram(client_id: str, telegram_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Привязывает Telegram-аккаунт к клиенту: ставит telegram_id и ГАСИТ токен
+    (одноразовость) вместе со сроком годности.
+    """
+    supabase = _service_client()
+    return _extract_data(
+        supabase.table("clients")
+        .update(
+            {
+                "telegram_id": telegram_id,
+                "telegram_link_token": None,
+                "telegram_link_token_expires_at": None,
+            }
+        )
+        .eq("id", client_id)
+        .execute()
+    )
+
+
+def unlink_client_telegram(client_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Отвязывает Telegram от клиента: обнуляет telegram_id и любой активный токен.
+    После этого посторонний (если случайно привязался) теряет доступ в боте.
+    """
+    supabase = _service_client()
+    return _extract_data(
+        supabase.table("clients")
+        .update(
+            {
+                "telegram_id": None,
+                "telegram_link_token": None,
+                "telegram_link_token_expires_at": None,
+            }
+        )
+        .eq("id", client_id)
+        .execute()
+    )
+
+
 def get_user(user_id: str) -> Optional[Dict[str, Any]]:
     """
     Резолвит пользователя по UUID для router.get_user_info (fallback после telegram).

@@ -128,6 +128,7 @@ def invite_client_account(
     payment_status: str = "trial",
     client_status: str = "onboarding",
     paid_until: Optional[str] = None,
+    phone: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Создаёт аккаунт клиента (вызывает нутрициолог): приглашение в Supabase Auth +
@@ -169,6 +170,7 @@ def invite_client_account(
         "user_id": user_id,
         "name": name,
         "email": email,
+        "phone": phone,
         "timezone": timezone,
         "language": language,
         "payment_status": payment_status,
@@ -192,6 +194,7 @@ def invite_client_account(
             new_value={
                 "email": email,
                 "name": name,
+                "phone": phone,
                 "payment_status": payment_status,
                 "client_status": client_status,
                 "paid_until": paid_until,

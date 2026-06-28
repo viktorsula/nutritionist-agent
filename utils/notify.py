@@ -70,3 +70,18 @@ def format_alert(event: Dict[str, Any]) -> str:
         lines.append(f"Детали: {detail}")
     lines.append("Подробнее — в кабинете, панель «Алерты».")
     return "\n".join(lines)
+
+
+def format_telegram_linked(client_name: str, telegram_id: int) -> str:
+    """
+    Текст уведомления нутрициологу о факте привязки Telegram клиентом.
+
+    Нужен для контроля: если привязался не тот человек (ссылка попала постороннему),
+    нутрициолог увидит факт и сможет отвязать/перевыпустить ссылку в карточке клиента.
+    """
+    return (
+        "🔗 Привязка Telegram\n"
+        f"Клиент: {client_name or 'Клиент'}\n"
+        f"Telegram ID: {telegram_id}\n"
+        "Если это не тот человек — отвяжите в карточке клиента и создайте новую ссылку."
+    )
