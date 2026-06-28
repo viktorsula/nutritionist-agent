@@ -57,8 +57,12 @@ export function Login() {
         await verifyRecoveryOtp(email, code);
         beginPasswordReset();
       }
-    } catch {
-      setError(mode === "recover_request" ? t("login.reset_error") : t("login.error"));
+    } catch (e) {
+      // Показываем человекочитаемый текст + реальную причину от Supabase/Resend
+      // (диагностика: напр. отказ доставки тестовым sender'ом, rate limit и т.п.).
+      const base = mode === "recover_request" ? t("login.reset_error") : t("login.error");
+      const detail = e instanceof Error ? e.message : String(e ?? "");
+      setError(detail ? `${base} (${detail})` : base);
     } finally {
       setBusy(false);
     }
