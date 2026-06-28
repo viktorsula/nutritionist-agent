@@ -80,6 +80,7 @@ export const api = {
   createClient: (payload: {
     email: string;
     name: string;
+    phone?: string | null;
     timezone?: string;
     language?: string;
     paid: boolean;
@@ -148,5 +149,18 @@ export const api = {
     request<{ report_type: string; title: string; content: string }>("/nutritionist/report", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  /** Создать одноразовую ссылку привязки Telegram для клиента (nutritionist). */
+  telegramLink: (clientId: string) =>
+    request<{ token: string; deep_link: string; expires_at: string; configured: boolean }>(
+      `/clients/${encodeURIComponent(clientId)}/telegram-link`,
+      { method: "POST" },
+    ),
+
+  /** Отвязать Telegram от клиента (обнуляет telegram_id и активный токен). */
+  telegramUnlink: (clientId: string) =>
+    request<{ ok: boolean }>(`/clients/${encodeURIComponent(clientId)}/telegram-link`, {
+      method: "DELETE",
     }),
 };

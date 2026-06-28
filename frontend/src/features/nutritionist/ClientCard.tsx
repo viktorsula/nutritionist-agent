@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { WeightChart, LabChart } from "../client/charts";
@@ -48,6 +49,47 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
   const [notesOk, setNotesOk] = useState(false);
   const [alertsOnly, setAlertsOnly] = useState(false);
   useEffect(() => setNotes(client?.nutritionist_notes ?? ""), [clientId, client?.nutritionist_notes]);
+
+  // Привязка Telegram: создать одноразовую ссылку / отвязать.
+  const [tgLink, setTgLink] = useState("");
+  const [tgBusy, setTgBusy] = useState(false);
+  const [tgCopied, setTgCopied] = useState(false);
+  const [tgErr, setTgErr] = useState("");
+  useEffect(() => {
+    setTgLink("");
+    setTgErr("");
+    setTgCopied(false);
+  }, [clientId]);
+
+  async function createTgLink() {
+    setTgBusy(true);
+    setTgErr("");
+    setTgCopied(false);
+    try {
+      const r = await api.telegramLink(clientId);
+      setTgLink(r.deep_link || r.token);
+      if (!r.configured) setTgErr(t("card.tg_no_username"));
+    } catch (e) {
+      setTgErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTgBusy(false);
+    }
+  }
+
+  async function unlinkTg() {
+    if (!window.confirm(t("card.tg_unlink_confirm"))) return;
+    setTgBusy(true);
+    setTgErr("");
+    try {
+      await api.telegramUnlink(clientId);
+      setTgLink("");
+      qc.invalidateQueries({ queryKey: ["client_row", clientId] });
+    } catch (e) {
+      setTgErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTgBusy(false);
+    }
+  }
 
   async function saveNotes() {
     setSavingNotes(true);
@@ -174,6 +216,50 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
             </Button>
             {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
           </div>
+        </Card>
+
+        <Card title={t("card.tg_title")}>
+          {client?.telegram_id ? (
+            <div className="space-y-2">
+              <div className="text-xs text-gray-700">
+                {t("card.tg_linked")}:{" "}
+                <span className="font-mono">{client.telegram_id}</span>
+              </div>
+              <Button type="button" onClick={unlinkTg} disabled={tgBusy}>
+                {t("card.tg_unlink")}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">{t("card.tg_not_linked")}</div>
+              <Button type="button" onClick={createTgLink} disabled={tgBusy}>
+                {tgBusy ? t("card.tg_creating") : t("card.tg_create_link")}
+              </Button>
+              {tgLink && (
+                <div className="space-y-1">
+                  <div className="text-[11px] text-gray-500">{t("card.tg_link_hint")}</div>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      value={tgLink}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="w-full rounded-md border px-2 py-1 font-mono text-xs"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(tgLink);
+                        setTgCopied(true);
+                      }}
+                    >
+                      {tgCopied ? t("card.tg_copied") : t("card.tg_copy")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {tgErr && <div className="mt-2 text-xs text-red-600">{tgErr}</div>}
         </Card>
       </div>
 

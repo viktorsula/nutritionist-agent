@@ -8,6 +8,7 @@ export function CreateClientForm() {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [timezone, setTimezone] = useState("Asia/Dubai");
   const [language, setLanguage] = useState("ru");
   const [paid, setPaid] = useState(true); // оплачено / не оплачено
@@ -31,6 +32,7 @@ export function CreateClientForm() {
       await api.createClient({
         email,
         name,
+        phone: phone.trim() || null,
         timezone,
         language,
         paid,
@@ -40,6 +42,7 @@ export function CreateClientForm() {
       setOk(t("clients.created", { email }));
       setEmail("");
       setName("");
+      setPhone("");
       setPaidUntil("");
     } catch (err) {
       setError(err instanceof Error ? err.message : t("clients.error"));
@@ -69,6 +72,13 @@ export function CreateClientForm() {
         className={input}
         value={name}
         onChange={(e) => setName(e.target.value)}
+      />
+      <input
+        type="tel"
+        placeholder={t("clients.phone")}
+        className={input}
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
       />
       <div className="flex gap-2">
         <input

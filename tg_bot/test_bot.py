@@ -43,6 +43,8 @@ class TestTelegramCommands(unittest.IsolatedAsyncioTestCase):
         self.update.message = self.message
 
         self.context = Mock(spec=ContextTypes.DEFAULT_TYPE)
+        # /start без deep-link payload — иначе срабатывает ветка привязки по токену.
+        self.context.args = []
 
     @patch('tg_bot.commands.get_user_by_telegram_id', return_value=None)
     @patch('tg_bot.commands.get_client_by_telegram_id')
@@ -65,10 +67,8 @@ class TestTelegramCommands(unittest.IsolatedAsyncioTestCase):
     @patch('tg_bot.commands.get_user_by_telegram_id', return_value=None)
     @patch('tg_bot.commands.get_client_by_telegram_id')
     async def test_start_command_existing_user(self, mock_get_client, _mock_get_user):
-        """Тест /start для существующего пользователя"""
-        mock_client = Mock()
-        mock_client.name = "Иван Петров"
-        mock_get_client.return_value = mock_client
+        """Тест /start для существующего пользователя (queries возвращает dict)"""
+        mock_get_client.return_value = {"id": "cli-1", "name": "Иван Петров"}
 
         await start_command(self.update, self.context)
 
@@ -78,6 +78,59 @@ class TestTelegramCommands(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("возвращением", message_text)
         self.assertIn("Иван Петров", message_text)
+
+    @patch('tg_bot.commands.link_client_telegram')
+    @patch('tg_bot.commands.get_client_by_telegram_id', return_value=None)
+    @patch('tg_bot.commands.get_client_by_link_token')
+    @patch('tg_bot.commands.get_user_by_telegram_id', return_value=None)
+    async def test_start_link_token_success(
+        self, _mock_user, mock_by_token, _mock_by_tg, mock_link
+    ):
+        """/start <token> с валидным токеном → привязка + приветствие."""
+        self.context.args = ["validtoken"]
+        mock_by_token.return_value = {
+            "id": "cli-1",
+            "name": "Kate",
+            "telegram_link_token_expires_at": None,
+        }
+
+        await start_command(self.update, self.context)
+
+        mock_link.assert_called_once_with("cli-1", self.user.id)
+        message_text = self.message.reply_text.call_args[0][0]
+        self.assertIn("привязан", message_text.lower())
+        self.assertIn("Kate", message_text)
+
+    @patch('tg_bot.commands.link_client_telegram')
+    @patch('tg_bot.commands.get_client_by_link_token', return_value=None)
+    @patch('tg_bot.commands.get_user_by_telegram_id', return_value=None)
+    async def test_start_link_token_invalid(self, _mock_user, _mock_by_token, mock_link):
+        """/start <token> с неизвестным токеном → отказ, привязки нет."""
+        self.context.args = ["badtoken"]
+
+        await start_command(self.update, self.context)
+
+        mock_link.assert_not_called()
+        message_text = self.message.reply_text.call_args[0][0]
+        self.assertIn("недействительна", message_text.lower())
+
+    @patch('tg_bot.commands.link_client_telegram')
+    @patch('tg_bot.commands.get_client_by_link_token')
+    @patch('tg_bot.commands.get_user_by_telegram_id', return_value=None)
+    async def test_start_link_token_expired(self, _mock_user, mock_by_token, mock_link):
+        """/start <token> с истёкшим токеном → отказ, привязки нет."""
+        self.context.args = ["oldtoken"]
+        mock_by_token.return_value = {
+            "id": "cli-1",
+            "name": "Kate",
+            "telegram_link_token_expires_at": "2000-01-01T00:00:00+00:00",
+        }
+
+        await start_command(self.update, self.context)
+
+        mock_link.assert_not_called()
+        message_text = self.message.reply_text.call_args[0][0]
+        self.assertIn("истёк", message_text.lower())
 
     @patch('tg_bot.commands.get_user_by_telegram_id')
     async def test_start_command_nutritionist(self, mock_get_user):
