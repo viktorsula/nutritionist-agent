@@ -12,12 +12,53 @@
 токена, а не из тела запроса — клиент не может выдать себя за другого/сменить роль.
 """
 
+import json
 import logging
+import os
+import urllib.error
+import urllib.request
 from typing import Any, Dict, Optional
 
 from database.client import get_supabase_service_client
 
 logger = logging.getLogger(__name__)
+
+
+def set_user_password(auth_id: str, new_password: str, confirm_email: bool = True) -> None:
+    """
+    Задаёт новый пароль пользователю через GoTrue admin REST (service-ключ).
+
+    Прямой HTTP (PUT /auth/v1/admin/users/{id}), а НЕ gotrue-py SDK — чтобы не зависеть от
+    версии SDK в прод-образе (тот же урок, что с supabase .insert().select()).
+    confirm_email=True помечает email подтверждённым (сброс инициирует нутрициолог →
+    клиент должен сразу мочь войти). Бросает RuntimeError при ошибке.
+    """
+    base = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    if not base or not key:
+        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_KEY не заданы")
+
+    payload: Dict[str, Any] = {"password": new_password}
+    if confirm_email:
+        payload["email_confirm"] = True
+
+    req = urllib.request.Request(
+        f"{base}/auth/v1/admin/users/{auth_id}",
+        data=json.dumps(payload).encode(),
+        method="PUT",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            if r.status not in (200, 201):
+                raise RuntimeError(f"GoTrue admin вернул {r.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:300]
+        raise RuntimeError(f"GoTrue admin {e.code}: {body}") from e
 
 
 def verify_access_token(access_token: str) -> Optional[Dict[str, Any]]:

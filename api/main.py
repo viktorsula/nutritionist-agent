@@ -594,3 +594,69 @@ def delete_telegram_link(
         old_value={"telegram_id": client.get("telegram_id")},
     )
     return {"ok": True}
+
+
+@app.post("/clients/{client_id}/reset-password")
+def reset_client_password(
+    client_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Сброс пароля клиента нутрициологом (обход почты клиента: без домена Supabase/Brevo не шлют).
+
+    Генерирует временный пароль, ставит его клиенту через GoTrue admin (email_confirm),
+    возвращает пароль в ответе (кабинет покажет/скопирует) и best-effort дублирует письмом
+    нутрициологу на его почту (Gmail SMTP). Сам пароль в аудит НЕ пишется.
+    """
+    from database import auth as db_auth
+    from database import queries
+    from utils import mailer
+
+    client = queries.get_client_by_id(client_id)
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    auth_id = queries.get_user_auth_id(client.get("user_id"))
+    if not auth_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="У клиента нет связанного Auth-аккаунта",
+        )
+
+    new_password = secrets.token_urlsafe(9)
+
+    try:
+        db_auth.set_user_password(auth_id, new_password)
+    except Exception as e:  # noqa: BLE001 — пробрасываем как 502 с причиной
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+    # Письмо нутрициологу — best-effort, в обход Supabase/Brevo.
+    nutri_email = os.environ.get("GMAIL_USER") or user.get("email") or ""
+    client_label = client.get("name") or client.get("email") or client_id
+    email_result = mailer.send_email(
+        to=nutri_email,
+        subject=f"Сброс пароля клиента: {client_label}",
+        body=(
+            f"Временный пароль для клиента {client.get('name') or ''} "
+            f"({client.get('email') or 'без email'}):\n\n"
+            f"    {new_password}\n\n"
+            f"Передайте его клиенту. После входа клиент может сменить пароль в кабинете."
+        ),
+    )
+
+    queries.write_audit_log(
+        actor_type="nutritionist",
+        actor_id=user.get("user_id"),
+        action="reset_client_password",
+        entity_type="client",
+        entity_id=client_id,
+        new_value={"email_sent": email_result.get("sent")},
+    )
+
+    return {
+        "password": new_password,
+        "client_email": client.get("email"),
+        "email_sent": bool(email_result.get("sent")),
+        "email_reason": email_result.get("reason", ""),
+        "sent_to": nutri_email if email_result.get("sent") else "",
+    }

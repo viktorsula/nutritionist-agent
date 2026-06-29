@@ -171,6 +171,17 @@ def get_nutritionist_user() -> Optional[Dict[str, Any]]:
     }
 
 
+def get_user_auth_id(user_id: str) -> Optional[str]:
+    """Возвращает Supabase Auth UUID (users.auth_id) по users.id или None."""
+    if not user_id:
+        return None
+    supabase = _service_client()
+    row = _execute_single(
+        supabase.table("users").select("auth_id").eq("id", user_id).single()
+    )
+    return row.get("auth_id") if row else None
+
+
 def get_user_by_telegram_id(telegram_id: Any) -> Optional[Dict[str, Any]]:
     """
     Резолвит пользователя по Telegram ID для router.get_user_info.

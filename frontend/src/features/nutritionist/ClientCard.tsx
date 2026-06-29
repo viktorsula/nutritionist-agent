@@ -91,6 +91,35 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
     }
   }
 
+  // Сброс пароля клиента: нутрициолог задаёт временный пароль, показывает его (и копирует).
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwValue, setPwValue] = useState("");
+  const [pwEmailSent, setPwEmailSent] = useState(false);
+  const [pwCopied, setPwCopied] = useState(false);
+  const [pwErr, setPwErr] = useState("");
+  useEffect(() => {
+    setPwValue("");
+    setPwErr("");
+    setPwCopied(false);
+    setPwEmailSent(false);
+  }, [clientId]);
+
+  async function resetPassword() {
+    if (!window.confirm(t("card.pw_reset_confirm"))) return;
+    setPwBusy(true);
+    setPwErr("");
+    setPwCopied(false);
+    try {
+      const r = await api.resetClientPassword(clientId);
+      setPwValue(r.password);
+      setPwEmailSent(r.email_sent);
+    } catch (e) {
+      setPwErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPwBusy(false);
+    }
+  }
+
   async function saveNotes() {
     setSavingNotes(true);
     setNotesOk(false);
@@ -260,6 +289,41 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
             </div>
           )}
           {tgErr && <div className="mt-2 text-xs text-red-600">{tgErr}</div>}
+        </Card>
+
+        <Card title={t("card.pw_title")}>
+          <div className="space-y-2">
+            <div className="text-[11px] text-gray-500">{t("card.pw_hint")}</div>
+            <Button type="button" onClick={resetPassword} disabled={pwBusy}>
+              {pwBusy ? t("card.pw_resetting") : t("card.pw_reset")}
+            </Button>
+            {pwValue && (
+              <div className="space-y-1">
+                <div className="text-[11px] text-gray-500">{t("card.pw_new")}</div>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={pwValue}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="w-full rounded-md border px-2 py-1 font-mono text-xs"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(pwValue);
+                      setPwCopied(true);
+                    }}
+                  >
+                    {pwCopied ? t("card.pw_copied") : t("card.pw_copy")}
+                  </Button>
+                </div>
+                <div className="text-[11px] text-gray-500">
+                  {pwEmailSent ? t("card.pw_email_sent") : t("card.pw_email_not_sent")}
+                </div>
+              </div>
+            )}
+          </div>
+          {pwErr && <div className="mt-2 text-xs text-red-600">{pwErr}</div>}
         </Card>
       </div>
 

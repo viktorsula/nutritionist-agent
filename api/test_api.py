@@ -112,6 +112,54 @@ class TestApi(unittest.TestCase):
         self.assertEqual(r.json()["client_id"], "c-9")
         self.assertEqual(m.call_args.kwargs["actor_user_id"], "u-2")
 
+    # --- /clients/{id}/reset-password (роль nutritionist) ---
+    def test_reset_password_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.post("/clients/c-1/reset-password")
+        self.assertEqual(r.status_code, 403)
+
+    def test_reset_password_client_not_found(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_client_by_id", return_value=None):
+            r = self.client.post("/clients/nope/reset-password")
+        self.assertEqual(r.status_code, 404)
+
+    def test_reset_password_no_auth_account(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_client_by_id", return_value={"id": "c-1", "user_id": "u-1"}), \
+             patch("database.queries.get_user_auth_id", return_value=None):
+            r = self.client.post("/clients/c-1/reset-password")
+        self.assertEqual(r.status_code, 409)
+
+    def test_reset_password_ok_sets_and_emails(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        client_row = {"id": "c-1", "user_id": "u-1", "name": "Катя", "email": "k@mail.ru"}
+        with patch("database.queries.get_client_by_id", return_value=client_row), \
+             patch("database.queries.get_user_auth_id", return_value="au-1"), \
+             patch("database.auth.set_user_password") as set_pw, \
+             patch("utils.mailer.send_email", return_value={"sent": True, "reason": ""}) as send, \
+             patch("database.queries.write_audit_log") as audit:
+            r = self.client.post("/clients/c-1/reset-password")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["password"])                 # пароль возвращён для показа
+        self.assertTrue(body["email_sent"])
+        # пароль реально передан в admin-сеттер и в письмо, но НЕ в аудит
+        self.assertEqual(set_pw.call_args.args[0], "au-1")
+        self.assertEqual(set_pw.call_args.args[1], body["password"])
+        self.assertIn(body["password"], send.call_args.kwargs["body"])
+        self.assertEqual(audit.call_args.kwargs["action"], "reset_client_password")
+        self.assertNotIn("password", audit.call_args.kwargs.get("new_value", {}))
+
+    def test_reset_password_admin_failure_502(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        client_row = {"id": "c-1", "user_id": "u-1", "name": "Катя", "email": "k@mail.ru"}
+        with patch("database.queries.get_client_by_id", return_value=client_row), \
+             patch("database.queries.get_user_auth_id", return_value="au-1"), \
+             patch("database.auth.set_user_password", side_effect=RuntimeError("GoTrue admin 500: boom")):
+            r = self.client.post("/clients/c-1/reset-password")
+        self.assertEqual(r.status_code, 502)
+
 
 if __name__ == "__main__":
     unittest.main()
