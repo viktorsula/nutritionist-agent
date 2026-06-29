@@ -29,6 +29,7 @@ from .state import ClientState
 from .food_analysis import resolve_meal_type
 from .intake_schema import from_diary_extract
 from .intake_store import persist_record
+from .intake_present import present
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +61,8 @@ def diary_node(state: ClientState) -> ClientState:
         state['agent_response'] = ''
         return state
 
-    state['agent_response'] = _build_response(state, extracted, _present_outcome(subtype))
+    state['agent_response'] = present(state, record, prompt_name='client/diary_system')
     return state
-
-
-def _present_outcome(subtype: Optional[str]) -> str:
-    """Под-тип захвата → сценарий для _build_response ('labs'→'lab', None→'other')."""
-    return {'labs': 'lab'}.get(subtype, subtype or 'other')
 
 
 # ==========================================
@@ -99,92 +95,6 @@ def _extract(state: ClientState) -> Dict[str, Any]:
 
 
 # ==========================================
-# ОТВЕТ КЛИЕНТУ (LLM)
-# ==========================================
-
-def _build_response(state: ClientState, extracted: Dict[str, Any], outcome: str) -> str:
-    """Формирует тёплый ответ через dialog-LLM по сценарию outcome."""
-    try:
-        system_prompt = _build_system_prompt(state)
-        user_content = _build_facts_message(state, extracted, outcome)
-
-        response = call_llm(
-            task_type='dialog',
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-        )
-        state['llm_model'] = response.get('model')
-        state['llm_usage'] = response.get('usage', {})
-        return response['content']
-
-    except Exception as e:
-        logger.error(f"Diary response build error: {e}", exc_info=True)
-        return _fallback_ack(outcome)
-
-
-def _build_system_prompt(state: ClientState) -> str:
-    profile = state.get('client_profile') or {}
-    plan = state.get('active_plan') or {}
-
-    try:
-        template = load_prompt('client/diary_system')
-        return template.format(
-            client_name=profile.get('name', 'Клиент'),
-            restrictions=_format_list(plan.get('restrictions')),
-            allergies=_format_allergies(profile),
-            language='русский',  # TODO: определять из profile/channel
-        )
-    except Exception as e:
-        logger.error(f"Error building diary system prompt: {e}")
-        return (
-            "Ты ИИ-ассистент нутрициолога, ведёшь дневник клиента. "
-            "Тепло подтверди, что записал сообщение, и при необходимости уточни. "
-            "Не выдумывай. Отвечай на русском."
-        )
-
-
-def _build_facts_message(state: ClientState, extracted: Dict[str, Any], outcome: str) -> str:
-    lines = [f"СЦЕНАРИЙ: {outcome}", f"Сообщение клиента: {state.get('message', '')}"]
-
-    if outcome == 'meal':
-        lines.append("Записанный состав: " + ", ".join(state.get('food_items') or []))
-    elif outcome == 'weight':
-        lines.append(f"Записанный вес: {extracted.get('weight_kg')} кг")
-    elif outcome == 'wellbeing':
-        wb = extracted.get('wellbeing') or {}
-        lines.append(f"Самочувствие: {wb.get('answer', '')}; причина: {wb.get('reason', '') or '—'}")
-    elif outcome == 'lab':
-        labs = state.get('saved_labs') or []
-        recorded = ", ".join(
-            f"{l['indicator']} {l['value']}{(' ' + l['unit']) if l.get('unit') else ''}" for l in labs
-        )
-        lines.append(f"Записанные анализы: {recorded}")
-        lines.append("Не интерпретируй медицински — просто подтверди, что внёс в карту.")
-
-    alerts = state.get('alerts') or []
-    if alerts:
-        lines.append("Отклонения/алерты (упомяни мягко, аллерген — серьёзно):")
-        for a in alerts:
-            lines.append(f"- [{a.get('severity', 'low')}] {a.get('type')}: {a.get('message', '')}")
-
-    lines.append("\nСформулируй короткий тёплый ответ клиенту по сценарию.")
-    return "\n".join(lines)
-
-
-def _fallback_ack(outcome: str) -> str:
-    acks = {
-        'meal': "Спасибо, записал твой приём пищи ✅ Если что-то не так — поправь.",
-        'weight': "Записал твой вес ✅ Продолжай отмечать — так виднее динамика.",
-        'wellbeing': "Спасибо, что поделился самочувствием 🙏 Я всё зафиксировал.",
-        'lab': "Записал результаты анализов в твою карту ✅ Нутрициолог их увидит.",
-        'other': "Не совсем понял 🙂 Хочешь записать приём пищи, вес или самочувствие?",
-    }
-    return acks.get(outcome, acks['other'])
-
-
-# ==========================================
 # ФОРМАТИРОВАНИЕ / ПАРСИНГ
 # ==========================================
 
@@ -214,17 +124,3 @@ def _safe_parse_json(text: str) -> Optional[Dict[str, Any]]:
             return None
 
     return None
-
-
-def _format_list(values: Optional[List[Any]]) -> str:
-    if not values:
-        return "Нет"
-    return ", ".join(str(v) for v in values)
-
-
-def _format_allergies(profile: Dict[str, Any]) -> str:
-    allergies = (profile or {}).get('allergies') or []
-    if not allergies:
-        return "Нет"
-    names = [a.get('name', a) if isinstance(a, dict) else a for a in allergies]
-    return ", ".join(str(n) for n in names)

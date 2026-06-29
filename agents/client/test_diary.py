@@ -6,7 +6,6 @@
 import unittest
 
 from agents.client.food_analysis import resolve_meal_type
-from agents.client.diary_agent import _present_outcome
 
 
 class TestResolveMealType(unittest.TestCase):
@@ -23,14 +22,6 @@ class TestResolveMealType(unittest.TestCase):
     def test_falls_back_to_time(self):
         # без маркеров → по времени суток; значение из допустимых
         self.assertIn(resolve_meal_type("просто поел"), ("breakfast", "lunch", "dinner", "snack"))
-
-
-class TestPresentOutcome(unittest.TestCase):
-    def test_subtype_to_outcome(self):
-        self.assertEqual(_present_outcome("labs"), "lab")    # labs → сценарий lab
-        self.assertEqual(_present_outcome("meal"), "meal")
-        self.assertEqual(_present_outcome("water"), "water")
-        self.assertEqual(_present_outcome(None), "other")    # не захватили → other
 
 
 if __name__ == "__main__":

@@ -23,10 +23,8 @@ LLM: Groq llama-3.3-70b (task_type='dialog') — только для тёпло�
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-
-from utils.llm import call_llm
 import re
+from typing import Any, Dict, Optional, Tuple
 
 from utils.vision import (
     analyze_food_plate,
@@ -34,11 +32,11 @@ from utils.vision import (
     classify_image,
     analyze_lab_document,
 )
-from prompts import load_prompt
 from .state import ClientState
 from .food_analysis import resolve_meal_type
 from .intake_schema import from_food_plate, empty_record
 from .intake_store import persist_record
+from .intake_present import present
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +115,7 @@ def vision_node(state: ClientState) -> ClientState:
         state['agent_response'] = ''
         return state
 
-    outcome = 'recognized_deviation' if state.get('alerts') else 'recognized_ok'
-    state['agent_response'] = _build_response(state, food_analysis, outcome)
+    state['agent_response'] = present(state, record, prompt_name='client/vision_system')
     return state
 
 
@@ -142,108 +139,6 @@ def _get_image_from_state(state: ClientState) -> Tuple[Optional[bytes], str]:
         return None, mime_type
 
     return image_bytes, mime_type
-
-
-# ==========================================
-# ОТВЕТ КЛИЕНТУ (LLM)
-# ==========================================
-
-def _build_response(
-    state: ClientState,
-    food_analysis: Dict[str, Any],
-    outcome: str,
-) -> str:
-    """
-    Формирует тёплый ответ клиенту через dialog-LLM на основе распознанного состава.
-
-    Детерминированные предупреждения (аллерген/отклонения) добавляются позже в
-    format_response_node оркестратора из state['alerts'] — здесь только дружелюбное
-    подтверждение и приглашение дополнить.
-    """
-    try:
-        system_prompt = _build_system_prompt(state)
-        user_content = _build_facts_message(state, food_analysis, outcome)
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-        response = call_llm(task_type='dialog', messages=messages)
-        state['llm_model'] = response.get('model')
-        state['llm_usage'] = response.get('usage', {})
-        return response['content']
-
-    except Exception as e:
-        logger.error(f"Vision agent response build error: {e}", exc_info=True)
-        # Детерминированный fallback — подтверждение получения
-        return _fallback_ack(food_analysis)
-
-
-def _build_system_prompt(state: ClientState) -> str:
-    """Загружает и заполняет prompts/client/vision_system.md."""
-    profile = state.get('client_profile') or {}
-    plan = state.get('active_plan') or {}
-
-    try:
-        template = load_prompt('client/vision_system')
-        return template.format(
-            client_name=profile.get('name', 'Клиент'),
-            restrictions=_format_list(plan.get('restrictions')),
-            allergies=_format_allergies(profile),
-            language='русский',  # TODO: определять из profile/channel
-        )
-    except Exception as e:
-        logger.error(f"Error building vision system prompt: {e}")
-        return (
-            "Ты ИИ-ассистент нутрициолога. Клиент прислал фото еды, состав уже распознан. "
-            "Тепло подтверди получение, кратко перечисли записанное и пригласи дополнить. "
-            "Не выдумывай продукты. Отвечай на русском."
-        )
-
-
-def _build_facts_message(
-    state: ClientState,
-    food_analysis: Dict[str, Any],
-    outcome: str,
-) -> str:
-    """Формирует пользовательское сообщение с распознанными фактами для LLM."""
-    lines = [f"СЦЕНАРИЙ: {outcome}"]
-
-    dish = food_analysis.get('dish_name')
-    if dish:
-        lines.append(f"Блюдо: {dish}")
-
-    lines.append("Распознанный состав:")
-    lines.append(_format_ingredients(food_analysis))
-
-    nutrition_text = _format_nutrition(food_analysis)
-    if nutrition_text:
-        lines.append(f"Примерно КБЖУ (справочно): {nutrition_text}")
-
-    # Подпись/комментарий клиента к фото, если был
-    caption = (state.get('message') or '').strip()
-    if caption:
-        lines.append(f"Комментарий клиента к фото: {caption}")
-
-    alerts = state.get('alerts') or []
-    if alerts:
-        lines.append("Выявленные отклонения от рациона (упомяни мягко, аллерген — серьёзно):")
-        for a in alerts:
-            lines.append(f"- [{a.get('severity', 'low')}] {a.get('type')}: {a.get('message', '')}")
-
-    lines.append("\nСформулируй короткий тёплый ответ клиенту по сценарию.")
-    return "\n".join(lines)
-
-
-def _fallback_ack(food_analysis: Dict[str, Any]) -> str:
-    """Детерминированное подтверждение, если LLM недоступен."""
-    ingredients = _format_ingredients(food_analysis)
-    return (
-        "Спасибо, фото получил ✅ Записал:\n"
-        f"{ingredients}\n"
-        "Если что-то распозналось неточно — напиши, поправлю."
-    )
 
 
 # ==========================================
@@ -303,51 +198,3 @@ def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str)
         "Нутрициолог их увидит. Если что-то распозналось неточно — поправь текстом."
     )
     return state
-
-
-# ==========================================
-# ФОРМАТИРОВАНИЕ
-# ==========================================
-
-def _format_ingredients(food_analysis: Dict[str, Any]) -> str:
-    """Человекочитаемый список ингредиентов с формой приготовления."""
-    ingredients = food_analysis.get('ingredients') or []
-    if not ingredients:
-        return "—"
-
-    lines = []
-    for ing in ingredients:
-        if isinstance(ing, dict):
-            name = ing.get('name', '')
-            form = ing.get('form')
-            amount = ing.get('approx_amount')
-            extra = ", ".join(x for x in [form, amount] if x)
-            lines.append(f"- {name}" + (f" ({extra})" if extra else ""))
-        elif isinstance(ing, str):
-            lines.append(f"- {ing}")
-    return "\n".join(lines)
-
-
-def _format_nutrition(food_analysis: Dict[str, Any]) -> str:
-    """Строка с суммарным КБЖУ (справочно), если есть."""
-    total = (food_analysis.get('nutrition') or {}).get('total') or {}
-    if not total or not any(total.values()):
-        return ""
-    return (
-        f"{total.get('calories', 0)} ккал, "
-        f"Б {total.get('protein', 0)} / Ж {total.get('fats', 0)} / У {total.get('carbs', 0)}"
-    )
-
-
-def _format_list(values: Optional[List[Any]]) -> str:
-    if not values:
-        return "Нет"
-    return ", ".join(str(v) for v in values)
-
-
-def _format_allergies(profile: Dict[str, Any]) -> str:
-    allergies = (profile or {}).get('allergies') or []
-    if not allergies:
-        return "Нет"
-    names = [a.get('name', a) if isinstance(a, dict) else a for a in allergies]
-    return ", ".join(str(n) for n in names)
