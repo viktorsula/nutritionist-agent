@@ -163,4 +163,14 @@ export const api = {
     request<{ ok: boolean }>(`/clients/${encodeURIComponent(clientId)}/telegram-link`, {
       method: "DELETE",
     }),
+
+  /** Сбросить пароль клиента (nutritionist): задаёт временный пароль, возвращает его для показа. */
+  resetClientPassword: (clientId: string) =>
+    request<{
+      password: string;
+      client_email: string | null;
+      email_sent: boolean;
+      email_reason: string;
+      sent_to: string;
+    }>(`/clients/${encodeURIComponent(clientId)}/reset-password`, { method: "POST" }),
 };
