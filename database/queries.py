@@ -60,7 +60,7 @@ def insert_document_metadata(metadata: DocumentMetadata) -> Any:
         "metadata": metadata.metadata,
     }
     return _extract_data(
-        supabase.table("document_metadata").insert(payload).select("*").execute()
+        supabase.table("document_metadata").insert(payload).execute()
     )
 
 
@@ -106,7 +106,7 @@ def insert_knowledge_base_chunk(chunk: KnowledgeBaseChunk) -> Any:
         "source": chunk.source,
     }
     return _extract_data(
-        supabase.table("knowledge_base").insert(payload).select("*").execute()
+        supabase.table("knowledge_base").insert(payload).execute()
     )
 
 
@@ -120,7 +120,7 @@ def insert_client_document_chunk(chunk: ClientDocumentChunk) -> Any:
         "embedding": _vector_literal(chunk.embedding),
     }
     return _extract_data(
-        supabase.table("client_documents").insert(payload).select("*").execute()
+        supabase.table("client_documents").insert(payload).execute()
     )
 
 
@@ -378,7 +378,7 @@ def insert_measurement(
         if value is not None:
             payload[key] = value
     rows = _extract_data(
-        supabase.table("measurements").insert(payload).select("*").execute()
+        supabase.table("measurements").insert(payload).execute()
     )
     return (rows or [None])[0]
 
@@ -421,7 +421,7 @@ def insert_lab_result(
         if val is not None:
             payload[key] = val
     rows = _extract_data(
-        supabase.table("lab_results").insert(payload).select("*").execute()
+        supabase.table("lab_results").insert(payload).execute()
     )
     return (rows or [None])[0]
 
@@ -613,7 +613,7 @@ def log_client_event(
         "payload_json": payload or {},
     }
     return _extract_data(
-        supabase.table("client_events").insert(data).select("*").execute()
+        supabase.table("client_events").insert(data).execute()
     )
 
 
@@ -733,7 +733,7 @@ def upsert_system_setting(key: str, value: Any, updated_by: Optional[str] = None
         row["updated_by"] = updated_by
 
     return _extract_data(
-        supabase.table("system_settings").upsert(row, on_conflict="key").select("*").execute()
+        supabase.table("system_settings").upsert(row, on_conflict="key").execute()
     )
 
 
@@ -763,7 +763,7 @@ def save_conversation(
         "metadata_json": metadata or {},
     }
     return _extract_data(
-        supabase.table("conversations").insert(data).select("*").execute()
+        supabase.table("conversations").insert(data).execute()
     )
 
 
@@ -859,7 +859,7 @@ def create_nutrition_plan(
         "is_active": True,
     }
     return _extract_data(
-        supabase.table("nutrition_plans").insert(data).select("*").execute()
+        supabase.table("nutrition_plans").insert(data).execute()
     )
 
 
@@ -896,7 +896,7 @@ def create_task(
         "status": "pending",
     }
     return _extract_data(
-        supabase.table("tasks").insert(data).select("*").execute()
+        supabase.table("tasks").insert(data).execute()
     )
 
 
@@ -984,7 +984,7 @@ def create_wellness_plan(
         "notes": notes,
     }
     return _extract_data(
-        supabase.table("wellness_plans").insert(data).select("*").execute()
+        supabase.table("wellness_plans").insert(data).execute()
     )
 
 
@@ -1071,7 +1071,7 @@ def write_audit_log(
         "new_value": new_value,
     }
     return _extract_data(
-        supabase.table("audit_logs").insert(data).select("*").execute()
+        supabase.table("audit_logs").insert(data).execute()
     )
 
 
@@ -1130,7 +1130,7 @@ def create_notification_schedule(
         "is_active": is_active,
     }
     return _extract_data(
-        supabase.table("notification_schedule").insert(data).select("*").execute()
+        supabase.table("notification_schedule").insert(data).execute()
     )
 
 
