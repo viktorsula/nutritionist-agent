@@ -188,5 +188,57 @@ class TestAdapters(unittest.TestCase):
         self.assertTrue(s.validate(rec)["needs_clarify"])
 
 
+class TestCoerceToRecord(unittest.TestCase):
+    def test_new_format_meal_normalized_with_meal_type(self):
+        parsed = {
+            "kind": "meal", "confidence": "high", "uncertainties": [],
+            "meal": {"meal_type": None, "items": [{"name": "рис", "kbju": {"kcal": 200}}]},
+        }
+        rec = s.coerce_to_record(parsed, source="text", meal_type="dinner")
+        self.assertEqual(rec["kind"], "meal")
+        self.assertEqual(rec["source"], "text")
+        self.assertEqual(rec["meal"]["meal_type"], "dinner")  # форс meal_type
+        self.assertEqual(rec["meal"]["total"]["kcal"], 200.0)
+
+    def test_new_format_water_preserves_confidence_uncertainties(self):
+        parsed = {"kind": "water", "water_ml": 500, "confidence": "medium", "uncertainties": ["точный объём"]}
+        rec = s.coerce_to_record(parsed, source="text")
+        self.assertEqual(rec["water_ml"], 500.0)
+        self.assertEqual(rec["confidence"], "medium")
+        self.assertEqual(rec["uncertainties"], ["точный объём"])
+
+    def test_new_format_other_maps_to_none(self):
+        rec = s.coerce_to_record({"kind": "other", "confidence": "low"}, source="text")
+        self.assertEqual(rec["kind"], "none")
+
+    def test_legacy_diary_meal_via_adapter(self):
+        # старый формат: ingredients как список строк, без meal/confidence
+        parsed = {"kind": "meal", "ingredients": ["курица", "рис"], "meal_type": "lunch"}
+        rec = s.coerce_to_record(parsed, source="text", meal_type="lunch")
+        self.assertEqual([i["name"] for i in rec["meal"]["items"]], ["курица", "рис"])
+
+    def test_legacy_vision_via_adapter(self):
+        # старый формат vision: ingredients как dict-и + nutrition, без meal
+        parsed = {
+            "dish_name": "Плов", "confidence": "high",
+            "ingredients": [{"name": "рис", "form": "варёный", "approx_amount": "200 г"}],
+            "nutrition": {"items": [{"name": "рис", "calories": 260}], "total": {"calories": 260}},
+        }
+        rec = s.coerce_to_record(parsed, source="photo", meal_type="lunch")
+        self.assertEqual(rec["meal"]["dish_name"], "Плов")
+        self.assertEqual(rec["meal"]["items"][0]["amount"], {"value": 200.0, "unit": "g"})
+        self.assertEqual(rec["meal"]["total"]["kcal"], 260.0)
+
+    def test_new_vision_meal_block(self):
+        parsed = {
+            "kind": "meal", "confidence": "high", "uncertainties": [],
+            "meal": {"dish_name": "Омлет", "items": [{"name": "яйцо", "kbju": {"kcal": 150, "sugar_g": 1}}]},
+        }
+        rec = s.coerce_to_record(parsed, source="photo", meal_type="breakfast")
+        self.assertEqual(rec["source"], "photo")
+        self.assertEqual(rec["meal"]["dish_name"], "Омлет")
+        self.assertEqual(rec["meal"]["total"]["sugar_g"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -57,5 +57,18 @@ class TestPresent(unittest.TestCase):
         self.assertEqual(p._fallback({"kind": "none"}), "Принято ✅")
 
 
+class TestClarifyFromUncertainties(unittest.TestCase):
+    def test_one_message_lists_all(self):
+        rec = {"uncertainties": ["объём курицы", "рис отварной или жареный"]}
+        out = p.clarify_from_uncertainties({"client_profile": {"name": "Катя"}}, rec)
+        self.assertIn("Катя", out)
+        self.assertIn("1) объём курицы", out)
+        self.assertIn("2) рис отварной или жареный", out)
+
+    def test_empty_when_no_uncertainties(self):
+        self.assertEqual(p.clarify_from_uncertainties({}, {"uncertainties": []}), "")
+        self.assertEqual(p.clarify_from_uncertainties({}, {}), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,23 @@ def _facts_from_record(state: Dict[str, Any], record: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def clarify_from_uncertainties(state: Dict[str, Any], record: Dict[str, Any]) -> str:
+    """
+    ОДИН уточняющий вопрос на ВСЕ неясные моменты записи (не серия вопросов).
+
+    Собирает `record['uncertainties']` в одно сообщение с нумерованным списком. Если
+    список пуст (тема/факт совсем не разобраны) — возвращает '' (вызывающий применит
+    общий clarify_request оркестратора).
+    """
+    unc = [str(u).strip() for u in (record or {}).get("uncertainties") or [] if str(u).strip()]
+    if not unc:
+        return ""
+    name = (state.get("client_profile") or {}).get("name") or ""
+    prefix = f"{name}, уточни" if name else "Уточни"
+    items = "; ".join(f"{i + 1}) {u}" for i, u in enumerate(unc))
+    return f"{prefix}, пожалуйста: {items}?"
+
+
 def _fallback(record: Dict[str, Any]) -> str:
     """Детерминированное подтверждение, если LLM недоступен."""
     acks = {

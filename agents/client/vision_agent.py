@@ -28,15 +28,14 @@ from typing import Any, Dict, Optional, Tuple
 
 from utils.vision import (
     analyze_food_plate,
-    extract_ingredient_names,
     classify_image,
     analyze_lab_document,
 )
 from .state import ClientState
 from .food_analysis import resolve_meal_type
-from .intake_schema import from_food_plate, empty_record
+from .intake_schema import coerce_to_record, validate, empty_record
 from .intake_store import persist_record
-from .intake_present import present
+from .intake_present import present, clarify_from_uncertainties
 
 logger = logging.getLogger(__name__)
 
@@ -92,25 +91,24 @@ def vision_node(state: ClientState) -> ClientState:
         state['error'] = str(e)
         return state
 
-    ingredients = extract_ingredient_names(food_analysis)
-    confidence = (food_analysis.get('confidence') or 'low').lower()
+    # 3. Строим IntakeRecord (новый формат промпта или legacy — coerce разложит оба).
+    meal_type = resolve_meal_type(state.get('message', ''), (food_analysis.get('meal') or {}).get('meal_type'))
+    record = coerce_to_record(food_analysis, source='photo', meal_type=meal_type)
 
-    # 3. Исход: не распознано → переснять / описать словами
-    if not ingredients or confidence == 'low':
-        state['agent_response'] = (
+    # 4. Гейт: низкая уверенность / не разобрали состав → НЕ пишем, один уточняющий вопрос.
+    if validate(record)['needs_clarify']:
+        state['intake_subtype'] = None
+        state['agent_response'] = clarify_from_uncertainties(state, record) or (
             "Не удалось уверенно разобрать, что на фото 🙈 "
             "Пришли, пожалуйста, ещё раз при хорошем освещении — "
             "или опиши словами, что и как приготовлено. Я всё зафиксирую."
         )
         return state
 
-    # 4. Распознано → строим IntakeRecord и пишем единым domain-слоем
-    #    (состав/food_items, анализ рациона, алерты, событие calories_logged).
-    meal_type = resolve_meal_type(state.get('message', ''))
-    record = from_food_plate(food_analysis, meal_type=meal_type)
+    # 5. Распознано уверенно → единая запись (food_items, анализ рациона, алерты, событие).
     state['intake_subtype'] = persist_record(state, record)
 
-    # 5. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
+    # 6. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
     if state.get('ack_only'):
         state['agent_response'] = ''
         return state
