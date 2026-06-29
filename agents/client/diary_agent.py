@@ -26,12 +26,9 @@ from typing import Any, Dict, List, Optional
 from utils.llm import call_llm
 from prompts import load_prompt
 from .state import ClientState
-from .food_analysis import (
-    analyze_against_plan,
-    determine_food_routing,
-    highest_severity,
-    resolve_meal_type,
-)
+from .food_analysis import resolve_meal_type
+from .intake_schema import from_diary_extract
+from .intake_store import persist_record
 
 logger = logging.getLogger(__name__)
 
@@ -48,46 +45,28 @@ def diary_node(state: ClientState) -> ClientState:
     """
     state['agent_used'] = 'diary_agent'
 
+    # 1. Извлечь структуру → канонический IntakeRecord (тип приёма резолвим тут).
     extracted = _extract(state)
-    kind = extracted.get('kind', 'other')
+    meal_type = resolve_meal_type(state.get('message', ''), extracted.get('meal_type'))
+    record = from_diary_extract(extracted, meal_type=meal_type)
 
-    mode = state.get('access_info', {}).get('mode', 'full_program')
+    # 2. Единая запись в БД + алерты (domain-слой). Возвращает под-тип захвата или None.
+    subtype = persist_record(state, record)
+    state['intake_subtype'] = subtype
 
-    if kind == 'weight':
-        outcome = _handle_weight(state, extracted, mode)
-    elif kind == 'water':
-        outcome = _handle_water(state, extracted, mode)
-    elif kind == 'wellbeing':
-        outcome = _handle_wellbeing(state, extracted, mode)
-    elif kind == 'meal':
-        outcome = _handle_meal(state, extracted, mode)
-    elif kind == 'lab':
-        outcome = _handle_lab(state, extracted, mode)
-    else:
-        outcome = 'other'
-
-    # Под-тип захвата для квитанции (lab → labs; 'other' = не захватили → None → clarify).
-    state['intake_subtype'] = _SUBTYPE_OF.get(outcome)
-
-    # ack_only + успешный захват → тёплый ответ не нужен (заменит квитанция).
-    # При неудаче (outcome 'other') строим поясняющий текст — клиент его увидит (clarify).
-    if state.get('ack_only') and state['intake_subtype'] is not None:
+    # 3. ack_only + успешный захват → тёплый ответ не нужен (заменит квитанция).
+    #    При неудаче захвата (subtype None) строим поясняющий текст (clarify).
+    if state.get('ack_only') and subtype is not None:
         state['agent_response'] = ''
         return state
 
-    state['agent_response'] = _build_response(state, extracted, outcome)
+    state['agent_response'] = _build_response(state, extracted, _present_outcome(subtype))
     return state
 
 
-# Нормализация outcome обработчика → ключ под-типа INTAKE_SUBTYPES (для квитанции).
-_SUBTYPE_OF = {
-    'meal': 'meal',
-    'water': 'water',
-    'weight': 'weight',
-    'wellbeing': 'wellbeing',
-    'lab': 'labs',
-    'other': None,
-}
+def _present_outcome(subtype: Optional[str]) -> str:
+    """Под-тип захвата → сценарий для _build_response ('labs'→'lab', None→'other')."""
+    return {'labs': 'lab'}.get(subtype, subtype or 'other')
 
 
 # ==========================================
@@ -117,211 +96,6 @@ def _extract(state: ClientState) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Diary extraction error: {e}", exc_info=True)
         return {"kind": "other"}
-
-
-# ==========================================
-# ОБРАБОТЧИКИ ПО ТИПУ
-# ==========================================
-
-def _handle_weight(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
-    """Фиксирует вес и проверяет алерт резкого изменения."""
-    from database import queries
-    from business_rules.medical_rules import check_medical_alerts
-
-    client_id = state['client_id']
-    weight = extracted.get('weight_kg')
-
-    if weight is None:
-        return 'other'
-
-    # Вес — это точка временного ряда → measurements (для графиков/динамики),
-    # а НЕ событие. Событие в client_events пишем только если сработает алерт (ниже).
-    try:
-        queries.insert_measurement(
-            client_id=client_id,
-            weight=weight,
-            notes=f"channel={state.get('channel')}",
-        )
-    except Exception as e:
-        logger.error(f"Diary failed to insert measurement: {e}")
-
-    # Проверка алерта weight_increase (сравнивает события за 24ч)
-    try:
-        alerts = [
-            a for a in check_medical_alerts(client_id=client_id, mode=mode)
-            if a.get('type') == 'weight_increase'
-        ]
-    except Exception as e:
-        logger.error(f"Diary weight alert check error: {e}")
-        alerts = []
-
-    if alerts:
-        state['alerts'] = (state.get('alerts') or []) + alerts
-        state['routing'] = determine_food_routing(state['alerts'], mode)
-        # Персистим алерт как событие с severity, чтобы он попал в панель
-        # алертов нутрициолога (сам вес выше уходит в measurements, не в события).
-        try:
-            top = alerts[0]
-            queries.log_client_event(
-                client_id=client_id,
-                event_type='weight_increase',
-                severity=top.get('severity') or 'high',
-                payload={
-                    "weight": weight,
-                    "message": top.get('message'),
-                    "details": top.get('details'),
-                },
-            )
-        except Exception as e:
-            logger.error(f"Diary failed to log weight_increase alert: {e}")
-
-    return 'weight'
-
-
-def _handle_water(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
-    """Фиксирует выпитую воду как событие water_logged (мл). Дневная норма/алерт — Фаза 3."""
-    from database import queries
-
-    ml = _to_float(extracted.get('water_ml'))
-    if ml is None or ml <= 0:
-        return 'other'
-
-    try:
-        queries.log_client_event(
-            client_id=state['client_id'],
-            event_type='water_logged',
-            severity=None,
-            payload={"water_ml": ml, "channel": state.get('channel')},
-        )
-    except Exception as e:
-        logger.error(f"Diary failed to log water: {e}")
-        return 'other'
-
-    return 'water'
-
-
-def _handle_wellbeing(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
-    """Фиксирует самочувствие; при негативном — уведомляет нутрициолога."""
-    from database import queries
-
-    client_id = state['client_id']
-    wb = extracted.get('wellbeing') or {}
-    answer = (wb.get('answer') or '').strip()
-    reason = (wb.get('reason') or '').strip()
-
-    # Негативное самочувствие → алерт bad_wellbeing
-    negative_markers = ('плох', 'хуже', 'нехорош', 'тошн', 'боль', 'болит', 'устал', 'слаб')
-    is_bad = any(m in (answer + ' ' + reason).lower() for m in negative_markers)
-
-    severity = 'medium' if is_bad else None
-
-    try:
-        queries.log_client_event(
-            client_id=client_id,
-            event_type='bad_wellbeing' if is_bad else 'wellbeing_logged',
-            severity=severity,
-            payload={"answer": answer, "reason": reason, "channel": state.get('channel')},
-        )
-    except Exception as e:
-        logger.error(f"Diary failed to log wellbeing: {e}")
-
-    if is_bad:
-        alert = {
-            'type': 'bad_wellbeing',
-            'severity': 'medium',
-            'message': f"Клиент сообщает о плохом самочувствии: {reason or answer}",
-            'details': {"answer": answer, "reason": reason},
-        }
-        state['alerts'] = (state.get('alerts') or []) + [alert]
-        state['routing'] = determine_food_routing(state['alerts'], mode)
-
-    return 'wellbeing'
-
-
-def _handle_meal(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
-    """Фиксирует приём пищи (текстом) и сверяет состав с рационом."""
-    from database import queries
-
-    client_id = state['client_id']
-    ingredients = [str(i) for i in (extracted.get('ingredients') or []) if i]
-
-    if not ingredients:
-        return 'other'
-
-    state['food_items'] = ingredients
-
-    alerts = analyze_against_plan(client_id, ingredients, mode)
-    if alerts:
-        state['alerts'] = (state.get('alerts') or []) + alerts
-        state['routing'] = determine_food_routing(state['alerts'], mode)
-
-    meal_type = resolve_meal_type(state.get('message', ''), extracted.get('meal_type'))
-
-    try:
-        queries.log_client_event(
-            client_id=client_id,
-            event_type='calories_logged',
-            severity=highest_severity(alerts),
-            payload={
-                "source": "text",
-                "meal_type": meal_type,
-                "ingredients": ingredients,
-                "deviations": [
-                    {"type": a.get('type'), "severity": a.get('severity'), "message": a.get('message')}
-                    for a in alerts
-                ],
-                "channel": state.get('channel'),
-            },
-        )
-    except Exception as e:
-        logger.error(f"Diary failed to log meal: {e}")
-
-    return 'meal'
-
-
-def _handle_lab(state: ClientState, extracted: Dict[str, Any], mode: str) -> str:
-    """Фиксирует названные клиентом результаты анализов в lab_results (source='client')."""
-    from database import queries
-
-    client_id = state['client_id']
-    labs = extracted.get('labs') or []
-
-    saved: List[Dict[str, Any]] = []
-    for item in labs:
-        if not isinstance(item, dict):
-            continue
-        indicator = str(item.get('indicator') or '').strip().lower()
-        value = _to_float(item.get('value'))
-        if not indicator or value is None:
-            continue
-        unit = (str(item.get('unit')).strip() or None) if item.get('unit') else None
-        try:
-            queries.insert_lab_result(
-                client_id=client_id,
-                indicator=indicator,
-                value=value,
-                unit=unit,
-                source='client',
-            )
-            saved.append({"indicator": indicator, "value": value, "unit": unit})
-        except Exception as e:
-            logger.error(f"Diary failed to insert lab result '{indicator}': {e}")
-
-    if not saved:
-        return 'other'
-
-    state['saved_labs'] = saved
-    return 'lab'
-
-
-def _to_float(value: Any) -> Optional[float]:
-    """Аккуратно приводит значение к float (поддержка '5,2' и '5.2'); иначе None."""
-    if value is None:
-        return None
-    try:
-        return float(str(value).replace(',', '.').strip())
-    except (ValueError, TypeError):
-        return None
 
 
 # ==========================================

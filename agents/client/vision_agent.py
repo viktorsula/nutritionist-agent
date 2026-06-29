@@ -36,12 +36,9 @@ from utils.vision import (
 )
 from prompts import load_prompt
 from .state import ClientState
-from .food_analysis import (
-    analyze_against_plan,
-    determine_food_routing,
-    highest_severity,
-    resolve_meal_type,
-)
+from .food_analysis import resolve_meal_type
+from .intake_schema import from_food_plate, empty_record
+from .intake_store import persist_record
 
 logger = logging.getLogger(__name__)
 
@@ -109,26 +106,18 @@ def vision_node(state: ClientState) -> ClientState:
         )
         return state
 
-    # 4. Исход: распознано → сохраняем состав и анализируем рацион
-    state['food_items'] = ingredients
+    # 4. Распознано → строим IntakeRecord и пишем единым domain-слоем
+    #    (состав/food_items, анализ рациона, алерты, событие calories_logged).
+    meal_type = resolve_meal_type(state.get('message', ''))
+    record = from_food_plate(food_analysis, meal_type=meal_type)
+    state['intake_subtype'] = persist_record(state, record)
 
-    mode = state.get('access_info', {}).get('mode', 'full_program')
-    alerts = analyze_against_plan(state['client_id'], ingredients, mode)
-    state['alerts'] = (state.get('alerts') or []) + alerts
-
-    # Маршрутизация (уведомлять ли нутрициолога об отклонениях)
-    state['routing'] = determine_food_routing(state['alerts'], mode)
-
-    # 5. Память: зафиксировать приём пищи
-    _log_meal_event(state, food_analysis, alerts)
-    state['intake_subtype'] = 'meal'
-
-    # 6. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
+    # 5. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
     if state.get('ack_only'):
         state['agent_response'] = ''
         return state
 
-    outcome = 'recognized_deviation' if alerts else 'recognized_ok'
+    outcome = 'recognized_deviation' if state.get('alerts') else 'recognized_ok'
     state['agent_response'] = _build_response(state, food_analysis, outcome)
     return state
 
@@ -266,8 +255,6 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str) -> ClientState:
     """Фото распознано как документ-анализы: извлекаем показатели в lab_results."""
-    from database import queries
-
     state['agent_used'] = 'vision_agent_labs'
 
     try:
@@ -285,37 +272,24 @@ def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str)
     labs = result.get('labs') or []
     measured_at = result.get('measured_at') if _DATE_RE.match(str(result.get('measured_at') or '')) else None
 
-    saved: List[Dict[str, Any]] = []
-    for item in labs:
-        if not isinstance(item, dict):
-            continue
-        indicator = str(item.get('indicator') or '').strip().lower()
-        value = _to_float(item.get('value'))
-        if not indicator or value is None:
-            continue
-        unit = (str(item.get('unit')).strip() or None) if item.get('unit') else None
-        try:
-            queries.insert_lab_result(
-                client_id=state['client_id'],
-                indicator=indicator,
-                value=value,
-                unit=unit,
-                source='client',
-                measured_at=measured_at,
-            )
-            saved.append({"indicator": indicator, "value": value, "unit": unit})
-        except Exception as e:
-            logger.error(f"Vision failed to insert lab result '{indicator}': {e}")
+    # Строим IntakeRecord(lab) и пишем единым domain-слоем (normalize чистит значения).
+    record = empty_record('lab', 'photo')
+    record['labs'] = [
+        {"indicator": it.get('indicator'), "value": it.get('value'),
+         "unit": it.get('unit'), "measured_at": measured_at}
+        for it in labs if isinstance(it, dict)
+    ]
+    subtype = persist_record(state, record)
 
-    if not saved:
+    if not subtype:
         state['agent_response'] = (
             "Похоже, на фото документ, но числовые показатели разобрать не удалось 🙈 "
             "Пришли фото почётче — или напиши показатели текстом."
         )
         return state
 
-    state['saved_labs'] = saved
-    state['intake_subtype'] = 'labs'
+    saved = state.get('saved_labs') or []
+    state['intake_subtype'] = subtype
 
     if state.get('ack_only'):
         state['agent_response'] = ''
@@ -329,54 +303,6 @@ def _handle_lab_document(state: ClientState, image_bytes: bytes, mime_type: str)
         "Нутрициолог их увидит. Если что-то распозналось неточно — поправь текстом."
     )
     return state
-
-
-def _to_float(value: Any) -> Optional[float]:
-    """Приводит значение к float (поддержка '5,2'); иначе None."""
-    if value is None:
-        return None
-    try:
-        return float(str(value).replace(',', '.').strip())
-    except (ValueError, TypeError):
-        return None
-
-
-# ==========================================
-# ПАМЯТЬ (client_events)
-# ==========================================
-
-def _log_meal_event(
-    state: ClientState,
-    food_analysis: Dict[str, Any],
-    alerts: List[Dict[str, Any]],
-) -> None:
-    """Сохраняет распознанный приём пищи в client_events (calories_logged)."""
-    from database import queries
-
-    severity = highest_severity(alerts)
-
-    payload = {
-        "dish_name": food_analysis.get('dish_name', ''),
-        "meal_type": resolve_meal_type(state.get('message', '')),
-        "ingredients": food_analysis.get('ingredients', []),
-        "nutrition": food_analysis.get('nutrition', {}),
-        "confidence": food_analysis.get('confidence', ''),
-        "deviations": [
-            {"type": a.get('type'), "severity": a.get('severity'), "message": a.get('message')}
-            for a in alerts
-        ],
-        "channel": state.get('channel'),
-    }
-
-    try:
-        queries.log_client_event(
-            client_id=state['client_id'],
-            event_type='calories_logged',
-            severity=severity,
-            payload=payload,
-        )
-    except Exception as e:
-        logger.error(f"Vision agent failed to log meal event: {e}")
 
 
 # ==========================================
