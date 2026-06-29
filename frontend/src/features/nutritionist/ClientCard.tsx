@@ -62,6 +62,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
   }, [clientId]);
 
   async function createTgLink() {
+    if (!window.confirm(t("card.tg_create_confirm"))) return;
     setTgBusy(true);
     setTgErr("");
     setTgCopied(false);

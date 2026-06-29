@@ -185,8 +185,13 @@ def get_prompt_meta(key: str) -> Dict[str, str]:
 
 
 def is_editable(key: str) -> bool:
-    """True, если промпт можно править через веб (раздел communication)."""
-    return _BY_KEY.get(key, {}).get("section") == SECTION_COMMUNICATION
+    """True, если промпт известен реестру и его можно править через веб.
+
+    Раньше правились только communication; теперь и системные промпты доступны
+    нутрициологу через веб-редактор (с предупреждением). Откат прост: удалить override
+    в system_settings.prompts → вернётся дефолт из .md. Неизвестные ключи — не редактируемы.
+    """
+    return key in _BY_KEY
 
 
 def list_prompts_with_meta() -> List[Dict[str, Any]]:
@@ -195,7 +200,8 @@ def list_prompts_with_meta() -> List[Dict[str, Any]]:
 
     source: 'db' — переопределён нутрициологом в system_settings.prompts;
             'file' — используется дефолт из .md.
-    editable: можно ли менять через веб (раздел communication).
+    editable: можно ли менять через веб (теперь — все известные промпты).
+    section: 'communication' | 'system' — для группировки по вкладкам в редакторе.
     """
     overrides: Dict[str, Any] = {}
     try:
@@ -209,6 +215,6 @@ def list_prompts_with_meta() -> List[Dict[str, Any]]:
     for p in PROMPTS:
         entry = dict(p)
         entry["source"] = "db" if p["key"] in overrides else "file"
-        entry["editable"] = p["section"] == SECTION_COMMUNICATION
+        entry["editable"] = True
         result.append(entry)
     return result

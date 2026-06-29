@@ -55,6 +55,9 @@ const resources = {
         dashboard: "Панель управления",
         main: "Рабочая панель",
         chat: "Чат с ассистентом",
+        hide_chat: "Скрыть чат",
+        show_chat: "Чат",
+        resize_hint: "Потяните, чтобы изменить ширину",
         profile_title: "Профиль",
         status: "Статус",
         age: "Возраст",
@@ -178,6 +181,11 @@ const resources = {
           group_system: "Системные",
           readonly_badge: "Только чтение",
           readonly_note: "Системный промпт — редактируется только разработчиком в файлах.",
+          system_warning:
+            "Системные промпты — технические (классификаторы, парсеры, распознавание фото). " +
+            "Некоторые требуют строгого формата ответа (например, JSON): неаккуратная правка " +
+            "может нарушить работу. Сохранённый текст сразу идёт в работу — меняйте осознанно " +
+            "и сохраняйте исходный текст, чтобы при необходимости вернуть.",
         },
         knowledge: {
           title: "База знаний",
@@ -314,6 +322,7 @@ const resources = {
         tg_creating: "Создание…",
         tg_unlink: "Отвязать",
         tg_unlink_confirm: "Отвязать Telegram от клиента?",
+        tg_create_confirm: "Создать ссылку привязки? Если ссылка уже создавалась — прежняя перестанет работать.",
         tg_link_hint: "Отправьте эту ссылку клиенту — он перейдёт и привяжет свой Telegram. Ссылка одноразовая, действует 14 дней.",
         tg_copy: "Копировать",
         tg_copied: "Скопировано",
@@ -498,6 +507,9 @@ const resources = {
         dashboard: "Dashboard",
         main: "Main panel",
         chat: "Assistant chat",
+        hide_chat: "Hide chat",
+        show_chat: "Chat",
+        resize_hint: "Drag to resize",
         profile_title: "Profile",
         status: "Status",
         age: "Age",
@@ -621,6 +633,11 @@ const resources = {
           group_system: "System",
           readonly_badge: "Read-only",
           readonly_note: "System prompt — editable only by the developer in files.",
+          system_warning:
+            "System prompts are technical (classifiers, parsers, photo recognition). " +
+            "Some require a strict output format (e.g. JSON): careless edits can break behaviour. " +
+            "Saved text takes effect immediately — edit deliberately and keep the original text " +
+            "in case you need to restore it.",
         },
         knowledge: {
           title: "Knowledge base",
@@ -757,6 +774,7 @@ const resources = {
         tg_creating: "Creating…",
         tg_unlink: "Unlink",
         tg_unlink_confirm: "Unlink Telegram from this client?",
+        tg_create_confirm: "Create a linking link? If a link was already created, the previous one will stop working.",
         tg_link_hint: "Send this link to the client — they open it and link their Telegram. Single-use, valid for 14 days.",
         tg_copy: "Copy",
         tg_copied: "Copied",
