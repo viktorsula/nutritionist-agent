@@ -27,9 +27,9 @@ from utils.llm import call_llm
 from prompts import load_prompt
 from .state import ClientState
 from .food_analysis import resolve_meal_type
-from .intake_schema import from_diary_extract
+from .intake_schema import coerce_to_record, validate
 from .intake_store import persist_record
-from .intake_present import present
+from .intake_present import present, clarify_from_uncertainties
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +46,28 @@ def diary_node(state: ClientState) -> ClientState:
     """
     state['agent_used'] = 'diary_agent'
 
-    # 1. Извлечь структуру → канонический IntakeRecord (тип приёма резолвим тут).
-    extracted = _extract(state)
-    meal_type = resolve_meal_type(state.get('message', ''), extracted.get('meal_type'))
-    record = from_diary_extract(extracted, meal_type=meal_type)
+    # 1. Извлечь → IntakeRecord (новый формат промпта или legacy — coerce разложит оба).
+    #    Тип приёма резолвим детерминированно (текст/время суток приоритетнее LLM).
+    parsed = _extract(state)
+    mt_raw = (parsed.get('meal') or {}).get('meal_type') or parsed.get('meal_type')
+    meal_type = resolve_meal_type(state.get('message', ''), mt_raw)
+    record = coerce_to_record(parsed, source='text', meal_type=meal_type)
 
-    # 2. Единая запись в БД + алерты (domain-слой). Возвращает под-тип захвата или None.
+    # 2. Гейт: при low-уверенности / нет ключевого факта — НЕ пишем, один уточняющий вопрос.
+    if validate(record)['needs_clarify']:
+        state['intake_subtype'] = None
+        state['agent_response'] = clarify_from_uncertainties(state, record)  # '' → общий clarify
+        return state
+
+    # 3. Единая запись в БД + алерты. Возвращает под-тип захвата или None.
     subtype = persist_record(state, record)
     state['intake_subtype'] = subtype
+    if subtype is None:
+        state['agent_response'] = clarify_from_uncertainties(state, record)
+        return state
 
-    # 3. ack_only + успешный захват → тёплый ответ не нужен (заменит квитанция).
-    #    При неудаче захвата (subtype None) строим поясняющий текст (clarify).
-    if state.get('ack_only') and subtype is not None:
+    # 4. ack_only → тёплый ответ не нужен (заменит квитанция).
+    if state.get('ack_only'):
         state['agent_response'] = ''
         return state
 

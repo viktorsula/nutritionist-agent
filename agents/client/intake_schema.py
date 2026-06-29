@@ -372,3 +372,40 @@ def from_food_plate(
     }
     rec["uncertainties"] = list(fa.get("uncertainties") or [])
     return normalize(rec)
+
+
+def coerce_to_record(
+    parsed: Dict[str, Any],
+    *,
+    source: str,
+    meal_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Приводит выход экстрактора к IntakeRecord, принимая ОБА формата (де-риск Слайса 4):
+
+    - НОВЫЙ (промпт выдаёт схему: есть `meal`/`schema_version`, а для текста — `confidence`)
+      → normalize() напрямую (+ форс meal_type, маппинг 'other'→'none');
+    - СТАРЫЙ (legacy) → прежние адаптеры: photo → from_food_plate, text → from_diary_extract.
+
+    Так смена промпта не роняет поток: если LLM вернёт ответ «по-старому», он всё равно
+    корректно разложится.
+    """
+    parsed = parsed or {}
+    is_new = (
+        "meal" in parsed
+        or "schema_version" in parsed
+        or (source == "text" and "confidence" in parsed)
+    )
+
+    if is_new:
+        rec = dict(parsed)
+        rec.setdefault("source", source)
+        if rec.get("kind") == "other":
+            rec["kind"] = "none"
+        if meal_type and isinstance(rec.get("meal"), dict):
+            rec["meal"] = {**rec["meal"], "meal_type": meal_type}
+        return normalize(rec)
+
+    if source == "photo":
+        return from_food_plate(parsed, meal_type=meal_type, source=source)
+    return from_diary_extract(parsed, source=source, meal_type=meal_type)
