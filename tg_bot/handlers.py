@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from database.queries import get_user_by_telegram_id
 from agents import route_message
+from . import turn_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -113,19 +114,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not client:
         return
 
-    await update.message.chat.send_action("typing")
-
-    await _dispatch_to_router(
-        update,
-        client,
-        message=update.message.text,
-        message_type="text",
-        metadata={
-            "telegram_id": telegram_id,
-            "username": username,
-            "message_id": update.message.message_id,
-        },
-    )
+    # Фаза 2: кладём в turn-буфер (серию текстов склеит в один ход после паузы).
+    await turn_buffer.enqueue({
+        "kind": "text",
+        "update": update,
+        "message": update.message.text or "",
+    })
 
 
 async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -143,8 +137,6 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not client:
         return
 
-    await update.message.chat.send_action("typing")
-
     # Скачиваем фото наибольшего размера (последний элемент массива)
     try:
         photo = update.message.photo[-1]
@@ -159,19 +151,20 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     caption = update.message.caption or ""
 
-    await _dispatch_to_router(
-        update,
-        client,
-        message=caption,
-        message_type="photo",
-        metadata={
+    # Фаза 2: в буфер. Фото одного альбома (media_group_id) склеятся в один ход.
+    await turn_buffer.enqueue({
+        "kind": "photo",
+        "update": update,
+        "message": caption,
+        "media_group_id": update.message.media_group_id,
+        "metadata": {
             "telegram_id": telegram_id,
             "username": username,
             "message_id": update.message.message_id,
             "image_bytes": image_bytes,
             "mime_type": "image/jpeg",
         },
-    )
+    })
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -188,8 +181,6 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     client = await _ensure_registered(update)
     if not client:
         return
-
-    await update.message.chat.send_action("typing")
 
     # Голос (voice) или аудиофайл (audio) — берём то, что пришло
     media = update.message.voice or update.message.audio
@@ -212,19 +203,18 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Имя файла с расширением — Whisper определяет формат по нему
     audio_name = getattr(media, "file_name", None) or "voice.ogg"
 
-    await _dispatch_to_router(
-        update,
-        client,
-        message="",
-        message_type="voice",
-        metadata={
+    await turn_buffer.enqueue({
+        "kind": "voice",
+        "update": update,
+        "message": "",
+        "metadata": {
             "telegram_id": telegram_id,
             "username": username,
             "message_id": update.message.message_id,
             "audio_bytes": audio_bytes,
             "audio_name": audio_name,
         },
-    )
+    })
 
 
 async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -240,8 +230,6 @@ async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_
     client = await _ensure_registered(update)
     if not client:
         return
-
-    await update.message.chat.send_action("typing")
 
     doc = update.message.document
     if doc is None:
@@ -260,12 +248,11 @@ async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_
         )
         return
 
-    await _dispatch_to_router(
-        update,
-        client,
-        message=update.message.caption or "",
-        message_type="document",
-        metadata={
+    await turn_buffer.enqueue({
+        "kind": "document",
+        "update": update,
+        "message": update.message.caption or "",
+        "metadata": {
             "telegram_id": telegram_id,
             "username": username,
             "message_id": update.message.message_id,
@@ -273,7 +260,7 @@ async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_
             "mime_type": doc.mime_type or "application/octet-stream",
             "file_name": doc.file_name or "document",
         },
-    )
+    })
 
 
 async def _send_long_message(update: Update, text: str, max_length: int = 4000) -> None:
