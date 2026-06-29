@@ -195,9 +195,16 @@ class TestTelegramHandlers(unittest.IsolatedAsyncioTestCase):
 
         self.update = Mock(spec=Update)
         self.update.effective_user = self.user
+        self.update.effective_chat = self.chat
         self.update.message = self.message
+        self.message.media_group_id = None
 
         self.context = Mock(spec=ContextTypes.DEFAULT_TYPE)
+
+        # Фаза 2: тесты хендлеров проверяют контракт «хендлер → немедленная диспетчеризация».
+        # Отключаем turn-буфер (debounce=0 → обработка сразу), чтобы assert'ы на route_message
+        # оставались валидны. Буферизацию проверяет отдельный TestTurnBuffer.
+        os.environ["TELEGRAM_TURN_DEBOUNCE_SEC"] = "0"
 
     @patch('tg_bot.handlers.get_user_by_telegram_id')
     async def test_handle_text_unregistered_user(self, mock_get_client):
@@ -349,6 +356,116 @@ class TestTelegramHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Доступ ограничен", self.message.reply_text.call_args[0][0])
 
 
+class TestTurnBuffer(unittest.IsolatedAsyncioTestCase):
+    """Тесты turn-буфера (Фаза 2): склейка серии текстов и альбомов."""
+
+    def setUp(self):
+        import asyncio  # noqa: F401 — для читаемости
+        from tg_bot import turn_buffer
+
+        self.turn_buffer = turn_buffer
+        turn_buffer._buffers.clear()
+        # Маленький debounce, чтобы тесты были быстрыми.
+        os.environ["TELEGRAM_TURN_DEBOUNCE_SEC"] = "0.05"
+
+    def _mk_update(self, chat_id=555, text="", caption=None, message_id=1):
+        user = Mock(spec=User)
+        user.id = chat_id
+        user.username = "u"
+
+        chat = Mock(spec=Chat)
+        chat.id = chat_id
+        chat.send_action = AsyncMock()
+
+        msg = Mock(spec=Message)
+        msg.text = text
+        msg.caption = caption
+        msg.message_id = message_id
+        msg.reply_text = AsyncMock()
+        msg.chat = chat
+
+        upd = Mock(spec=Update)
+        upd.effective_user = user
+        upd.effective_chat = chat
+        upd.message = msg
+        return upd
+
+    async def _wait_flush(self):
+        import asyncio
+        await asyncio.sleep(0.2)  # > debounce (0.05)
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_text_burst_coalesced(self, mock_dispatch):
+        """Три текста подряд → один ход с конкатенацией."""
+        for i, txt in enumerate(["вешу 80", "и съел кашу", "как дела?"]):
+            await self.turn_buffer.enqueue(
+                {"kind": "text", "update": self._mk_update(text=txt, message_id=i), "message": txt}
+            )
+        await self._wait_flush()
+
+        mock_dispatch.assert_called_once()
+        kwargs = mock_dispatch.call_args.kwargs
+        self.assertEqual(kwargs["message_type"], "text")
+        self.assertEqual(kwargs["message"], "вешу 80\nи съел кашу\nкак дела?")
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_album_coalesced_to_first_photo(self, mock_dispatch):
+        """Альбом (один media_group_id) → один ход по первому фото + heads-up «получено N»."""
+        updates = []
+        for i in range(3):
+            upd = self._mk_update(caption=("обед" if i == 0 else None), message_id=i)
+            updates.append(upd)
+            await self.turn_buffer.enqueue({
+                "kind": "photo",
+                "update": upd,
+                "message": upd.message.caption or "",
+                "media_group_id": "ALBUM1",
+                "metadata": {"image_bytes": b"\xff\xd8", "mime_type": "image/jpeg"},
+            })
+        await self._wait_flush()
+
+        mock_dispatch.assert_called_once()
+        kwargs = mock_dispatch.call_args.kwargs
+        self.assertEqual(kwargs["message_type"], "photo")
+        self.assertEqual(kwargs["message"], "обед")          # общая подпись альбома
+        self.assertEqual(kwargs["metadata"]["album_count"], 3)
+        updates[0].message.reply_text.assert_called_once()    # heads-up «получено N фото»
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_mixed_text_then_voice_two_turns(self, mock_dispatch):
+        """Текст + голос → два отдельных хода."""
+        await self.turn_buffer.enqueue(
+            {"kind": "text", "update": self._mk_update(text="привет"), "message": "привет"}
+        )
+        await self.turn_buffer.enqueue({
+            "kind": "voice",
+            "update": self._mk_update(message_id=2),
+            "message": "",
+            "metadata": {"audio_bytes": b"ogg", "audio_name": "voice.ogg"},
+        })
+        await self._wait_flush()
+
+        self.assertEqual(mock_dispatch.call_count, 2)
+        types = [c.kwargs["message_type"] for c in mock_dispatch.call_args_list]
+        self.assertEqual(types, ["text", "voice"])
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_debounce_resets_on_new_message(self, mock_dispatch):
+        """Сообщение в пределах окна перевзводит таймер → единый сброс обоими сообщениями."""
+        import asyncio
+        await self.turn_buffer.enqueue(
+            {"kind": "text", "update": self._mk_update(text="раз"), "message": "раз"}
+        )
+        await asyncio.sleep(0.02)  # < debounce
+        await self.turn_buffer.enqueue(
+            {"kind": "text", "update": self._mk_update(text="два", message_id=2), "message": "два"}
+        )
+        await self._wait_flush()
+
+        mock_dispatch.assert_called_once()
+        self.assertEqual(mock_dispatch.call_args.kwargs["message"], "раз\nдва")
+
+
 def run_tests():
     """Запуск всех тестов через стандартный раннер (поддерживает async-тесты)."""
     loader = unittest.TestLoader()
@@ -356,6 +473,7 @@ def run_tests():
 
     suite.addTests(loader.loadTestsFromTestCase(TestTelegramCommands))
     suite.addTests(loader.loadTestsFromTestCase(TestTelegramHandlers))
+    suite.addTests(loader.loadTestsFromTestCase(TestTurnBuffer))
 
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
