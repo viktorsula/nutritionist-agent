@@ -255,7 +255,23 @@ INSERT INTO system_settings (key, value, description) VALUES
 }'::jsonb, 'Пороги алертов (глобальные)'),
 ('default_language', '"ru"'::jsonb, 'Язык по умолчанию'),
 ('default_timezone', '"Asia/Dubai"'::jsonb, 'Часовой пояс по умолчанию'),
-('trial_days', '7'::jsonb, 'Дней бесплатного триала');
+('trial_days', '7'::jsonb, 'Дней бесплатного триала'),
+-- llm_config: основная модель + резерв (fallbacks) по task_type. Правится нутрициологом
+-- в «Настройках». Источник правды после сидинга — БД; код-константы — дефолт (см. миграцию 011).
+('llm_config', '{
+  "dialog": {"provider": "groq", "model": "llama-3.3-70b-versatile", "temperature": 0.7, "max_tokens": 2000,
+             "fallbacks": [{"provider": "gemini", "model": "gemini-2.5-flash"}]},
+  "analytics": {"provider": "claude", "model": "claude-sonnet-4-6", "temperature": 0.3, "max_tokens": 4000,
+                "fallbacks": [{"provider": "groq", "model": "llama-3.3-70b-versatile"}, {"provider": "gemini", "model": "gemini-2.5-flash"}]},
+  "vision": {"provider": "gemini", "model": "gemini-2.5-flash", "temperature": 0.5, "max_tokens": 1500,
+             "fallbacks": [{"provider": "claude", "model": "claude-sonnet-4-6"}]},
+  "nutrition_analysis": {"provider": "claude", "model": "claude-sonnet-4-6", "temperature": 0.4, "max_tokens": 3000,
+                         "fallbacks": [{"provider": "groq", "model": "llama-3.3-70b-versatile"}, {"provider": "gemini", "model": "gemini-2.5-flash"}]},
+  "summary": {"provider": "groq", "model": "llama-3.3-70b-versatile", "temperature": 0.5, "max_tokens": 2000,
+              "fallbacks": [{"provider": "gemini", "model": "gemini-2.5-flash"}]},
+  "planning": {"provider": "claude", "model": "claude-sonnet-4-6", "temperature": 0.4, "max_tokens": 3000,
+               "fallbacks": [{"provider": "groq", "model": "llama-3.3-70b-versatile"}, {"provider": "gemini", "model": "gemini-2.5-flash"}]}
+}'::jsonb, 'Конфигурация LLM по task_type: основная модель + резерв (fallbacks)');
 
 -- =============================================
 -- БЛОК 5: ДОКУМЕНТЫ И PGVECTOR

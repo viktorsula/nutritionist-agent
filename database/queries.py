@@ -463,7 +463,7 @@ def get_setting(key: str) -> Optional[Any]:
         key: Ключ настройки (например, 'llm_config')
 
     Returns:
-        Значение setting_value (может быть dict, list, str, int, bool)
+        Значение колонки `value` (может быть dict, list, str, int, bool)
         или None если настройка не найдена
 
     Example:
@@ -473,7 +473,10 @@ def get_setting(key: str) -> Optional[Any]:
     """
     setting = get_system_setting(key)
     if setting and isinstance(setting, dict):
-        return setting.get('setting_value')
+        # Колонка JSONB называется 'value' (schema.sql); раньше тут было ошибочное
+        # 'setting_value' → get_setting всегда возвращал None, и БД-переопределение
+        # моделей/промптов/trusted_sources было мёртвым (маскировалось дефолтами/файлами).
+        return setting.get('value')
     return None
 
 
