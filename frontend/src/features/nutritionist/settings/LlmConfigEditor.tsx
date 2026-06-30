@@ -165,6 +165,7 @@ export function LlmConfigEditor() {
 
   const [cfg, setCfg] = useState<LlmConfig>({});
   const [expert, setExpert] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<string>("");
   const [rawText, setRawText] = useState("");
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState("");
@@ -267,11 +268,31 @@ export function LlmConfigEditor() {
           <p className="text-xs text-gray-400">{t("settings.llm.empty_note")}</p>
         </>
       ) : (
-        <div className="space-y-2">
-          {TASK_ORDER.filter((task) => cfg[task]).map((task) => (
-            <TaskCard key={task} task={task} cfg={cfg} defaults={defaults} providers={providers} setCfg={setCfg} />
-          ))}
-        </div>
+        (() => {
+          const tasks = TASK_ORDER.filter((task) => cfg[task]);
+          const current = selectedTask && tasks.includes(selectedTask) ? selectedTask : (tasks[0] ?? "");
+          return (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                {t("settings.llm.choose_task")}
+                <select
+                  className="rounded-md border px-2 py-1 text-xs"
+                  value={current}
+                  onChange={(e) => setSelectedTask(e.target.value)}
+                >
+                  {tasks.map((task) => (
+                    <option key={task} value={task}>
+                      {t(`settings.llm.tasks.${task}.title`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {current && cfg[current] && (
+                <TaskCard task={current} cfg={cfg} defaults={defaults} providers={providers} setCfg={setCfg} />
+              )}
+            </div>
+          );
+        })()
       )}
 
       {issues.length > 0 && (
