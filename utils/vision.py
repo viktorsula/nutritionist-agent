@@ -38,7 +38,28 @@ logger = logging.getLogger(__name__)
 # ========================================
 
 VISION_MODEL = "gemini-2.5-flash"
-"""Модель vision (Gemini 2.5 Flash; gemini-1.5-flash снята Google 2026)."""
+"""Дефолт модели vision (Gemini 2.5 Flash; gemini-1.5-flash снята Google 2026).
+Единый источник правды — `system_settings.llm_config['vision']`; константа — fallback."""
+
+
+def resolve_vision_model() -> str:
+    """
+    Модель vision: `llm_config['vision']['model']` (БД) → `VISION_MODEL` (дефолт).
+
+    Тот же приоритет «БД → код», что у текстовых задач (resolve_fallback_chain). Любая
+    ошибка/отсутствие записи → дефолт-константа, чтобы фото-путь не падал.
+    """
+    try:
+        from database import queries
+
+        cfg = queries.get_setting('llm_config')
+        if isinstance(cfg, dict):
+            vision_cfg = cfg.get('vision')
+            if isinstance(vision_cfg, dict) and vision_cfg.get('model'):
+                return vision_cfg['model']
+    except Exception as e:
+        logger.warning(f"resolve_vision_model: llm_config недоступен, дефолт {VISION_MODEL}: {e}")
+    return VISION_MODEL
 
 
 # ========================================
@@ -85,7 +106,7 @@ def analyze_image(
 
     try:
         genai.configure(api_key=api_key)
-        gen_model = genai.GenerativeModel(model or VISION_MODEL)
+        gen_model = genai.GenerativeModel(model or resolve_vision_model())
 
         response = gen_model.generate_content([
             prompt,

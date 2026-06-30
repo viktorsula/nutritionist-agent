@@ -257,7 +257,7 @@ def call_llm(
     # там пользователь намеренно выбрал конкретную модель).
     candidates = [config]
     if task_type and not (provider and model):
-        for fb in TASK_FALLBACK_CHAINS.get(task_type, []):
+        for fb in resolve_fallback_chain(task_type):
             if fb['provider'] == config['provider'] and fb['model'] == config['model']:
                 continue
             candidates.append({
@@ -375,7 +375,11 @@ def get_model_config(task_type: str) -> Dict[str, Any]:
             logger.info(
                 f"Loaded LLM config from system_settings for task_type='{task_type}'"
             )
-            return llm_config[task_type]
+            # 'fallbacks' резолвится отдельно (resolve_fallback_chain) — в основной
+            # конфиг модели его не пускаем, чтобы не путать вызов провайдера.
+            cfg = dict(llm_config[task_type])
+            cfg.pop('fallbacks', None)
+            return cfg
 
     except ImportError:
         # database.queries ещё не готов или недоступен
@@ -401,6 +405,37 @@ def get_model_config(task_type: str) -> Dict[str, Any]:
         f"Available: {list(DEFAULT_TASK_MODEL_MAPPING.keys())}\n"
         f"Добавьте конфигурацию в system_settings или DEFAULT_TASK_MODEL_MAPPING"
     )
+
+
+def resolve_fallback_chain(task_type: str) -> List[Dict[str, str]]:
+    """
+    Резервная цепочка моделей для task_type. Приоритет (как у промптов):
+    1. `system_settings.llm_config[task_type]['fallbacks']` (БД) — если задано нутрициологом;
+    2. `TASK_FALLBACK_CHAINS` (код) — дефолт.
+
+    Каждый элемент — {'provider': str, 'model': str}. Из БД берём цепочку, ТОЛЬКО если у
+    задачи явно присутствует ключ 'fallbacks' (даже пустой список — осознанный выбор «без
+    резерва»). Если задачи/ключа нет или БД недоступна — код-дефолт (прод не теряет резерв).
+    """
+    try:
+        from database import queries
+
+        llm_config = queries.get_setting('llm_config')
+        if isinstance(llm_config, dict):
+            task_cfg = llm_config.get(task_type)
+            if isinstance(task_cfg, dict) and isinstance(task_cfg.get('fallbacks'), list):
+                chain: List[Dict[str, str]] = []
+                for fb in task_cfg['fallbacks']:
+                    if isinstance(fb, dict) and fb.get('provider') and fb.get('model'):
+                        chain.append({'provider': fb['provider'], 'model': fb['model']})
+                return chain
+    except Exception as e:
+        logger.warning(
+            f"resolve_fallback_chain: не удалось прочитать llm_config для '{task_type}', "
+            f"использую код-дефолт: {e}"
+        )
+
+    return [dict(fb) for fb in TASK_FALLBACK_CHAINS.get(task_type, [])]
 
 
 # ========================================
