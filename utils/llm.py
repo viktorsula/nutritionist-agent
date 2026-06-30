@@ -272,6 +272,15 @@ def call_llm(
                 'max_tokens': config.get('max_tokens', 2000),
             })
 
+    # Обогащаем кандидатов на кастом-провайдерах base_url/api_key_env из реестра
+    # (один запрос в БД, только если такие кандидаты есть).
+    if any(c['provider'] not in NATIVE_PROVIDERS for c in candidates):
+        custom = get_custom_providers()
+        for c in candidates:
+            if c['provider'] not in NATIVE_PROVIDERS and c['provider'] in custom:
+                c['base_url'] = custom[c['provider']]['base_url']
+                c['api_key_env'] = custom[c['provider']]['api_key_env']
+
     errors: List[str] = []
     for idx, cand in enumerate(candidates):
         start_time = time.monotonic()
@@ -286,9 +295,14 @@ def call_llm(
                 result = _call_claude(messages, cand, stream, **call_kwargs)
             elif cand['provider'] == 'gemini':
                 result = _call_gemini(messages, cand, stream, **call_kwargs)
+            elif cand.get('base_url'):
+                # Кастом-провайдер (OpenAI-совместимый) из реестра _providers.
+                result = _call_openai_compatible(messages, cand, stream, **call_kwargs)
             else:
                 raise ValueError(
-                    f"Unknown provider: {cand['provider']}. Supported: groq, claude, gemini"
+                    f"Unknown provider: {cand['provider']}. "
+                    f"Нативные: groq/claude/gemini; кастом — добавьте в llm_config._providers "
+                    f"(base_url + api_key_env)."
                 )
 
             if task_type:
@@ -443,6 +457,37 @@ def resolve_fallback_chain(task_type: str) -> List[Dict[str, str]]:
     return [dict(fb) for fb in TASK_FALLBACK_CHAINS.get(task_type, [])]
 
 
+NATIVE_PROVIDERS = ("groq", "claude", "gemini")
+"""Провайдеры со своим SDK-адаптером. Остальные — OpenAI-совместимые из реестра."""
+
+
+def get_custom_providers() -> Dict[str, Dict[str, str]]:
+    """
+    Реестр кастом-провайдеров (OpenAI-совместимых) из `llm_config['_providers']`:
+        {"<name>": {"base_url": str, "api_key_env": str}}
+
+    Позволяет добавлять провайдеров (OpenAI / Mistral / DeepSeek / Together / …)
+    КОНФИГОМ, без кода: указываешь base_url и имя env-переменной с ключом. Вызов идёт
+    через generic OpenAI-совместимый адаптер. Ошибка/нет записи → {} (никогда не бросает).
+    """
+    try:
+        from database import queries
+
+        cfg = queries.get_setting("llm_config")
+        if isinstance(cfg, dict) and isinstance(cfg.get("_providers"), dict):
+            out: Dict[str, Dict[str, str]] = {}
+            for name, meta in cfg["_providers"].items():
+                if isinstance(meta, dict) and meta.get("base_url") and meta.get("api_key_env"):
+                    out[str(name)] = {
+                        "base_url": str(meta["base_url"]),
+                        "api_key_env": str(meta["api_key_env"]),
+                    }
+            return out
+    except Exception as e:
+        logger.warning(f"get_custom_providers failed: {e}")
+    return {}
+
+
 def build_default_llm_config() -> Dict[str, Any]:
     """
     Каноничный `llm_config` из код-дефолтов: каждый task_type — основная модель
@@ -498,7 +543,7 @@ def list_provider_models(provider: str) -> List[str]:
         elif key == "gemini":
             models = _list_gemini_models()
         else:
-            return []
+            models = _list_openai_compatible_models(key)
     except Exception as e:
         logger.warning(f"list_provider_models({key}) failed: {e}")
         return cached["models"] if cached else []
@@ -554,6 +599,25 @@ def _list_gemini_models() -> List[str]:
         if name and not any(x in name for x in ("embedding", "aqa", "tts", "image")):
             out.append(name)
     return sorted(out)
+
+
+def _list_openai_compatible_models(name: str) -> List[str]:
+    """Модели кастом-провайдера (OpenAI-совместимый GET {base_url}/models)."""
+    meta = get_custom_providers().get(name)
+    if not meta or httpx is None:
+        return []
+    api_key = os.environ.get(meta["api_key_env"])
+    if not api_key:
+        return []
+    r = httpx.get(
+        meta["base_url"].rstrip("/") + "/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=10.0,
+    )
+    r.raise_for_status()
+    return sorted(
+        m.get("id") for m in r.json().get("data", []) if isinstance(m, dict) and m.get("id")
+    )
 
 
 def test_model(provider: str, model: str) -> Dict[str, Any]:
@@ -646,6 +710,69 @@ def _call_groq(
 
     except Exception as e:
         logger.error(f"Groq API error: {e}")
+        raise
+
+
+def _call_openai_compatible(
+    messages: List[Dict[str, str]],
+    config: Dict[str, Any],
+    stream: bool = False,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Generic-адаптер для OpenAI-совместимых провайдеров (OpenAI/Mistral/DeepSeek/…).
+
+    base_url и имя env-ключа берутся из config (обогащено call_llm из реестра
+    llm_config._providers). Контракт ответа — как у нативных адаптеров.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("openai SDK не установлен. Установите: pip install openai")
+
+    base_url = config.get('base_url')
+    api_key_env = config.get('api_key_env')
+    provider_name = config.get('provider', 'custom')
+    if not base_url or not api_key_env:
+        raise RuntimeError(
+            f"Кастом-провайдер '{provider_name}' без base_url/api_key_env "
+            f"(добавьте в llm_config._providers)"
+        )
+
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        raise RuntimeError(
+            f"{api_key_env} не задан в окружении (ключ провайдера '{provider_name}')"
+        )
+
+    try:
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        response = client.chat.completions.create(
+            model=config['model'],
+            messages=messages,
+            temperature=config.get('temperature', 0.7),
+            max_tokens=config.get('max_tokens', 2000),
+            stream=stream,
+            **kwargs
+        )
+        if stream:
+            logger.warning("Streaming not fully implemented for OpenAI-compatible")
+            return response
+
+        usage = response.usage
+        return {
+            'content': response.choices[0].message.content,
+            'model': config['model'],
+            'provider': provider_name,
+            'usage': {
+                'input_tokens': getattr(usage, 'prompt_tokens', 0) if usage else 0,
+                'output_tokens': getattr(usage, 'completion_tokens', 0) if usage else 0,
+                'total_tokens': getattr(usage, 'total_tokens', 0) if usage else 0,
+            },
+            'finish_reason': response.choices[0].finish_reason,
+        }
+    except Exception as e:
+        logger.error(f"OpenAI-compatible ({provider_name}) API error: {e}")
         raise
 
 
@@ -856,6 +983,11 @@ def list_available_providers() -> List[str]:
 
     if genai and os.environ.get('GOOGLE_API_KEY'):
         available.append('gemini')
+
+    # Кастом-провайдеры (OpenAI-совместимые) — доступны, если задан их env-ключ.
+    for name, meta in get_custom_providers().items():
+        if os.environ.get(meta['api_key_env']):
+            available.append(name)
 
     return available
 

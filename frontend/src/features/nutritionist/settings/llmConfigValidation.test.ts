@@ -61,4 +61,36 @@ describe("validateLlmConfig", () => {
       "dialog: ожидается объект с provider/model",
     ]);
   });
+
+  it("_providers + кастом-провайдер в задаче — допустимо", () => {
+    const cfg = {
+      _providers: { mistral: { base_url: "https://api.mistral.ai/v1", api_key_env: "MISTRAL_API_KEY" } },
+      dialog: { provider: "mistral", model: "mistral-large-latest" },
+    };
+    expect(validateLlmConfig(cfg)).toEqual([]);
+  });
+
+  it("_providers не валидируется как задача (нет provider/model)", () => {
+    const cfg = {
+      _providers: { mistral: { base_url: "https://x/v1", api_key_env: "K" } },
+      dialog: { provider: "groq", model: "m" },
+    };
+    const errs = validateLlmConfig(cfg);
+    expect(errs.some((e) => e.startsWith("_providers:"))).toBe(false);
+  });
+
+  it("кривой _providers → адресная ошибка", () => {
+    const cfg = { _providers: { mistral: { base_url: "" } } };
+    expect(validateLlmConfig(cfg)).toEqual([
+      "_providers.mistral.base_url: непустая строка",
+      "_providers.mistral.api_key_env: непустая строка",
+    ]);
+  });
+
+  it("неизвестный провайдер (нет в _providers) → ошибка", () => {
+    const cfg = { dialog: { provider: "mistral", model: "m" } };
+    expect(validateLlmConfig(cfg)).toEqual([
+      "dialog.provider: один из groq, claude, gemini",
+    ]);
+  });
 });
