@@ -438,6 +438,30 @@ def resolve_fallback_chain(task_type: str) -> List[Dict[str, str]]:
     return [dict(fb) for fb in TASK_FALLBACK_CHAINS.get(task_type, [])]
 
 
+def build_default_llm_config() -> Dict[str, Any]:
+    """
+    Каноничный `llm_config` из код-дефолтов: каждый task_type — основная модель
+    (`DEFAULT_TASK_MODEL_MAPPING`) + вложенный резерв (`TASK_FALLBACK_CHAINS`).
+
+    Это стартовое значение для `system_settings.llm_config` (сидер Фазы 2). Дальше
+    нутрициолог правит модели через редактор «Настройки», БЕЗ кода. Источник правды
+    после сидинга — БД; код-константы остаются дефолтом/фолбэком.
+    """
+    config: Dict[str, Any] = {}
+    for task, base in DEFAULT_TASK_MODEL_MAPPING.items():
+        config[task] = {
+            "provider": base["provider"],
+            "model": base["model"],
+            "temperature": base.get("temperature", 0.7),
+            "max_tokens": base.get("max_tokens", 2000),
+            "fallbacks": [
+                {"provider": fb["provider"], "model": fb["model"]}
+                for fb in TASK_FALLBACK_CHAINS.get(task, [])
+            ],
+        }
+    return config
+
+
 # ========================================
 # ПРИВАТНЫЕ ФУНКЦИИ ДЛЯ ПРОВАЙДЕРОВ
 # ========================================

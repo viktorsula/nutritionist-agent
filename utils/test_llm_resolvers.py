@@ -7,7 +7,13 @@
 
 from unittest.mock import patch
 
-from utils.llm import resolve_fallback_chain, get_model_config, TASK_FALLBACK_CHAINS
+from utils.llm import (
+    resolve_fallback_chain,
+    get_model_config,
+    build_default_llm_config,
+    DEFAULT_TASK_MODEL_MAPPING,
+    TASK_FALLBACK_CHAINS,
+)
 from utils.vision import resolve_vision_model, VISION_MODEL
 
 
@@ -49,6 +55,28 @@ def test_fallback_filters_malformed_entries():
                                     {"provider": "groq", "model": "llama"}]}}
     with patch("database.queries.get_setting", return_value=cfg):
         assert resolve_fallback_chain("dialog") == [{"provider": "groq", "model": "llama"}]
+
+
+# ── build_default_llm_config (сидер Фазы 2) ──────────────────────────────────
+
+def test_build_default_covers_all_tasks_with_nested_fallbacks():
+    cfg = build_default_llm_config()
+    assert set(cfg) == set(DEFAULT_TASK_MODEL_MAPPING)
+    for task, entry in cfg.items():
+        assert entry["provider"] and entry["model"]
+        assert entry["fallbacks"] == [
+            {"provider": fb["provider"], "model": fb["model"]}
+            for fb in TASK_FALLBACK_CHAINS.get(task, [])
+        ]
+
+
+def test_seeded_default_round_trips_to_code_defaults():
+    """Сидинг build_default → резолверы возвращают то же, что код-дефолты (поведение не меняется)."""
+    cfg = build_default_llm_config()
+    with patch("database.queries.get_setting", return_value=cfg):
+        assert resolve_fallback_chain("dialog") == TASK_FALLBACK_CHAINS["dialog"]
+        assert resolve_fallback_chain("analytics") == TASK_FALLBACK_CHAINS["analytics"]
+        assert resolve_vision_model() == cfg["vision"]["model"]
 
 
 # ── get_model_config: основной конфиг без fallbacks ──────────────────────────
