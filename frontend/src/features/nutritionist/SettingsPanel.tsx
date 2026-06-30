@@ -5,6 +5,7 @@ import { JsonSetting } from "./settings/JsonSetting";
 import { TrustedSources } from "./settings/TrustedSources";
 import { PromptEditor } from "./settings/PromptEditor";
 import { KnowledgeBase } from "./settings/KnowledgeBase";
+import { LlmConfigEditor } from "./settings/LlmConfigEditor";
 
 /** Сворачиваемая секция настроек. */
 function Section({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean }) {
@@ -49,7 +50,7 @@ export function SettingsPanel() {
 
       <Section title={t("settings.llm.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.llm.hint")}</p>
-        <JsonSetting settingKey="llm_config" hint='{"dialog": {"provider": "groq"}, "analytics": {"provider": "claude"}}' />
+        <LlmConfigEditor />
       </Section>
 
       <Section title={t("settings.prompts.title")}>
