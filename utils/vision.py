@@ -10,7 +10,7 @@ Vision — анализ изображений через Gemini 1.5 Flash (Эт
 2. analyze_food_plate(image_bytes) → структурированный КБЖУ-результат (dict)
 
 Ключи: GOOGLE_API_KEY из os.environ.get (НИКОГДА load_dotenv).
-Модель: gemini-1.5-flash (бесплатно, 1500 req/день).
+Модель: gemini-2.5-flash.
 
 TODO v1.1:
 - analyze_fridge() — фото холодильника → варианты блюд
@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # КОНФИГУРАЦИЯ
 # ========================================
 
-VISION_MODEL = "gemini-1.5-flash"
-"""Модель vision. Flash — бесплатно, 1500 запросов/день."""
+VISION_MODEL = "gemini-2.5-flash"
+"""Модель vision (Gemini 2.5 Flash; gemini-1.5-flash снята Google 2026)."""
 
 
 # ========================================
@@ -58,7 +58,7 @@ def analyze_image(
         image_bytes: Бинарное содержимое изображения
         prompt: Что нужно сделать с изображением
         mime_type: MIME-тип ('image/jpeg', 'image/png', ...)
-        model: Переопределение модели (по умолчанию gemini-1.5-flash)
+        model: Переопределение модели (по умолчанию gemini-2.5-flash)
 
     Returns:
         Текстовый ответ модели
