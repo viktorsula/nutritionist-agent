@@ -583,7 +583,6 @@ def update_client(client_id: str, updates: Dict[str, Any]) -> Optional[Dict[str,
         supabase.table("clients")
         .update(updates)
         .eq("id", client_id)
-        .select("*")
         .single()
     )
 
@@ -706,7 +705,6 @@ def update_notification_schedule(
         .update(updates)
         .eq("client_id", client_id)
         .eq("notification_type", notification_type)
-        .select("*")
         .single()
     )
 
@@ -725,7 +723,6 @@ def update_system_setting(key: str, value: Any, updated_by: Optional[str] = None
         supabase.table("system_settings")
         .update(updates)
         .eq("key", key)
-        .select("*")
         .single()
     )
 
@@ -830,7 +827,6 @@ def update_conversation_summary(
             }
         )
         .eq("id", client_id)
-        .select("*")
         .single()
     )
 
@@ -938,7 +934,6 @@ def complete_task(task_id: str, confirmation_payload: Optional[Dict[str, Any]] =
         supabase.table("tasks")
         .update(updates)
         .eq("id", task_id)
-        .select("*")
         .single()
     )
 
@@ -1028,7 +1023,6 @@ def update_wellness_plan(
         supabase.table("wellness_plans")
         .update(updates)
         .eq("id", plan["id"])
-        .select("*")
         .single()
     )
 
