@@ -165,6 +165,10 @@ const resources = {
         llm: {
           title: "LLM-модели",
           hint: "JSON-конфигурация моделей по task_type (llm_config).",
+          structure: "Структура: { task_type: { provider, model, temperature, max_tokens, fallbacks: [{ provider, model }] } }. Провайдеры: groq, claude, gemini. fallbacks — резерв при сбое основной модели (пробуются по порядку). Применяется сразу, без деплоя.",
+          code_note: "Эмбеддинги (RAG) и распознавание голоса задаются в коде, не здесь: модель эмбеддингов привязана к размерности векторов в БД.",
+          empty_note: "Пустое поле = откат на код-дефолты.",
+          invalid_config: "Ошибки в конфигурации (не сохранено):",
         },
         prompts: {
           title: "Редактор промптов",
@@ -617,6 +621,10 @@ const resources = {
         llm: {
           title: "LLM models",
           hint: "JSON model config by task_type (llm_config).",
+          structure: "Structure: { task_type: { provider, model, temperature, max_tokens, fallbacks: [{ provider, model }] } }. Providers: groq, claude, gemini. fallbacks — backup models tried in order if the primary fails. Applies immediately, no deploy.",
+          code_note: "Embeddings (RAG) and voice transcription are set in code, not here: the embedding model is tied to the DB vector dimension.",
+          empty_note: "Empty field = revert to code defaults.",
+          invalid_config: "Config errors (not saved):",
         },
         prompts: {
           title: "Prompt editor",
