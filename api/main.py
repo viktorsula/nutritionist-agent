@@ -203,6 +203,49 @@ def save_setting(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+class LlmTestIn(BaseModel):
+    provider: str
+    model: str
+
+
+@app.get("/nutritionist/llm/providers")
+def llm_providers(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> Dict[str, Any]:
+    """Провайдеры: какие доступны (есть SDK+ключ) из всех известных — для окна «LLM-модели»."""
+    from utils.llm import list_available_providers
+
+    return {"available": list_available_providers(), "all": ["groq", "claude", "gemini"]}
+
+
+@app.get("/nutritionist/llm/models")
+def llm_models(
+    provider: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Живой список chat/generate-моделей провайдера (ListModels, кэш 5 мин)."""
+    from utils.llm import list_provider_models
+
+    return {"provider": provider, "models": list_provider_models(provider)}
+
+
+@app.post("/nutritionist/llm/test")
+def llm_test(
+    body: LlmTestIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Мини-пинг модели перед сохранением: {ok, latency_ms, model, error}."""
+    from utils.llm import test_model
+
+    return test_model(body.provider, body.model)
+
+
+@app.get("/nutritionist/llm/defaults")
+def llm_defaults(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> Dict[str, Any]:
+    """Код-дефолты llm_config — для кнопки «Сбросить на дефолт» и подписи дефолта."""
+    from utils.llm import build_default_llm_config
+
+    return build_default_llm_config()
+
+
 @app.get("/nutritionist/prompts")
 def prompts_list(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> List[Dict[str, Any]]:
     """
