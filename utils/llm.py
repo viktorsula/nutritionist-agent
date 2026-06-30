@@ -69,7 +69,7 @@ DEFAULT_TASK_MODEL_MAPPING = {
     },
     'vision': {
         'provider': 'gemini',
-        'model': 'gemini-1.5-flash',
+        'model': 'gemini-2.5-flash',
         'temperature': 0.5,
         'max_tokens': 1500,
         'description': 'Анализ фото еды'
@@ -107,22 +107,22 @@ DEFAULT_TASK_MODEL_MAPPING = {
 # vision-моделями. Если все исчерпаны → LLMUnavailableError (просьба повторить).
 TASK_FALLBACK_CHAINS = {
     'dialog': [
-        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
     'analytics': [
         {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
-        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
     'nutrition_analysis': [
         {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
-        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
     'summary': [
-        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
     'planning': [
         {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
-        {'provider': 'gemini', 'model': 'gemini-1.5-flash'},
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
     'vision': [
         # vision умеют Claude и Gemini; Groq — нет, поэтому в резерве только Claude.
