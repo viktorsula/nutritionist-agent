@@ -28,6 +28,11 @@ import time
 import logging
 from typing import List, Dict, Optional, Any
 
+try:
+    import httpx  # для ListModels провайдеров (есть в зависимостях supabase)
+except ImportError:
+    httpx = None
+
 # Импорты провайдеров (будут установлены через requirements.txt)
 try:
     from groq import Groq
@@ -460,6 +465,125 @@ def build_default_llm_config() -> Dict[str, Any]:
             ],
         }
     return config
+
+
+# ========================================
+# ОБНАРУЖЕНИЕ И ПРОВЕРКА МОДЕЛЕЙ (для окна «LLM-модели», Фаза A)
+# ========================================
+
+_MODELS_CACHE: Dict[str, Dict[str, Any]] = {}
+"""provider -> {'ts': monotonic, 'models': [str]} — кэш ListModels."""
+
+_MODELS_CACHE_TTL = 300.0
+"""TTL кэша списка моделей (сек). Списки меняются редко — не дёргаем API на каждый клик."""
+
+
+def list_provider_models(provider: str) -> List[str]:
+    """
+    Список chat/generate-моделей провайдера (живой ListModels), отфильтрованный и
+    кэшированный (TTL 5 мин). Для выпадашки в окне «LLM-модели». При ошибке/без ключа/
+    без httpx → [] (UI оставит ручной ввод). Никогда не бросает.
+    """
+    key = (provider or "").strip().lower()
+    now = time.monotonic()
+    cached = _MODELS_CACHE.get(key)
+    if cached and now - cached["ts"] < _MODELS_CACHE_TTL:
+        return cached["models"]
+
+    try:
+        if key == "groq":
+            models = _list_groq_models()
+        elif key == "claude":
+            models = _list_claude_models()
+        elif key == "gemini":
+            models = _list_gemini_models()
+        else:
+            return []
+    except Exception as e:
+        logger.warning(f"list_provider_models({key}) failed: {e}")
+        return cached["models"] if cached else []
+
+    _MODELS_CACHE[key] = {"ts": now, "models": models}
+    return models
+
+
+def _list_groq_models() -> List[str]:
+    """Groq (OpenAI-совместимый /models). Исключаем не-chat (whisper/tts/guard)."""
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key or httpx is None:
+        return []
+    r = httpx.get(
+        "https://api.groq.com/openai/v1/models",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=10.0,
+    )
+    r.raise_for_status()
+    ids = [m.get("id") for m in r.json().get("data", []) if isinstance(m, dict) and m.get("id")]
+    return sorted(m for m in ids if not any(x in m.lower() for x in ("whisper", "tts", "guard")))
+
+
+def _list_claude_models() -> List[str]:
+    """Anthropic /v1/models."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key or httpx is None:
+        return []
+    r = httpx.get(
+        "https://api.anthropic.com/v1/models",
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+        timeout=10.0,
+    )
+    r.raise_for_status()
+    return sorted(m.get("id") for m in r.json().get("data", []) if isinstance(m, dict) and m.get("id"))
+
+
+def _list_gemini_models() -> List[str]:
+    """Gemini ListModels: только generateContent, без embedding/aqa/tts/image-генерации."""
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if not api_key or httpx is None:
+        return []
+    r = httpx.get(
+        f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+        timeout=10.0,
+    )
+    r.raise_for_status()
+    out: List[str] = []
+    for m in r.json().get("models", []):
+        if "generateContent" not in (m.get("supportedGenerationMethods") or []):
+            continue
+        name = (m.get("name") or "").replace("models/", "")
+        if name and not any(x in name for x in ("embedding", "aqa", "tts", "image")):
+            out.append(name)
+    return sorted(out)
+
+
+def test_model(provider: str, model: str) -> Dict[str, Any]:
+    """
+    Мини-пинг конкретной модели для кнопки «Проверить»: явный вызов коротким промптом
+    (без резерва — проверяем ИМЕННО эту модель). Возвращает {ok, latency_ms, model, error}.
+    Никогда не бросает — ошибку отдаёт в поле error.
+    """
+    start = time.monotonic()
+    try:
+        resp = call_llm(
+            provider=provider,
+            model=model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5,
+            temperature=0,
+        )
+        return {
+            "ok": True,
+            "latency_ms": int((time.monotonic() - start) * 1000),
+            "model": resp.get("model", model),
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "latency_ms": int((time.monotonic() - start) * 1000),
+            "model": model,
+            "error": str(e),
+        }
 
 
 # ========================================
