@@ -99,6 +99,26 @@ export const api = {
       body: JSON.stringify({ key, value }),
     }),
 
+  /** Провайдеры LLM: какие доступны (ключ задан) из всех известных. */
+  llmProviders: () =>
+    request<{ available: string[]; all: string[] }>("/nutritionist/llm/providers"),
+
+  /** Живой список моделей провайдера (ListModels, кэш на бэке). */
+  llmModels: (provider: string) =>
+    request<{ provider: string; models: string[] }>(
+      `/nutritionist/llm/models?provider=${encodeURIComponent(provider)}`,
+    ),
+
+  /** Мини-пинг модели перед сохранением. */
+  llmTest: (provider: string, model: string) =>
+    request<{ ok: boolean; latency_ms: number; model: string; error: string | null }>(
+      "/nutritionist/llm/test",
+      { method: "POST", body: JSON.stringify({ provider, model }) },
+    ),
+
+  /** Код-дефолты llm_config (для «Сбросить на дефолт»). */
+  llmDefaults: () => request<Record<string, unknown>>("/nutritionist/llm/defaults"),
+
   /** Реестр промптов с понятными названиями, разделом и источником значения. */
   promptsList: () => request<PromptMeta[]>("/nutritionist/prompts"),
 
