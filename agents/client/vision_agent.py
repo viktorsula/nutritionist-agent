@@ -108,11 +108,9 @@ def vision_node(state: ClientState) -> ClientState:
     # 5. Распознано уверенно → единая запись (food_items, анализ рациона, алерты, событие).
     state['intake_subtype'] = persist_record(state, record)
 
-    # 6. Ответ. При ack_only (захват удался) тёплый ответ не нужен — заменит квитанция.
-    if state.get('ack_only'):
-        state['agent_response'] = ''
-        return state
-
+    # 6. Тёплый ответ с распознанным составом — ВСЕГДА, даже при ack_only: клиент должен
+    #    видеть, что агент «увидел» на фото («Вижу: рис с курицей»), а не сухое «Принято».
+    #    dispatch вынесет этот текст в ответ-квитанцию. (Текст-дневник остаётся тихим.)
     state['agent_response'] = present(state, record, prompt_name='client/vision_system')
     return state
 

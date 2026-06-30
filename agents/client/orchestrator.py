@@ -424,8 +424,11 @@ def dispatch_node(state: ClientState) -> ClientState:
             _run_handler(state, branch)
             subtype = state.get('intake_subtype')
             if subtype:
+                # Тёплый текст обработчика (vision — распознанный состав) выносим в ответ;
+                # text-дневник оставляет его пустым → генерик-ack в format_response.
+                warm = (state.get('agent_response') or '').strip()
                 results.append({
-                    "branch": INTAKE, "needs_answer": ACK, "text": "",
+                    "branch": INTAKE, "needs_answer": ACK, "text": warm,
                     "label": intake_subtype_meta(subtype).get('label_ru', label_ru(INTAKE)),
                 })
             else:
@@ -528,13 +531,16 @@ def format_response_node(state: ClientState) -> ClientState:
     clarifies = [r for r in results if r['needs_answer'] == CLARIFY and (r.get('text') or '').strip()]
     answers = [r for r in results if r['needs_answer'] == ANSWER and (r.get('text') or '').strip()]
     ack_results = [r for r in results if r['needs_answer'] == ACK]
+    # Тёплый текст из ack-сегмента (vision — распознанный состав фото). text-дневник пуст.
+    ack_texts = [r['text'].strip() for r in ack_results if (r.get('text') or '').strip()]
 
-    # ── Содержательные блоки: уточнения (clarify) → ответы (answer) ─────────
+    # ── Содержательные блоки: уточнения (clarify) → ответы (answer) → тёплый ack ─
     blocks: List[str] = [c['text'].strip() for c in clarifies]
     if len(answers) == 1:
         blocks.append(answers[0]['text'].strip())
     elif len(answers) > 1:
         blocks += [f"**{a['label']}**\n{a['text'].strip()}" for a in answers]
+    blocks += ack_texts
 
     body = "\n\n".join(blocks)
 
@@ -543,11 +549,11 @@ def format_response_node(state: ClientState) -> ClientState:
     receipt = ("✓ Записал: " + ", ".join(recorded)) if recorded else ""
 
     if body:
-        # Есть уточнение/ответ — квитанцию просто дописываем (без отдельного «принято»).
+        # Есть уточнение/ответ/тёплый ack — квитанцию просто дописываем.
         if receipt:
             body = f"{body}\n\n{receipt}"
     elif ack_results:
-        # Чистый ack-ход → тёплое подтверждение (дешёвый Groq) + квитанция.
+        # Чистый ack без тёплого текста (text-дневник) → генерик-подтверждение + квитанция.
         ack_text = _render_ack(state)
         body = f"{ack_text}\n\n{receipt}" if receipt else ack_text
     else:
