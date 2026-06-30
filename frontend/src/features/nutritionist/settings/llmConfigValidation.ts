@@ -1,11 +1,13 @@
-/** Провайдеры, которые умеет utils/llm.call_llm (groq/claude/gemini). */
+/** Нативные провайдеры (свой SDK-адаптер). Кастом — из секции `_providers`. */
 export const KNOWN_PROVIDERS = ["groq", "claude", "gemini"];
 
 /**
  * Структурная валидация llm_config (поверх JSON.parse). Возвращает список ошибок
- * (пустой = ок). Защищает от валидного JSON с неверной структурой (опечатка в
- * provider, model не строка, кривой fallbacks) — иначе задача молча уйдёт в резерв
- * или код-дефолт. Пустое значение (null) допустимо — откат на код-дефолты.
+ * (пустой = ок). Пустое значение (null) допустимо — откат на код-дефолты.
+ *
+ * Поддерживает реестр кастом-провайдеров `_providers` (OpenAI-совместимые):
+ *   "_providers": { "<name>": { "base_url": str, "api_key_env": str } }
+ * Имена из реестра становятся допустимыми provider у задач/резерва.
  */
 export function validateLlmConfig(parsed: unknown): string[] {
   const errors: string[] = [];
@@ -13,17 +15,43 @@ export function validateLlmConfig(parsed: unknown): string[] {
   if (typeof parsed !== "object" || Array.isArray(parsed)) {
     return ["root: ожидается объект { task_type: {...} }"];
   }
+  const obj = parsed as Record<string, unknown>;
 
+  // ── Реестр кастом-провайдеров (необязателен) ───────────────────────────────
+  const customNames: string[] = [];
+  if (obj._providers !== undefined) {
+    const reg = obj._providers;
+    if (typeof reg !== "object" || reg === null || Array.isArray(reg)) {
+      errors.push("_providers: объект { имя: { base_url, api_key_env } }");
+    } else {
+      for (const [name, raw] of Object.entries(reg as Record<string, unknown>)) {
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+          errors.push(`_providers.${name}: объект { base_url, api_key_env }`);
+          continue;
+        }
+        const p = raw as Record<string, unknown>;
+        if (typeof p.base_url !== "string" || !p.base_url.trim())
+          errors.push(`_providers.${name}.base_url: непустая строка`);
+        if (typeof p.api_key_env !== "string" || !p.api_key_env.trim())
+          errors.push(`_providers.${name}.api_key_env: непустая строка`);
+        customNames.push(name);
+      }
+    }
+  }
+
+  const allowed = [...KNOWN_PROVIDERS, ...customNames];
   const checkProvider = (where: string, p: unknown) => {
-    if (typeof p !== "string" || !KNOWN_PROVIDERS.includes(p)) {
-      errors.push(`${where}.provider: один из ${KNOWN_PROVIDERS.join(", ")}`);
+    if (typeof p !== "string" || !allowed.includes(p)) {
+      errors.push(`${where}.provider: один из ${allowed.join(", ")}`);
     }
   };
   const checkModel = (where: string, m: unknown) => {
     if (typeof m !== "string" || !m.trim()) errors.push(`${where}.model: непустая строка`);
   };
 
-  for (const [task, raw] of Object.entries(parsed as Record<string, unknown>)) {
+  // ── Задачи (всё, кроме реестра) ────────────────────────────────────────────
+  for (const [task, raw] of Object.entries(obj)) {
+    if (task === "_providers") continue;
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       errors.push(`${task}: ожидается объект с provider/model`);
       continue;

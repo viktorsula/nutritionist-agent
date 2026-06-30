@@ -210,10 +210,11 @@ class LlmTestIn(BaseModel):
 
 @app.get("/nutritionist/llm/providers")
 def llm_providers(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> Dict[str, Any]:
-    """Провайдеры: какие доступны (есть SDK+ключ) из всех известных — для окна «LLM-модели»."""
-    from utils.llm import list_available_providers
+    """Провайдеры: какие доступны (SDK/ключ) и все известные (нативные + кастом из реестра)."""
+    from utils.llm import list_available_providers, get_custom_providers, NATIVE_PROVIDERS
 
-    return {"available": list_available_providers(), "all": ["groq", "claude", "gemini"]}
+    custom = list(get_custom_providers().keys())
+    return {"available": list_available_providers(), "all": list(NATIVE_PROVIDERS) + custom}
 
 
 @app.get("/nutritionist/llm/models")
