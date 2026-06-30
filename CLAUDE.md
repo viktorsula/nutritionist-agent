@@ -19,7 +19,7 @@ Render: nutritionist-agent-gvxp.onrender.com
 - Telegram Bot / python-telegram-bot (основной канал клиента)
 - Groq llama-3.3-70b (диалог, бесплатно)
 - Claude Sonnet (аналитика, ~$3/M токенов)
-- Gemini 2.5 Flash (фото/vision; 1.5 снята Google 06.2026). Модели/резерв — в system_settings.llm_config (правит нутрициолог)
+- Gemini 2.5 Flash (фото/vision; 1.5 снята Google 06.2026). Модели/резерв — в system_settings.llm_config, правятся нутрициологом в окне «Настройки → LLM-модели» (живой список моделей, «Проверить», резерв). Новый OpenAI-совместимый провайдер — конфигом через llm_config._providers (base_url+api_key_env), без кода
 - OpenAI Whisper (голос → текст, v1.1)
 - n8n cloud (автоматизация расписаний)
 - LangFuse (мониторинг и трейсинг)
