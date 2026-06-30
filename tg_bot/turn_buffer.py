@@ -80,13 +80,50 @@ async def _flush_after(chat_id: int, delay: float) -> None:
         logger.exception(f"turn_buffer flush failed for chat {chat_id}: {e}")
 
 
+def _merge_single_photo_with_text(items: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Частый случай: ОДНО одиночное фото + текст(ы) в окне (без голоса/документа/альбома)
+    → один photo-ход, где текст(ы) становятся подписью фото.
+
+    Иначе фото и текст ушли бы РАЗНЫМИ ходами → два ответа на один смысловой ход
+    (фото → vision, текст → diary-clarify). Подпись передаётся определителю вместе с
+    фото, и он видит цельный ход. Возвращает None, если случай не подходит (тогда —
+    общая логика _group).
+    """
+    photos = [it for it in items if it["kind"] == "photo" and not it.get("media_group_id")]
+    album = [it for it in items if it["kind"] == "photo" and it.get("media_group_id")]
+    voice_doc = [it for it in items if it["kind"] in ("voice", "document")]
+    texts = [it for it in items if it["kind"] == "text"]
+
+    if len(photos) != 1 or album or voice_doc or not texts:
+        return None
+
+    photo = photos[0]
+    caption: List[str] = []
+    for it in items:  # сохраняем порядок буфера: подпись фото + тексты как пришли
+        if it is photo:
+            if photo.get("message"):
+                caption.append(photo["message"])
+        elif it["kind"] == "text" and it.get("message"):
+            caption.append(it["message"])
+
+    merged = dict(photo)
+    merged["message"] = "\n".join(c for c in caption if c)
+    return [{"type": "single", "item": merged}]
+
+
 def _group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Группирует буфер в «ходы» с сохранением порядка:
+    - одиночное фото + текст(ы) → один photo-ход (текст = подпись, см. _merge_single_photo_with_text);
     - подряд текст → один text-ход (склейка через \\n);
     - подряд фото с одним media_group_id → один album-ход;
     - прочее (одиночное фото / голос / документ) → single-ход.
     """
+    merged = _merge_single_photo_with_text(items)
+    if merged is not None:
+        return merged
+
     turns: List[Dict[str, Any]] = []
     text_acc: List[str] = []
     text_update = None

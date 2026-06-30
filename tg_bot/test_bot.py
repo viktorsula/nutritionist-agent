@@ -432,6 +432,71 @@ class TestTurnBuffer(unittest.IsolatedAsyncioTestCase):
         updates[0].message.reply_text.assert_called_once()    # heads-up «получено N фото»
 
     @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_single_photo_plus_text_one_turn(self, mock_dispatch):
+        """Одиночное фото + текст в окне → ОДИН photo-ход, текст = подпись фото."""
+        await self.turn_buffer.enqueue({
+            "kind": "photo",
+            "update": self._mk_update(caption=None, message_id=1),
+            "message": "",
+            "media_group_id": None,
+            "metadata": {"image_bytes": b"\xff\xd8", "mime_type": "image/jpeg"},
+        })
+        await self.turn_buffer.enqueue({
+            "kind": "text",
+            "update": self._mk_update(text="посмотри мой обед", message_id=2),
+            "message": "посмотри мой обед",
+        })
+        await self._wait_flush()
+
+        mock_dispatch.assert_called_once()  # не два ответа
+        kwargs = mock_dispatch.call_args.kwargs
+        self.assertEqual(kwargs["message_type"], "photo")
+        self.assertEqual(kwargs["message"], "посмотри мой обед")  # текст стал подписью
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_text_then_single_photo_one_turn_order(self, mock_dispatch):
+        """Текст ПЕРЕД фото тоже склеивается в один photo-ход (порядок сохранён)."""
+        await self.turn_buffer.enqueue({
+            "kind": "text",
+            "update": self._mk_update(text="это обед", message_id=1),
+            "message": "это обед",
+        })
+        await self.turn_buffer.enqueue({
+            "kind": "photo",
+            "update": self._mk_update(caption=None, message_id=2),
+            "message": "",
+            "media_group_id": None,
+            "metadata": {"image_bytes": b"\xff\xd8", "mime_type": "image/jpeg"},
+        })
+        await self._wait_flush()
+
+        mock_dispatch.assert_called_once()
+        self.assertEqual(mock_dispatch.call_args.kwargs["message_type"], "photo")
+        self.assertEqual(mock_dispatch.call_args.kwargs["message"], "это обед")
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
+    async def test_photo_plus_voice_not_merged(self, mock_dispatch):
+        """Фото + голос НЕ склеиваются (разные модальности) → два отдельных хода."""
+        await self.turn_buffer.enqueue({
+            "kind": "photo",
+            "update": self._mk_update(message_id=1),
+            "message": "",
+            "media_group_id": None,
+            "metadata": {"image_bytes": b"\xff\xd8", "mime_type": "image/jpeg"},
+        })
+        await self.turn_buffer.enqueue({
+            "kind": "voice",
+            "update": self._mk_update(message_id=2),
+            "message": "",
+            "metadata": {"audio_bytes": b"ogg", "audio_name": "voice.ogg"},
+        })
+        await self._wait_flush()
+
+        self.assertEqual(mock_dispatch.call_count, 2)
+        types = [c.kwargs["message_type"] for c in mock_dispatch.call_args_list]
+        self.assertEqual(types, ["photo", "voice"])
+
+    @patch("tg_bot.handlers._dispatch_to_router", new_callable=AsyncMock)
     async def test_mixed_text_then_voice_two_turns(self, mock_dispatch):
         """Текст + голос → два отдельных хода."""
         await self.turn_buffer.enqueue(
