@@ -188,6 +188,7 @@ const resources = {
           test_need_model: "Укажите провайдера и модель",
           mode_expert: "Экспертный режим (JSON)",
           mode_structured: "Обычный режим",
+          choose_task: "Задача:",
           tasks: {
             dialog: { title: "Диалог с клиентом", desc: "Чат/Telegram: ответы, определитель темы, уточнения." },
             vision: { title: "Распознавание фото", desc: "Еда и бланки анализов на фото." },
@@ -671,6 +672,7 @@ const resources = {
           test_need_model: "Pick a provider and model",
           mode_expert: "Expert mode (JSON)",
           mode_structured: "Normal mode",
+          choose_task: "Task:",
           tasks: {
             dialog: { title: "Client dialog", desc: "Chat/Telegram: replies, topic router, clarifications." },
             vision: { title: "Photo recognition", desc: "Food and lab-result photos." },
