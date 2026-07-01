@@ -22,6 +22,13 @@ SECTION_SYSTEM = "system"
 PROMPTS: List[Dict[str, str]] = [
     # ── Коммуникационные (правит нутрициолог) ───────────────────────────────
     {
+        "key": "client/orchestrator_system",
+        "label_ru": "Оркестратор клиента (главный промпт)",
+        "label_en": "Client orchestrator (main)",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Claude",
+    },
+    {
         "key": "client/dialog_system",
         "label_ru": "Диалог с клиентом",
         "label_en": "Client dialog",
