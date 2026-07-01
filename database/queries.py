@@ -43,6 +43,21 @@ def _execute_single(request: Any) -> Any:
         raise
 
 
+def _execute_one(request: Any) -> Optional[Dict[str, Any]]:
+    """Выполнить запрос и вернуть ПЕРВУЮ строку из data (или None).
+
+    Для update/insert/upsert-цепочек нельзя вызывать `.single()`: на проде
+    `supabase==2.10.0` билдер `.update().eq()` — это `SyncFilterRequestBuilder`
+    без метода `.single()` (локальная 2.31 это маскировала → пути молча падали).
+    Поэтому запрос идёт БЕЗ `.single()`, а первую строку из списка берём сами.
+    """
+    response = request.execute()
+    data = _extract_data(response)
+    if isinstance(data, list):
+        return data[0] if data else None
+    return data
+
+
 def insert_document_metadata(metadata: DocumentMetadata) -> Any:
     supabase = _service_client()
     payload: Dict[str, Any] = {
@@ -582,11 +597,10 @@ def get_client_profile(client_id: str) -> Optional[Dict[str, Any]]:
 def update_client(client_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Обновить профиль клиента (payment_status, access_status, client_status и др.)."""
     supabase = _service_client()
-    return _execute_single(
+    return _execute_one(
         supabase.table("clients")
         .update(updates)
         .eq("id", client_id)
-        .single()
     )
 
 
@@ -703,12 +717,11 @@ def update_notification_schedule(
     if not updates:
         return None
 
-    return _execute_single(
+    return _execute_one(
         supabase.table("notification_schedule")
         .update(updates)
         .eq("client_id", client_id)
         .eq("notification_type", notification_type)
-        .single()
     )
 
 
@@ -722,11 +735,10 @@ def update_system_setting(key: str, value: Any, updated_by: Optional[str] = None
     if updated_by:
         updates["updated_by"] = updated_by
 
-    return _execute_single(
+    return _execute_one(
         supabase.table("system_settings")
         .update(updates)
         .eq("key", key)
-        .single()
     )
 
 
@@ -820,7 +832,7 @@ def update_conversation_summary(
     from datetime import datetime
 
     supabase = _service_client()
-    return _execute_single(
+    return _execute_one(
         supabase.table("clients")
         .update(
             {
@@ -830,7 +842,6 @@ def update_conversation_summary(
             }
         )
         .eq("id", client_id)
-        .single()
     )
 
 
@@ -933,11 +944,10 @@ def complete_task(task_id: str, confirmation_payload: Optional[Dict[str, Any]] =
                 payload={"task_id": task_id, **confirmation_payload},
             )
 
-    return _execute_single(
+    return _execute_one(
         supabase.table("tasks")
         .update(updates)
         .eq("id", task_id)
-        .single()
     )
 
 
@@ -1022,11 +1032,10 @@ def update_wellness_plan(
     if not plan:
         return None
 
-    return _execute_single(
+    return _execute_one(
         supabase.table("wellness_plans")
         .update(updates)
         .eq("id", plan["id"])
-        .single()
     )
 
 

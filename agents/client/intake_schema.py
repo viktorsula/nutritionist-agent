@@ -93,8 +93,13 @@ def parse_amount(text: Any) -> Optional[Dict[str, Any]]:
 
 
 def kbju_from_legacy(d: Optional[Dict[str, Any]]) -> Dict[str, Optional[float]]:
-    """Старый формат vision (calories/protein/fats/carbs) → канон KBJU_KEYS."""
-    d = d or {}
+    """Старый формат vision (calories/protein/fats/carbs) → канон KBJU_KEYS.
+
+    Защищено от «грязного» входа: LLM иногда отдаёт kbju строкой/числом/списком
+    вместо словаря — тогда считаем КБЖУ неизвестным (всё None), а не падаем.
+    """
+    if not isinstance(d, dict):
+        d = {}
     out = empty_kbju()
     out["kcal"] = _to_float(d.get("kcal", d.get("calories")))
     out["protein_g"] = _to_float(d.get("protein_g", d.get("protein")))
