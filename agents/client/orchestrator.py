@@ -546,18 +546,13 @@ def format_response_node(state: ClientState) -> ClientState:
 
     body = "\n\n".join(blocks)
 
-    # ── Квитанция по ack (перечень захваченных под-типов) ──────────────────
-    recorded = list(dict.fromkeys(r['label'] for r in ack_results if r.get('label')))
-    receipt = ("✓ Записал: " + ", ".join(recorded)) if recorded else ""
-
+    # Техническая квитанция «✓ Записал: …» убрана — из самого текста ответа уже ясно,
+    # что зафиксировано (тёплый ответ present/vision перечисляет записанное).
     if body:
-        # Есть уточнение/ответ/тёплый ack — квитанцию просто дописываем.
-        if receipt:
-            body = f"{body}\n\n{receipt}"
+        pass  # содержательный ответ / тёплый ack уже готов
     elif ack_results:
-        # Чистый ack без тёплого текста (text-дневник) → генерик-подтверждение + квитанция.
-        ack_text = _render_ack(state)
-        body = f"{ack_text}\n\n{receipt}" if receipt else ack_text
+        # Чистый ack без тёплого текста (text-дневник) → генерик-подтверждение.
+        body = _render_ack(state)
     else:
         body = "Принято ✅"  # подстраховка: всё упало
 
