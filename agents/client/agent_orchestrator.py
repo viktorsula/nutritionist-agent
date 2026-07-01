@@ -207,12 +207,12 @@ def _build_messages(state: Dict[str, Any]) -> List[Dict[str, str]]:
 
 def _system_prompt(state: Dict[str, Any]) -> str:
     profile = state.get("client_profile") or {}
-    plan = state.get("active_plan") or {}
+    view = _plan_view(state.get("active_plan"))
     try:
         template = load_prompt("client/orchestrator_system")
         system = template.format(
             client_name=profile.get("name", "Клиент"),
-            restrictions=format_list(plan.get("restrictions")),
+            restrictions=format_list(view.get("restrictions")),
             allergies=format_allergies(profile),
         )
     except Exception as e:
@@ -221,10 +221,77 @@ def _system_prompt(state: Dict[str, Any]) -> str:
             "Ты — ИИ-ассистент нутрициолога. Веди тёплый диалог на русском от первого лица, "
             "используй инструменты для записи данных и ответов, не выдумывай факты."
         )
+
+    # Назначения нутрициолога — ОБЯЗАТЕЛЬНАЯ опора любого ответа (норма воды, калории,
+    # рекомендации и т.д. приходят отсюда). Кладём всегда, а не «инструментом по требованию».
+    prescriptions = _format_prescriptions(state, view)
+    if prescriptions:
+        system += "\n\n" + prescriptions
+
     summary = (state.get("conversation_summary") or "").strip()
     if summary:
         system += "\n\n## Память о клиенте (сводка прошлых разговоров)\n" + summary
     return system
+
+
+def _plan_view(plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Нормализованный вид активного плана: назначения нутрициолога лежат в `plan_json`
+    (`description`/`target_calories`/`restrictions`), БАДы — в `supplements_json.items`.
+    Читаем ИЗ plan_json (редактор нутрициолога пишет туда), с фолбэком на верхний уровень
+    (совместимость со старыми записями/тестами). Возвращает плоский словарь для подачи.
+    """
+    plan = plan or {}
+    pj = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+
+    def pick(key: str) -> Any:
+        val = pj.get(key)
+        return val if val is not None else plan.get(key)
+
+    supplements = plan.get("supplements_json")
+    items = supplements.get("items") if isinstance(supplements, dict) else supplements
+
+    return {
+        "title": plan.get("title"),
+        "description": pick("description"),          # свободный текст рекомендаций (в т.ч. вода)
+        "target_calories": pick("target_calories"),
+        "restrictions": pick("restrictions"),
+        "water_ml_target": pick("water_ml_target"),  # если появится структурное поле
+        "supplements": items,
+    }
+
+
+def _format_prescriptions(state: Dict[str, Any], view: Dict[str, Any]) -> str:
+    """Обязательный контекст: назначения плана + заметки нутрициолога (опора ответа)."""
+    lines: List[str] = []
+    if view.get("title"):
+        lines.append(f"- План: {view['title']}")
+    if view.get("target_calories"):
+        lines.append(f"- Целевые калории: {view['target_calories']} ккал/день")
+    if view.get("water_ml_target"):
+        lines.append(f"- Норма воды: {view['water_ml_target']} мл/день")
+    restrictions = view.get("restrictions")
+    if restrictions:
+        lines.append("- Ограничения: " + format_list(restrictions))
+    if view.get("supplements"):
+        lines.append("- БАДы/добавки: " + format_list(view["supplements"]))
+    if view.get("description"):
+        lines.append(f"- Рекомендации нутрициолога: {view['description']}")
+
+    notes = (state.get("client") or {}).get("nutritionist_notes")
+    if notes:
+        lines.append(f"- Заметки нутрициолога (внутреннее): {notes}")
+
+    if not lines:
+        return (
+            "## Назначения нутрициолога\n"
+            "Активный план ещё не заполнен. Если клиент спрашивает про норму воды/калории/"
+            "рекомендации — честно скажи, что их пока не назначил нутрициолог, не выдумывай."
+        )
+    return (
+        "## Назначения нутрициолога (обязательная опора ответа; не выдумывай сверх этого)\n"
+        + "\n".join(lines)
+    )
 
 
 # ==========================================
@@ -384,7 +451,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         if scope == "labs":
             return queries.get_recent_lab_results(cid, limit=20)
         if scope == "plan":
-            return state.get("active_plan") or queries.get_active_nutrition_plan(cid)
+            return _plan_view(state.get("active_plan") or queries.get_active_nutrition_plan(cid))
         if scope == "wellness":
             return queries.get_wellness_plan(cid)
         if scope == "tasks":

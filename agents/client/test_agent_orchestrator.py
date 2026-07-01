@@ -87,9 +87,51 @@ def test_get_client_data_dispatches_scopes():
     with patch("database.queries.get_latest_measurement", return_value={"weight": 70}) as m:
         assert handlers["get_client_data"]({"scope": "measurements"}) == {"weight": 70}
         m.assert_called_once_with("cid")
-    # plan берётся из уже загруженного state, без обращения в БД
-    assert handlers["get_client_data"]({"scope": "plan"}) == {"target_calories": 1800}
+    # plan берётся из уже загруженного state (нормализованный вид), без обращения в БД
+    assert handlers["get_client_data"]({"scope": "plan"})["target_calories"] == 1800
     assert "неизвестный scope" in handlers["get_client_data"]({"scope": "wat"})
+
+
+# ── Заземление на назначения нутрициолога (plan_json) ────────────────────────
+def test_plan_view_reads_from_plan_json():
+    plan = {
+        "title": "Снижение веса",
+        "plan_json": {"description": "Пить 2000 мл воды в день", "target_calories": 1600,
+                      "restrictions": ["сахар", "жареное"]},
+        "supplements_json": {"items": ["омега-3"]},
+    }
+    view = ao._plan_view(plan)
+    assert view["title"] == "Снижение веса"
+    assert view["target_calories"] == 1600
+    assert view["restrictions"] == ["сахар", "жареное"]
+    assert view["description"] == "Пить 2000 мл воды в день"
+    assert view["supplements"] == ["омега-3"]
+
+
+def test_plan_view_fallback_to_top_level():
+    # старые записи/тесты с плоскими полями по-прежнему читаются
+    view = ao._plan_view({"target_calories": 1800, "restrictions": ["алкоголь"]})
+    assert view["target_calories"] == 1800
+    assert view["restrictions"] == ["алкоголь"]
+
+
+def test_prescriptions_block_included_in_system_prompt():
+    state = {
+        "client_profile": {"name": "Катя"},
+        "active_plan": {"title": "План", "plan_json": {
+            "description": "Норма воды 2 л/день", "target_calories": 1600, "restrictions": ["сахар"]}},
+        "client": {"nutritionist_notes": "следить за железом"},
+    }
+    system = ao._system_prompt(state)
+    assert "Назначения нутрициолога" in system
+    assert "Норма воды 2 л/день" in system
+    assert "1600 ккал" in system
+    assert "следить за железом" in system
+
+
+def test_prescriptions_block_honest_when_plan_empty():
+    system = ao._system_prompt({"client_profile": {"name": "Катя"}, "active_plan": None})
+    assert "ещё не заполнен" in system or "не назначил" in system
 
 
 # ── Цикл агента ──────────────────────────────────────────────────────────────
