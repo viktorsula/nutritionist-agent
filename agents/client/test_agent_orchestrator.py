@@ -145,7 +145,7 @@ def test_run_agent_loop_sets_state_and_returns_text():
                 "usage": {"total_tokens": 10},
                 "tool_calls": [{"name": "log_water", "input": {}, "is_error": False}]}
 
-    with patch("agents.client.agent_orchestrator.call_llm", side_effect=fake_call):
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call):
         text = ao._run_agent_loop(state)
 
     assert text == "Привет, Катя!"
@@ -156,7 +156,7 @@ def test_run_agent_loop_sets_state_and_returns_text():
 
 def test_run_agent_loop_empty_content_has_fallback():
     state = {"client_id": "cid", "client_profile": {}, "conversation_history": []}
-    with patch("agents.client.agent_orchestrator.call_llm",
+    with patch("agents.core.agent_engine.call_llm",
                return_value={"content": "", "model": "m", "usage": {}}):
         text = ao._run_agent_loop(state)
     assert text  # не пусто — есть фолбэк-приглашение
@@ -168,7 +168,7 @@ def test_process_runs_loop_persists_and_finalizes():
         kw["tool_handlers"]["log_weight"]({"weight_kg": 70})
         return {"content": "Записал вес 70 кг ✅", "model": "claude-sonnet-4-6", "usage": {}}
 
-    with patch("agents.client.agent_orchestrator.call_llm", side_effect=fake_call), \
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call), \
          patch("agents.client.agent_orchestrator._load_base_context"), \
          patch("agents.client.agent_orchestrator.intake_store.persist_record", return_value="weight") as pr, \
          patch("agents.client.orchestrator.ingest_node", side_effect=lambda s: s), \

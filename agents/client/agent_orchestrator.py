@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from prompts import load_prompt
-from utils.llm import call_llm
+from agents.core.agent_engine import run_agent
 from .state import create_initial_state, extract_response
 from .intake_present import format_list, format_allergies
 from . import intake_store
@@ -174,35 +174,29 @@ def _load_base_context(state: Dict[str, Any]) -> None:
 # ==========================================
 
 def _run_agent_loop(state: Dict[str, Any]) -> str:
-    """Один вызов оркестратора с инструментами; возвращает текст ответа клиенту."""
-    messages = _build_messages(state)
-    resp = call_llm(
-        task_type="orchestrator",
-        messages=messages,
+    """
+    Клиентский адаптер поверх общего движка: собирает промпт/инструменты/обработчики
+    (всё scoped по client_id) и вызывает role-agnostic run_agent. task_type='orchestrator'
+    → модель из llm_config (кабинет нутрициолога).
+    """
+    result = run_agent(
+        system_prompt=_system_prompt(state),
+        history=state.get("conversation_history"),
+        user_message=state.get("message"),
         tools=_tool_schemas(),
         tool_handlers=_build_handlers(state),
+        task_type="orchestrator",
     )
-    state["llm_model"] = resp.get("model")
-    state["llm_usage"] = resp.get("usage", {})
+    state["llm_model"] = result.model
+    state["llm_usage"] = result.usage
     state["agent_used"] = "orchestrator"
 
-    tool_calls = resp.get("tool_calls") or []
-    if tool_calls:
+    if result.tool_calls:
         md = state.get("metadata") or {}
-        md["tool_calls"] = [t.get("name") for t in tool_calls]
+        md["tool_calls"] = [t.get("name") for t in result.tool_calls]
         state["metadata"] = md
 
-    content = (resp.get("content") or "").strip()
-    return content or "Принял. Расскажи, пожалуйста, чуть подробнее — и я помогу."
-
-
-def _build_messages(state: Dict[str, Any]) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = [{"role": "system", "content": _system_prompt(state)}]
-    for msg in (state.get("conversation_history") or [])[-10:]:
-        if msg.get("content"):
-            messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": state.get("message") or "—"})
-    return messages
+    return result.content or "Принял. Расскажи, пожалуйста, чуть подробнее — и я помогу."
 
 
 def _system_prompt(state: Dict[str, Any]) -> str:
