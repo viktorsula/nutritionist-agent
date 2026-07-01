@@ -24,6 +24,7 @@ TODO v1.1:
 """
 
 import os
+import json
 import time
 import logging
 from typing import List, Dict, Optional, Any
@@ -284,10 +285,13 @@ def call_llm(
     errors: List[str] = []
     for idx, cand in enumerate(candidates):
         start_time = time.monotonic()
-        # tools (серверный web_search) — только для Claude; иначе убираем.
+        # tools (серверный web_search / клиентские инструменты) + tool_handlers —
+        # только для Claude; иначе убираем (остальные провайдеры их не понимают).
         call_kwargs = dict(kwargs)
         if cand['provider'] != 'claude':
             call_kwargs.pop('tools', None)
+            call_kwargs.pop('tool_handlers', None)
+            call_kwargs.pop('max_tool_iterations', None)
         try:
             if cand['provider'] == 'groq':
                 result = _call_groq(messages, cand, stream, **call_kwargs)
@@ -776,6 +780,55 @@ def _call_openai_compatible(
         raise
 
 
+def _run_client_tools(
+    content_blocks: List[Any],
+    tool_handlers: Dict[str, Any],
+    trace: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Выполняет клиентские инструменты из ответа Claude (блоки type='tool_use')
+    и собирает блоки tool_result для дослания модели.
+
+    tool_handlers: {имя_инструмента: callable(input_dict) -> str | JSON-сериализуемое}.
+    Ошибка/отсутствие обработчика не роняет вызов — возвращается tool_result с
+    is_error=True, чтобы модель могла восстановиться (переспросить/выбрать другой путь).
+    trace пополняется записями {name, input, is_error} для наблюдаемости/трейсинга.
+    """
+    tool_results: List[Dict[str, Any]] = []
+    for block in content_blocks:
+        if getattr(block, 'type', None) != 'tool_use':
+            continue
+        name = getattr(block, 'name', '')
+        tool_input = getattr(block, 'input', None) or {}
+        is_error = False
+        try:
+            handler = tool_handlers.get(name)
+            if handler is None:
+                result_str = f"Ошибка: инструмент '{name}' не зарегистрирован."
+                is_error = True
+            else:
+                result = handler(tool_input)
+                result_str = result if isinstance(result, str) else json.dumps(
+                    result, ensure_ascii=False, default=str
+                )
+        except Exception as e:  # noqa: BLE001 — ошибку инструмента отдаём модели, не роняем ход
+            logger.error(f"Client tool '{name}' failed: {e}", exc_info=True)
+            result_str = f"Ошибка инструмента: {e}"
+            is_error = True
+
+        trace.append({'name': name, 'input': tool_input, 'is_error': is_error})
+        tool_result: Dict[str, Any] = {
+            'type': 'tool_result',
+            'tool_use_id': getattr(block, 'id', None),
+            'content': result_str,
+        }
+        if is_error:
+            tool_result['is_error'] = True
+        tool_results.append(tool_result)
+
+    return tool_results
+
+
 def _call_claude(
     messages: List[Dict[str, str]],
     config: Dict[str, Any],
@@ -830,12 +883,23 @@ def _call_claude(
                 **kwargs
             )
 
-        # Серверные инструменты (например, web_search) передаются через tools.
-        # Anthropic сам выполняет поиск; при server-tool-цикле возможен
-        # stop_reason='pause_turn' — нужно дослать ответ и продолжить.
-        # max_iterations — предохранитель от бесконечного цикла.
-        max_iterations = 5
-        loop_messages = claude_messages
+        # Инструменты передаются через tools (Anthropic-схема). Два вида:
+        #  • СЕРВЕРНЫЕ (web_search) — Anthropic выполняет сам; возможен
+        #    stop_reason='pause_turn' → дослать ассистентский ход и продолжить.
+        #  • КЛИЕНТСКИЕ — модель возвращает stop_reason='tool_use' с блоками tool_use;
+        #    ИХ выполняем МЫ через tool_handlers[name](input) и возвращаем tool_result.
+        # tool_handlers / max_tool_iterations — наши параметры, НЕ параметры Anthropic:
+        # изымаем из kwargs до вызова .create().
+        tool_handlers = kwargs.pop('tool_handlers', None)
+        max_iterations = kwargs.pop('max_tool_iterations', 8)
+
+        tool_calls_trace: List[Dict[str, Any]] = []
+        total_input = 0
+        total_output = 0
+        web_search_requests = 0
+
+        loop_messages = list(claude_messages)
+        response = None
         for _ in range(max_iterations):
             response = client.messages.create(
                 model=config['model'],
@@ -847,45 +911,62 @@ def _call_claude(
                 **kwargs
             )
 
-            if response.stop_reason != 'pause_turn':
-                break
+            # Накапливаем usage по всем итерациям цикла инструментов.
+            total_input += response.usage.input_tokens
+            total_output += response.usage.output_tokens
+            server_tool_use = getattr(response.usage, 'server_tool_use', None)
+            if server_tool_use is not None:
+                wr = getattr(server_tool_use, 'web_search_requests', None)
+                if wr:
+                    web_search_requests += wr
 
-            # Сервер приостановил server-tool-цикл — дослать ассистентский ход
-            # и продолжить (без дополнительного user-сообщения).
-            loop_messages = loop_messages + [
-                {'role': 'assistant', 'content': response.content}
-            ]
+            stop = response.stop_reason
+
+            # Серверный инструмент приостановил ход — дослать ассистентский ход.
+            if stop == 'pause_turn':
+                loop_messages.append({'role': 'assistant', 'content': response.content})
+                continue
+
+            # Клиентские инструменты — выполняем и возвращаем результаты.
+            if stop == 'tool_use' and tool_handlers:
+                tool_results = _run_client_tools(response.content, tool_handlers, tool_calls_trace)
+                loop_messages.append({'role': 'assistant', 'content': response.content})
+                loop_messages.append({'role': 'user', 'content': tool_results})
+                continue
+
+            # Обычное завершение (end_turn / max_tokens / stop_sequence),
+            # либо tool_use без переданных обработчиков — выходим.
+            break
         else:
             logger.warning(
-                f"Claude server-tool loop hit max_iterations={max_iterations}"
+                f"Claude tool loop hit max_iterations={max_iterations}"
             )
 
         # Финальный текст собираем из всех text-блоков (перед ним могут идти
-        # блоки server_tool_use / web_search_tool_result).
+        # блоки server_tool_use / web_search_tool_result / tool_use).
         content_text = "".join(
             block.text for block in response.content
             if getattr(block, 'type', None) == 'text'
         )
 
         usage = {
-            'input_tokens': response.usage.input_tokens,
-            'output_tokens': response.usage.output_tokens,
-            'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+            'input_tokens': total_input,
+            'output_tokens': total_output,
+            'total_tokens': total_input + total_output,
         }
-        # Учёт серверных инструментов (web search) для стоимости/трейсинга.
-        server_tool_use = getattr(response.usage, 'server_tool_use', None)
-        if server_tool_use is not None:
-            web_requests = getattr(server_tool_use, 'web_search_requests', None)
-            if web_requests is not None:
-                usage['web_search_requests'] = web_requests
+        if web_search_requests:
+            usage['web_search_requests'] = web_search_requests
 
-        return {
+        result = {
             'content': content_text,
             'model': config['model'],
             'provider': 'claude',
             'usage': usage,
-            'finish_reason': response.stop_reason
+            'finish_reason': response.stop_reason,
         }
+        if tool_calls_trace:
+            result['tool_calls'] = tool_calls_trace
+        return result
 
     except Exception as e:
         logger.error(f"Claude API error: {e}")
