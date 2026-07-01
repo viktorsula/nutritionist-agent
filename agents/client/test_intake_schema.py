@@ -33,6 +33,25 @@ class TestHelpers(unittest.TestCase):
         self.assertIsNone(k["sugar_g"])
         self.assertIsNone(k["fiber_g"])
 
+    def test_kbju_from_legacy_survives_non_dict(self):
+        # LLM иногда отдаёт kbju строкой/числом/списком — не должно падать (регресс прод-краша).
+        for bad in ("неизвестно", 200, ["a"], None):
+            k = s.kbju_from_legacy(bad)
+            self.assertEqual(set(k.keys()), set(s.KBJU_KEYS))
+            self.assertTrue(all(v is None for v in k.values()))
+
+    def test_normalize_meal_item_with_string_kbju(self):
+        # Ход из прод-лога: meal.items[].kbju пришёл строкой → normalize не должен падать.
+        rec = s.normalize({
+            "kind": "meal",
+            "confidence": "high",
+            "meal": {"meal_type": "lunch", "items": [{"name": "лазанья", "kbju": "много"}]},
+        })
+        self.assertEqual(rec["kind"], "meal")
+        item = rec["meal"]["items"][0]
+        self.assertEqual(item["name"], "лазанья")
+        self.assertTrue(all(v is None for v in item["kbju"].values()))
+
     def test_infer_wellbeing_status(self):
         self.assertEqual(s.infer_wellbeing_status("нормально", ""), "ok")
         self.assertEqual(s.infer_wellbeing_status("плохо", "болит голова"), "bad")

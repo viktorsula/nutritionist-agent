@@ -28,6 +28,28 @@ class TestPresent(unittest.TestCase):
         self.assertIn("курица", facts)
         self.assertIn("рис", facts)
 
+    def test_injects_history_and_summary(self):
+        # Регресс: intake-ответ должен видеть контекст (иначе повторно здоровается).
+        rec = from_diary_extract({"kind": "meal", "ingredients": ["курица"], "meal_type": "lunch"})
+        state = _state(
+            conversation_summary="Клиент на снижении веса, аллергия на орехи.",
+            conversation_history=[
+                {"role": "user", "content": "Привет"},
+                {"role": "assistant", "content": "Привет, Катя!"},
+            ],
+        )
+        with patch("agents.client.intake_present.call_llm",
+                   return_value={"content": "ok", "model": "m", "usage": {}}) as llm:
+            p.present(state, rec, prompt_name="client/diary_system")
+        msgs = llm.call_args.kwargs["messages"]
+        # система содержит сводку
+        self.assertIn("снижении веса", msgs[0]["content"])
+        # предыдущие реплики идут ДО фактов текущего хода
+        roles = [m["role"] for m in msgs]
+        self.assertEqual(roles, ["system", "user", "assistant", "user"])
+        self.assertEqual(msgs[1]["content"], "Привет")
+        self.assertIn("курица", msgs[-1]["content"])  # факты — последним
+
     def test_fallback_on_llm_error(self):
         rec = from_diary_extract({"kind": "weight", "weight_kg": 80})
         with patch("agents.client.intake_present.call_llm", side_effect=RuntimeError("down")):

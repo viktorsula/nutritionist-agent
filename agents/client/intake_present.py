@@ -25,14 +25,19 @@ def present(state: Dict[str, Any], record: Dict[str, Any], *, prompt_name: str) 
     record = normalize(record)
     try:
         system = _system_prompt(state, prompt_name)
+        # Долговременная память — сводка прошлых разговоров (как в dialog/nutrition).
+        summary = (state.get("conversation_summary") or "").strip()
+        if summary:
+            system += "\n\n## Память о клиенте (сводка прошлых разговоров)\n" + summary
         facts = _facts_from_record(state, record)
-        resp = call_llm(
-            task_type="dialog",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": facts},
-            ],
-        )
+        # Краткосрочная память — последние реплики диалога перед фактами текущего хода,
+        # чтобы ответ был в контексте (без повторного приветствия/противоречий).
+        messages = [{"role": "system", "content": system}]
+        for msg in (state.get("conversation_history") or [])[-6:]:
+            if msg.get("content"):
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": facts})
+        resp = call_llm(task_type="dialog", messages=messages)
         state["llm_model"] = resp.get("model")
         state["llm_usage"] = resp.get("usage", {})
         return resp["content"]
