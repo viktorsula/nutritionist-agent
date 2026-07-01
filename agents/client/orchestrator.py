@@ -86,6 +86,28 @@ def process_client_message(
     """
     start_time = datetime.now()
 
+    # ── LLM-оркестратор (Фаза 1, за фиче-флагом) ────────────────────────────
+    # Если включён для этого клиента и тип сообщения ему по силам (текст/голос) —
+    # обрабатываем им. При недоступности LLM / любой ошибке — молча откатываемся
+    # на граф ниже (сеть безопасности strangler-миграции).
+    from . import agent_orchestrator
+    from utils.llm import LLMUnavailableError
+
+    if agent_orchestrator.should_use(client_id, message_type):
+        try:
+            return agent_orchestrator.process(
+                client_id=client_id,
+                message=message,
+                channel=channel,
+                message_type=message_type,
+                metadata=metadata,
+                access_info=access_info,
+            )
+        except LLMUnavailableError as e:
+            logger.warning(f"Orchestrator LLM unavailable, fallback to graph: {e}")
+        except Exception as e:
+            logger.error(f"Orchestrator failed, fallback to graph: {e}", exc_info=True)
+
     try:
         # Создание графа
         graph = create_client_graph()

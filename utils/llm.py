@@ -100,6 +100,13 @@ DEFAULT_TASK_MODEL_MAPPING = {
         'temperature': 0.4,
         'max_tokens': 3000,
         'description': 'Создание планов питания и задач'
+    },
+    'orchestrator': {
+        'provider': 'claude',
+        'model': 'claude-sonnet-4-6',
+        'temperature': 0.4,
+        'max_tokens': 2000,
+        'description': 'LLM-оркестратор ветки клиента (tool-calling)'
     }
 }
 
@@ -134,6 +141,10 @@ TASK_FALLBACK_CHAINS = {
         # vision умеют Claude и Gemini; Groq — нет, поэтому в резерве только Claude.
         {'provider': 'claude', 'model': 'claude-sonnet-4-6'},
     ],
+    # Оркестратору нужен надёжный клиентский tool-calling — сейчас это только Claude.
+    # Резерва в рамках LLM НЕТ: при недоступности оркестратор откатывается на граф
+    # (agent_orchestrator ловит LLMUnavailableError и делегирует старому пути).
+    'orchestrator': [],
 }
 
 
