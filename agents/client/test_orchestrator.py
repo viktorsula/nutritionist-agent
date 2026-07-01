@@ -150,17 +150,17 @@ class TestFormatResponse(unittest.TestCase):
             "client_profile": {"name": "Аня"},
         }
 
-    def test_answer_plus_ack_shows_receipt_not_warm_ack(self):
+    def test_answer_plus_empty_ack_shows_only_answer(self):
         state = self._state([
             {"branch": INTAKE, "needs_answer": ACK, "text": "", "label": "Приём пищи"},
             {"branch": PROFILE, "needs_answer": ANSWER, "text": "ваш вес 80 кг", "label": "Запрос по профилю"},
         ])
         out = orch.format_response_node(state)
         msg = out["final_message"]
-        self.assertIn("ваш вес 80 кг", msg)        # ответ
-        self.assertIn("✓ Записал: Приём пищи", msg)  # квитанция по под-типу
+        self.assertIn("ваш вес 80 кг", msg)         # ответ
+        self.assertNotIn("✓ Записал", msg)          # квитанция убрана
 
-    def test_pure_ack_warm_plus_receipt(self):
+    def test_pure_ack_uses_warm_ack_no_receipt(self):
         state = self._state([
             {"branch": INTAKE, "needs_answer": ACK, "text": "", "label": "Вода"},
         ])
@@ -168,7 +168,7 @@ class TestFormatResponse(unittest.TestCase):
             out = orch.format_response_node(state)
         msg = out["final_message"]
         self.assertIn("Принято", msg)
-        self.assertIn("✓ Записал: Вода", msg)
+        self.assertNotIn("✓ Записал", msg)          # квитанция убрана
 
     def test_clarify_shown_first(self):
         state = self._state([
@@ -178,7 +178,7 @@ class TestFormatResponse(unittest.TestCase):
         out = orch.format_response_node(state)
         msg = out["final_message"]
         self.assertIn("А это что", msg)             # уточнение показано
-        self.assertIn("✓ Записал: Вес/замеры", msg)  # и квитанция по захваченному
+        self.assertNotIn("✓ Записал", msg)          # квитанция убрана
 
     def test_two_answers_get_headers(self):
         state = self._state([
@@ -201,7 +201,7 @@ class TestFormatResponse(unittest.TestCase):
         msg = out["final_message"]
         self.assertIn("Нутрициолог", msg)              # уведомление сверху
         self.assertIn("Свинина в плане запрещена", msg)  # предупреждение
-        self.assertIn("✓ Записал: Приём пищи", msg)
+        self.assertNotIn("✓ Записал", msg)             # квитанция убрана
 
 
 if __name__ == "__main__":

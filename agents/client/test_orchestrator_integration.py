@@ -61,7 +61,7 @@ class TestGraphEndToEnd(unittest.TestCase):
             )
             return graph.invoke(state)
 
-    def test_pure_intake_ack_produces_receipt(self):
+    def test_pure_intake_ack_no_receipt(self):
         final = self._run(
             [{"branch": INTAKE, "parts": [0], "needs_answer": ACK}],
             handlers={'diary_node': _fake_diary_capture},
@@ -69,7 +69,7 @@ class TestGraphEndToEnd(unittest.TestCase):
         )
         msg = final['final_message']
         self.assertIn("Принято", msg)
-        self.assertIn("✓ Записал: Приём пищи", msg)
+        self.assertNotIn("✓ Записал", msg)  # квитанция убрана
 
     def test_profile_answer(self):
         final = self._run(
@@ -97,7 +97,7 @@ class TestGraphEndToEnd(unittest.TestCase):
         )
         msg = final['final_message']
         self.assertIn("Ваш вес сейчас 80 кг.", msg)       # ответ
-        self.assertIn("✓ Записал: Приём пищи", msg)         # квитанция
+        self.assertNotIn("✓ Записал", msg)                # квитанция убрана
 
     def test_intake_capture_fail_becomes_clarify(self):
         def fail_diary(state):

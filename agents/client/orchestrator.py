@@ -86,6 +86,28 @@ def process_client_message(
     """
     start_time = datetime.now()
 
+    # ── LLM-оркестратор (Фаза 1, за фиче-флагом) ────────────────────────────
+    # Если включён для этого клиента и тип сообщения ему по силам (текст/голос) —
+    # обрабатываем им. При недоступности LLM / любой ошибке — молча откатываемся
+    # на граф ниже (сеть безопасности strangler-миграции).
+    from . import agent_orchestrator
+    from utils.llm import LLMUnavailableError
+
+    if agent_orchestrator.should_use(client_id, message_type):
+        try:
+            return agent_orchestrator.process(
+                client_id=client_id,
+                message=message,
+                channel=channel,
+                message_type=message_type,
+                metadata=metadata,
+                access_info=access_info,
+            )
+        except LLMUnavailableError as e:
+            logger.warning(f"Orchestrator LLM unavailable, fallback to graph: {e}")
+        except Exception as e:
+            logger.error(f"Orchestrator failed, fallback to graph: {e}", exc_info=True)
+
     try:
         # Создание графа
         graph = create_client_graph()
@@ -546,18 +568,13 @@ def format_response_node(state: ClientState) -> ClientState:
 
     body = "\n\n".join(blocks)
 
-    # ── Квитанция по ack (перечень захваченных под-типов) ──────────────────
-    recorded = list(dict.fromkeys(r['label'] for r in ack_results if r.get('label')))
-    receipt = ("✓ Записал: " + ", ".join(recorded)) if recorded else ""
-
+    # Техническая квитанция «✓ Записал: …» убрана — из самого текста ответа уже ясно,
+    # что зафиксировано (тёплый ответ present/vision перечисляет записанное).
     if body:
-        # Есть уточнение/ответ/тёплый ack — квитанцию просто дописываем.
-        if receipt:
-            body = f"{body}\n\n{receipt}"
+        pass  # содержательный ответ / тёплый ack уже готов
     elif ack_results:
-        # Чистый ack без тёплого текста (text-дневник) → генерик-подтверждение + квитанция.
-        ack_text = _render_ack(state)
-        body = f"{ack_text}\n\n{receipt}" if receipt else ack_text
+        # Чистый ack без тёплого текста (text-дневник) → генерик-подтверждение.
+        body = _render_ack(state)
     else:
         body = "Принято ✅"  # подстраховка: всё упало
 
