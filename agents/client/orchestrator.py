@@ -225,8 +225,10 @@ def load_context_node(state: ClientState) -> ClientState:
             state['wellness_plan'] = None
             state['tasks'] = []
 
-        # ── Долговременная/краткосрочная память диалога: profile/advice ─────
-        if conversational:
+        # ── Долговременная/краткосрочная память диалога: profile/advice + intake ─
+        # intake тоже получает историю/сводку — иначе тёплый ответ (present) не знает,
+        # что диалог уже идёт, и здоровается повторно / противоречит прошлому ходу.
+        if conversational or has_intake:
             state['conversation_summary'] = client.get('conversation_summary') or ''
             conversations = queries.get_conversations(client_id=client_id, limit=10)
             history = []
@@ -627,12 +629,25 @@ def save_to_db_node(state: ClientState) -> ClientState:
     except Exception as e:
         logger.error(f"Error saving to DB: {e}")
 
-    # Обновление скользящей сводки (best-effort, раз в N сообщений; не валит ответ)
+    # Обновление скользящей сводки — ВНЕ критического пути ответа. Сворачивание делает
+    # отдельный LLM-вызов; держать его в save_to_db значит заставлять клиента ждать лишние
+    # ~1–2 c ради фоновой памяти. Запускаем daemon-потоком (best-effort). Потоку отдаём
+    # снапшот нужных полей, а не живой state (его читает extract_response после END).
     try:
+        import threading
         from .summary import update_rolling_summary
-        update_rolling_summary(state)
+
+        snapshot = {"client_id": state.get("client_id"), "client": state.get("client")}
+
+        def _bg_summary(snap: Dict[str, Any]) -> None:
+            try:
+                update_rolling_summary(snap)
+            except Exception as e:  # noqa: BLE001 — фон не должен падать
+                logger.warning(f"Rolling summary (bg) failed: {e}")
+
+        threading.Thread(target=_bg_summary, args=(snapshot,), daemon=True).start()
     except Exception as e:
-        logger.warning(f"Rolling summary update skipped: {e}")
+        logger.warning(f"Rolling summary thread not started: {e}")
 
     return state
 
