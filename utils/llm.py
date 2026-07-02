@@ -107,6 +107,13 @@ DEFAULT_TASK_MODEL_MAPPING = {
         'temperature': 0.4,
         'max_tokens': 2000,
         'description': 'LLM-оркестратор ветки клиента (tool-calling)'
+    },
+    'nutritionist_orchestrator': {
+        'provider': 'claude',
+        'model': 'claude-sonnet-4-6',
+        'temperature': 0.3,
+        'max_tokens': 3000,
+        'description': 'LLM-оркестратор ветки нутрициолога (tool-calling: аналитика + управление)'
     }
 }
 
@@ -145,6 +152,8 @@ TASK_FALLBACK_CHAINS = {
     # Резерва в рамках LLM НЕТ: при недоступности оркестратор откатывается на граф
     # (agent_orchestrator ловит LLMUnavailableError и делегирует старому пути).
     'orchestrator': [],
+    # То же для оркестратора нутрициолога — резерв = откат на граф Части B.
+    'nutritionist_orchestrator': [],
 }
 
 
