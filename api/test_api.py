@@ -92,6 +92,27 @@ class TestApi(unittest.TestCase):
         self.assertEqual(r.json()["message"], "отчёт")
         self.assertEqual(m.call_args.kwargs["nutritionist_id"], "u-2")
 
+    # --- /nutritionist/coverage (наблюдаемость покрытия, Ф3) ---
+    def test_coverage_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.get("/nutritionist/coverage")
+        self.assertEqual(r.status_code, 403)
+
+    def test_coverage_returns_counts_and_rate(self):
+        from agents.core import coverage
+        coverage.reset()
+        coverage.record_turn("client", "orchestrator")
+        coverage.record_turn("client", "orchestrator")
+        coverage.record_turn("client", "graph_fallback")
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.get("/nutritionist/coverage")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["counts"]["client:orchestrator"], 2)
+        self.assertEqual(body["fallbacks"]["client"], 1)
+        self.assertAlmostEqual(body["orchestrator_rate"]["client"], 0.667, places=2)
+        self.assertIsNone(body["orchestrator_rate"]["nutritionist"])  # ходов нет
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

@@ -229,6 +229,7 @@ def route_to_nutritionist(
     флаге/ошибке/недоступности LLM — откат на граф process_nutritionist_message.
     """
     from agents.nutritionist.orchestrator import process_nutritionist_message
+    from agents.core.coverage import record_turn
 
     result = None
     try:
@@ -242,8 +243,12 @@ def route_to_nutritionist(
                 message_type=message_type,
                 metadata=metadata,
             )
+            record_turn("nutritionist", "orchestrator")
+        else:
+            record_turn("nutritionist", "graph_flag_off")
     except Exception as e:
         logger.warning(f"Nutritionist orchestrator failed, fallback to graph: {e}")
+        record_turn("nutritionist", "graph_fallback", reason=type(e).__name__)
         result = None
 
     if result is None:
