@@ -220,4 +220,14 @@ export const api = {
       email_reason: string;
       sent_to: string;
     }>(`/clients/${encodeURIComponent(clientId)}/reset-password`, { method: "POST" }),
+
+  /** Обновление статусов клиента (жизненный цикл + оплата + срок) с аудитом на бэкенде. */
+  updateClientStatus: (
+    clientId: string,
+    body: { client_status?: string; payment_status?: string; paid_until?: string },
+  ) =>
+    request<{ ok: boolean }>(`/clients/${encodeURIComponent(clientId)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

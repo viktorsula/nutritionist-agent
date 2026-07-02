@@ -1,6 +1,5 @@
 import {
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ReferenceArea,
@@ -68,10 +67,40 @@ export interface NutritionLabels {
   water: string;
 }
 
+/** Один маленький график метрики питания (для сетки 2-в-ряд). */
+function NutritionMini({
+  data,
+  dataKey,
+  title,
+  color,
+  target,
+}: {
+  data: NutritionDay[];
+  dataKey: keyof NutritionDay;
+  title: string;
+  color: string;
+  target?: number;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-gray-600">{title}</div>
+      <ResponsiveContainer width="100%" height={150}>
+        <LineChart data={data} margin={{ top: 4, right: 10, left: -12, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+          <XAxis dataKey="date" fontSize={9} />
+          <YAxis fontSize={9} domain={[0, "auto"]} />
+          <Tooltip />
+          {target ? <ReferenceLine y={target} stroke="#c0392b" strokeDasharray="4 4" /> : null}
+          <Line type="monotone" dataKey={dataKey as string} name={title} stroke={color} strokeWidth={2} dot />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 /**
- * Графики питания: «Питание» — К/Б/Ж/У + сахар в ОДНОМ поле (две оси: ккал справа,
- * граммы слева, т.к. разный масштаб) с линией целевых калорий; «Вода» — отдельно, с
- * линией нормы. Нормы (targets) приходят из активного плана.
+ * Графики питания: 6 отдельных графиков (ккал/белки/жиры/углеводы/сахар/вода), по 2 в ряд.
+ * Нормы (целевые калории, норма воды) из активного плана — линией на соответствующих графиках.
  */
 export function NutritionChart({
   data,
@@ -86,43 +115,13 @@ export function NutritionChart({
 }) {
   if (data.length === 0) return empty(emptyText);
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="mb-1 text-xs font-medium text-gray-600">{labels.nutrition}</div>
-        <ResponsiveContainer width="100%" height={210}>
-          <LineChart data={data} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-            <XAxis dataKey="date" fontSize={10} />
-            <YAxis yAxisId="g" fontSize={10} domain={[0, "auto"]} />
-            <YAxis yAxisId="kcal" orientation="right" fontSize={10} domain={[0, "auto"]} />
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            {targets.kcal ? (
-              <ReferenceLine yAxisId="kcal" y={targets.kcal} stroke="#c0392b" strokeDasharray="4 4" />
-            ) : null}
-            <Line yAxisId="kcal" type="monotone" dataKey="kcal" name={labels.kcal} stroke="#2e7d5b" strokeWidth={2} dot />
-            <Line yAxisId="g" type="monotone" dataKey="protein_g" name={labels.protein} stroke="#8e44ad" strokeWidth={2} dot={false} />
-            <Line yAxisId="g" type="monotone" dataKey="fat_g" name={labels.fat} stroke="#e67e22" strokeWidth={2} dot={false} />
-            <Line yAxisId="g" type="monotone" dataKey="carb_g" name={labels.carbs} stroke="#2980b9" strokeWidth={2} dot={false} />
-            <Line yAxisId="g" type="monotone" dataKey="sugar_g" name={labels.sugar} stroke="#c0392b" strokeWidth={2} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div>
-        <div className="mb-1 text-xs font-medium text-gray-600">{labels.water}</div>
-        <ResponsiveContainer width="100%" height={160}>
-          <LineChart data={data} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-            <XAxis dataKey="date" fontSize={10} />
-            <YAxis fontSize={10} domain={[0, "auto"]} />
-            <Tooltip />
-            {targets.water_ml ? (
-              <ReferenceLine y={targets.water_ml} stroke="#c0392b" strokeDasharray="4 4" />
-            ) : null}
-            <Line type="monotone" dataKey="water_ml" name={labels.water} stroke="#2980b9" strokeWidth={2} dot />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <NutritionMini data={data} dataKey="kcal" title={labels.kcal} color="#2e7d5b" target={targets.kcal} />
+      <NutritionMini data={data} dataKey="water_ml" title={labels.water} color="#2980b9" target={targets.water_ml} />
+      <NutritionMini data={data} dataKey="protein_g" title={labels.protein} color="#8e44ad" />
+      <NutritionMini data={data} dataKey="fat_g" title={labels.fat} color="#e67e22" />
+      <NutritionMini data={data} dataKey="carb_g" title={labels.carbs} color="#2980b9" />
+      <NutritionMini data={data} dataKey="sugar_g" title={labels.sugar} color="#c0392b" />
     </div>
   );
 }
