@@ -29,10 +29,14 @@ def test_should_use_respects_allowlist():
         assert ao.should_use("zzz", "text") is False
 
 
-def test_should_use_photo_goes_to_graph():
+def test_should_use_photo_handled_by_orchestrator():
+    # Ф1.5: фото обрабатывается оркестратором (мультимодальность), не уходит на граф.
     with patch.dict(os.environ, {"CLIENT_ORCHESTRATOR_ENABLED": "on",
                                  "CLIENT_ORCHESTRATOR_CLIENT_IDS": ""}, clear=False):
-        assert ao.should_use("cid", "photo") is False
+        assert ao.should_use("cid", "photo") is True
+        assert ao.should_use("cid", "voice") is True
+        # неподдерживаемый тип (документ) — на граф
+        assert ao.should_use("cid", "document") is False
 
 
 # ── Инструменты: обёртки над persist_record ──────────────────────────────────
@@ -74,11 +78,51 @@ def test_log_water_weight_wellbeing_labs_records():
         assert pr.call_args.args[1]["labs"][0]["indicator"] == "холестерин"
 
 
-def test_log_meal_reports_not_captured():
+def test_log_meal_empty_items_blocked_by_validate():
+    # Пустой приём пищи не доходит до persist: validate-гейт → просим уточнить.
     state = {"client_id": "cid"}
-    with patch("agents.client.agent_orchestrator.intake_store.persist_record", return_value=None):
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record") as pr:
         out = ao._build_handlers(state)["log_meal"]({"items": []})
-    assert out.startswith("не записано")
+    pr.assert_not_called()
+    assert out.startswith("не записал")
+
+
+# ── Ф1.5: мультимодальность (расшифровка фото, шов A/B) ──────────────────────
+def test_log_meal_source_photo_when_photo_turn():
+    # На фото-ходе записанный приём помечается source='photo'.
+    state = {"client_id": "cid", "message_type": "photo"}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record",
+               return_value="meal") as pr:
+        ao._build_handlers(state)["log_meal"]({"items": [{"name": "салат"}]})
+    assert pr.call_args.args[1]["source"] == "photo"
+
+
+def test_prepare_vision_direct_returns_image_block():
+    state = {"client_id": "cid", "message_type": "photo", "image_kind": "food",
+             "metadata": {"image_bytes": b"\x00\x01\x02", "mime_type": "image/png"}}
+    with patch("utils.vision.resolve_vision_strategy", return_value="direct"):
+        blocks = ao._prepare_vision(state)
+    assert len(blocks) == 1
+    assert blocks[0]["type"] == "image"
+    assert blocks[0]["source"]["media_type"] == "image/png"
+    assert blocks[0]["source"]["type"] == "base64"
+
+
+def test_prepare_vision_gemini_tool_injects_note_and_no_images():
+    state = {"client_id": "cid", "message_type": "photo", "image_kind": "food",
+             "message": "посмотри обед",
+             "metadata": {"image_bytes": b"\x00", "mime_type": "image/jpeg"}}
+    with patch("utils.vision.resolve_vision_strategy", return_value="gemini_tool"), \
+         patch("utils.vision.analyze_food_plate",
+               return_value={"items": [{"name": "курица"}, {"name": "рис"}]}):
+        blocks = ao._prepare_vision(state)
+    assert blocks == []                          # image-блоков нет (B)
+    assert "курица" in state["message"]          # распознанное подмешано в контекст хода
+    assert "посмотри обед" in state["message"]   # исходная подпись сохранена
+
+
+def test_prepare_vision_non_photo_returns_empty():
+    assert ao._prepare_vision({"client_id": "c", "message_type": "text"}) == []
 
 
 def test_get_client_data_dispatches_scopes():

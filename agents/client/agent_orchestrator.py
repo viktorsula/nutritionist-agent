@@ -22,6 +22,7 @@ persist_record через business_rules, не сама модель.
 """
 
 import os
+import base64
 import logging
 import threading
 from datetime import datetime
@@ -35,7 +36,9 @@ from . import intake_store
 
 logger = logging.getLogger(__name__)
 
-_TEXT_LIKE = ("text", "voice")
+# Ф1.5: фото обрабатывается оркестратором (мультимодальность). Стратегия расшифровки
+# (Claude видит фото vs Gemini-инструмент) выбирается per-kind через resolve_vision_strategy.
+_SUPPORTED_TYPES = ("text", "voice", "photo")
 
 
 # ==========================================
@@ -50,11 +53,12 @@ def should_use(client_id: str, message_type: str = "text") -> bool:
     - CLIENT_ORCHESTRATOR_ENABLED — глобальный тумблер (1/true/yes/on).
     - CLIENT_ORCHESTRATOR_CLIENT_IDS — белый список id через запятую (пусто = все, кто включён).
 
-    Фото на оркестратор пока не пускаем (Фаза 1 текст-в-текст) — вернёт False → граф.
+    Ф1.5: текст, голос И фото идут через оркестратор (мультимодальность). Прочие типы
+    (документ и т.п.) — на граф.
     """
     if os.environ.get("CLIENT_ORCHESTRATOR_ENABLED", "").strip().lower() not in ("1", "true", "yes", "on"):
         return False
-    if message_type not in _TEXT_LIKE:
+    if message_type not in _SUPPORTED_TYPES:
         return False
     allow = os.environ.get("CLIENT_ORCHESTRATOR_CLIENT_IDS", "").strip()
     if allow:
@@ -110,11 +114,15 @@ def process(
             access_info=access_info,
         )
 
-        # Нормализация вложений (голос → текст). Фото сюда не попадает (see should_use).
+        # Нормализация вложений: голос → текст (Whisper); фото → image_kind (classify_image).
         ingest_node(state)
         _load_base_context(state)
 
-        reply = _run_agent_loop(state)
+        # Ф1.5: расшифровка фото. direct → image-блоки в Claude; gemini_tool → Gemini
+        # расшифровывает и кладёт распознанное в контекст хода (оркестратор решает).
+        images = _prepare_vision(state)
+
+        reply = _run_agent_loop(state, images)
         state["agent_response"] = reply
         _finalize(state, reply)
 
@@ -170,14 +178,106 @@ def _load_base_context(state: Dict[str, Any]) -> None:
 
 
 # ==========================================
+# РАСШИФРОВКА ФОТО (шов A/B, граница — IntakeRecord)
+# ==========================================
+
+def _image_block(image_bytes: bytes, mime_type: str) -> Dict[str, Any]:
+    """Anthropic image-блок из сырых байтов (base64)."""
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": mime_type or "image/jpeg",
+            "data": base64.standard_b64encode(image_bytes).decode("utf-8"),
+        },
+    }
+
+
+def _prepare_vision(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Готовит расшифровку фото по стратегии (per-kind, из llm_config):
+
+    - "direct" (A): возвращает image-блоки — Claude видит фото сам, вместе с подписью и
+      назначениями (один reasoning-цикл, связный ответ).
+    - "gemini_tool" (B): Gemini расшифровывает → распознанное кладём текстом в контекст хода,
+      оркестратор решает (прежняя схема). image-блоки не возвращаем ([]).
+
+    Инвариант обоих путей: фактическая запись идёт через log_*-инструменты → validate →
+    persist_record (IntakeRecord — граница, а не механизм зрения).
+    """
+    if state.get("message_type") != "photo":
+        return []
+    metadata = state.get("metadata") or {}
+    image_bytes = metadata.get("image_bytes")
+    if not image_bytes:
+        return []
+
+    kind = state.get("image_kind") or "food"
+    mime = metadata.get("mime_type", "image/jpeg")
+
+    from utils.vision import resolve_vision_strategy
+
+    strategy = resolve_vision_strategy(kind)
+    logger.info(f"Vision strategy for client {state['client_id']} kind={kind}: {strategy}")
+
+    if strategy == "direct":
+        return [_image_block(image_bytes, mime)]
+
+    _gemini_preextract(state, image_bytes, kind, mime)
+    return []
+
+
+def _gemini_preextract(state: Dict[str, Any], image_bytes: bytes, kind: str, mime: str) -> None:
+    """
+    Вариант B: Gemini-инструмент расшифровывает фото, распознанное подмешиваем текстом в
+    сообщение хода — оркестратор (Claude) дальше сам решает, что записать/ответить. Ошибка
+    зрения не валит ход: просто идём без распознанного (Claude попросит уточнить).
+    """
+    from utils import vision
+
+    note: Optional[str] = None
+    try:
+        if kind == "lab_document":
+            data = vision.analyze_lab_document(image_bytes, mime_type=mime) or {}
+            labs = data.get("labs") or data.get("results") or []
+            if labs:
+                note = "На фото распознан бланк анализов: " + "; ".join(
+                    f"{l.get('indicator')} {l.get('value')} {l.get('unit') or ''}".strip()
+                    for l in labs if l.get("indicator") is not None
+                )
+        elif kind == "fridge":
+            data = vision.analyze_fridge(image_bytes, mime_type=mime) or {}
+            products = data.get("products") or data.get("items") or []
+            if products:
+                names = [p if isinstance(p, str) else p.get("name") for p in products]
+                note = "На фото холодильника распознаны продукты: " + format_list(
+                    [n for n in names if n]
+                )
+        else:  # food
+            data = vision.analyze_food_plate(image_bytes, mime_type=mime) or {}
+            items = data.get("items") or data.get("ingredients") or []
+            names = [it if isinstance(it, str) else it.get("name") for it in items]
+            names = [n for n in names if n]
+            if names:
+                note = "На фото распознана еда: " + format_list(names)
+    except Exception as e:
+        logger.warning(f"_gemini_preextract failed (kind={kind}): {e}")
+
+    if note:
+        base = (state.get("message") or "").strip()
+        state["message"] = f"{base}\n\n[{note}]".strip() if base else f"[{note}]"
+
+
+# ==========================================
 # ЦИКЛ АГЕНТА
 # ==========================================
 
-def _run_agent_loop(state: Dict[str, Any]) -> str:
+def _run_agent_loop(state: Dict[str, Any], images: Optional[List[Dict[str, Any]]] = None) -> str:
     """
     Клиентский адаптер поверх общего движка: собирает промпт/инструменты/обработчики
     (всё scoped по client_id) и вызывает role-agnostic run_agent. task_type='orchestrator'
-    → модель из llm_config (кабинет нутрициолога).
+    → модель из llm_config (кабинет нутрициолога). images — image-блоки текущего хода
+    (стратегия direct); при пустом списке ход текстовый.
     """
     result = run_agent(
         system_prompt=_system_prompt(state),
@@ -186,6 +286,7 @@ def _run_agent_loop(state: Dict[str, Any]) -> str:
         tools=_tool_schemas(),
         tool_handlers=_build_handlers(state),
         task_type="orchestrator",
+        images=images or None,
     )
     state["llm_model"] = result.model
     state["llm_usage"] = result.usage
@@ -393,8 +494,20 @@ def _tool_schemas() -> List[Dict[str, Any]]:
 
 def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
     """Обработчики инструментов замыкаются на state текущего хода."""
+    from .intake_schema import validate
+
+    # Источник факта = модальность хода (photo, если Claude логирует с фото; иначе text).
+    source = "photo" if state.get("message_type") == "photo" else "text"
 
     def _persist(record: Dict[str, Any], not_captured: str) -> str:
+        # Инвариант: любая запись (text/photo, direct/gemini_tool) проходит validate-гейт
+        # перед persist — как в графовом IntakeRecord-протоколе. low/пусто → не пишем.
+        # validate работает по сырой записи; нормализацию делает сам persist_record (один раз).
+        check = validate(record)
+        if check.get("needs_clarify"):
+            reasons = check.get("uncertainties") or check.get("issues") or []
+            detail = f" ({'; '.join(str(x) for x in reasons)})" if reasons else ""
+            return f"не записал: нужно уточнить у клиента{detail}"
         subtype = intake_store.persist_record(state, record)
         return f"записано: {subtype}" if subtype else f"не записано: {not_captured}"
 
@@ -404,7 +517,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
             for it in (inp.get("items") or []) if it.get("name")
         ]
         record = {
-            "kind": "meal", "source": "text", "confidence": "high",
+            "kind": "meal", "source": source, "confidence": "high",
             "meal": {
                 "dish_name": inp.get("dish_name"),
                 "meal_type": inp.get("meal_type"),
@@ -415,16 +528,16 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         return _persist(record, "не понял, что именно из еды")
 
     def log_water(inp: Dict[str, Any]) -> str:
-        return _persist({"kind": "water", "source": "text", "water_ml": inp.get("water_ml")},
+        return _persist({"kind": "water", "source": source, "water_ml": inp.get("water_ml")},
                         "не понял объём воды")
 
     def log_weight(inp: Dict[str, Any]) -> str:
-        return _persist({"kind": "weight", "source": "text", "weight_kg": inp.get("weight_kg")},
+        return _persist({"kind": "weight", "source": source, "weight_kg": inp.get("weight_kg")},
                         "не понял значение веса")
 
     def log_wellbeing(inp: Dict[str, Any]) -> str:
         return _persist(
-            {"kind": "wellbeing", "source": "text",
+            {"kind": "wellbeing", "source": source,
              "wellbeing": {"status": inp.get("status"), "reason": inp.get("reason")}},
             "не понял самочувствие",
         )
@@ -434,7 +547,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
             {"indicator": l.get("indicator"), "value": l.get("value"), "unit": l.get("unit")}
             for l in (inp.get("labs") or []) if l.get("indicator") is not None
         ]
-        return _persist({"kind": "lab", "source": "text", "labs": labs}, "не понял показатели анализов")
+        return _persist({"kind": "lab", "source": source, "labs": labs}, "не понял показатели анализов")
 
     def get_client_data(inp: Dict[str, Any]) -> Any:
         from database import queries

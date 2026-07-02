@@ -58,6 +58,28 @@ def test_run_agent_trims_history_to_limit():
     assert [m["content"] for m in msgs] == ["s", "m17", "m18", "m19", "now"]
 
 
+def test_run_agent_images_build_multimodal_user_content():
+    box, fake = _capture()
+    img = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"}}
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake):
+        run_agent(system_prompt="s", history=None, user_message="что на фото?",
+                  tools=[], tool_handlers={}, task_type="orchestrator", images=[img])
+    # последний ход — список блоков: image(ы) + текст в одном user-сообщении
+    last = box["messages"][-1]
+    assert last["role"] == "user"
+    assert isinstance(last["content"], list)
+    assert last["content"][0] == img
+    assert last["content"][-1] == {"type": "text", "text": "что на фото?"}
+
+
+def test_run_agent_no_images_keeps_string_content():
+    box, fake = _capture()
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake):
+        run_agent(system_prompt="s", history=None, user_message="привет",
+                  tools=[], tool_handlers={}, task_type="orchestrator", images=None)
+    assert box["messages"][-1] == {"role": "user", "content": "привет"}
+
+
 def test_run_agent_empty_user_message_placeholder():
     box, fake = _capture()
     with patch("agents.core.agent_engine.call_llm", side_effect=fake):

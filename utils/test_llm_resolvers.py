@@ -14,7 +14,7 @@ from utils.llm import (
     DEFAULT_TASK_MODEL_MAPPING,
     TASK_FALLBACK_CHAINS,
 )
-from utils.vision import resolve_vision_model, VISION_MODEL
+from utils.vision import resolve_vision_model, VISION_MODEL, resolve_vision_strategy
 
 
 # ── resolve_fallback_chain ───────────────────────────────────────────────────
@@ -106,3 +106,32 @@ def test_vision_model_default_when_missing():
 def test_vision_model_default_when_raises():
     with patch("database.queries.get_setting", side_effect=RuntimeError("x")):
         assert resolve_vision_model() == VISION_MODEL
+
+
+# ── resolve_vision_strategy (Ф1.5) ───────────────────────────────────────────
+def test_vision_strategy_default_food_is_direct():
+    with patch("database.queries.get_setting", return_value=None):
+        assert resolve_vision_strategy("food") == "direct"
+
+
+def test_vision_strategy_default_lab_is_gemini_tool():
+    with patch("database.queries.get_setting", return_value=None):
+        assert resolve_vision_strategy("lab_document") == "gemini_tool"
+
+
+def test_vision_strategy_db_override_per_kind():
+    cfg = {"vision_strategy": {"food": "gemini_tool", "default": "direct"}}
+    with patch("database.queries.get_setting", return_value=cfg):
+        assert resolve_vision_strategy("food") == "gemini_tool"
+        assert resolve_vision_strategy("fridge") == "direct"  # → default
+
+
+def test_vision_strategy_unknown_value_falls_back_to_direct():
+    cfg = {"vision_strategy": {"food": "banana"}}
+    with patch("database.queries.get_setting", return_value=cfg):
+        assert resolve_vision_strategy("food") == "direct"
+
+
+def test_vision_strategy_default_when_db_raises():
+    with patch("database.queries.get_setting", side_effect=RuntimeError("x")):
+        assert resolve_vision_strategy("lab_document") == "gemini_tool"
