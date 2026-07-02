@@ -139,6 +139,32 @@ class TestApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(g.call_args.args[0], "c-9")
 
+    # --- /clients/{id}/status (редактор статусов, PR A) ---
+    def test_client_status_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.post("/clients/c-1/status", json={"payment_status": "active"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_client_status_updates_and_audits(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_client_by_id",
+                   return_value={"payment_status": "inactive", "paid_until": None}), \
+             patch("database.queries.update_client_status") as upd, \
+             patch("database.queries.write_audit_log") as audit:
+            r = self.client.post("/clients/c-9/status",
+                                 json={"payment_status": "active", "paid_until": "2026-08-01"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(upd.call_args.kwargs["payment_status"], "active")
+        self.assertEqual(upd.call_args.kwargs["paid_until"], "2026-08-01")
+        audit.assert_called_once()
+        self.assertEqual(audit.call_args.kwargs["action"], "change_status")
+
+    def test_client_status_empty_fields_400(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_client_by_id", return_value={"payment_status": "active"}):
+            r = self.client.post("/clients/c-9/status", json={})
+        self.assertEqual(r.status_code, 400)
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

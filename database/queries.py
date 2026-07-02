@@ -609,8 +609,9 @@ def update_client_status(
     client_status: Optional[str] = None,
     payment_status: Optional[str] = None,
     access_status: Optional[str] = None,
+    paid_until: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Обновить статусы клиента."""
+    """Обновить статусы клиента (client_status/payment_status/paid_until; access_status — legacy)."""
     updates = {}
     if client_status is not None:
         updates["client_status"] = client_status
@@ -618,6 +619,8 @@ def update_client_status(
         updates["payment_status"] = payment_status
     if access_status is not None:
         updates["access_status"] = access_status
+    if paid_until is not None:
+        updates["paid_until"] = paid_until or None
 
     if not updates:
         return None

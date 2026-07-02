@@ -12,6 +12,7 @@ Access Rules — Проверка доступа клиента к систем�
 """
 
 from typing import Dict, Any
+from datetime import date
 import sys
 import os
 
@@ -19,6 +20,27 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from database.queries import get_client_by_id, get_client_profile
+
+
+def _payment_active(client: Dict[str, Any]) -> bool:
+    """
+    Оплата активна: статус trial/active И срок оплаты не истёк.
+
+    paid_until ('YYYY-MM-DD') задаёт нутрициолог при оплате. Если он в прошлом —
+    считаем неоплаченным АВТОМАТИЧЕСКИ (ежемесячная оплата: без ручного переключения
+    payment_status). paid_until не задан → блокируем только по статусу (напр. trial без
+    даты), чтобы не запереть клиента без даты. Сравнение ISO-дат строкой корректно.
+    """
+    if (client or {}).get('payment_status') not in ('trial', 'active'):
+        return False
+    paid_until = client.get('paid_until')
+    if paid_until:
+        try:
+            if str(paid_until)[:10] < date.today().isoformat():
+                return False
+        except Exception:
+            pass
+    return True
 
 
 def check_access(client_id: str) -> Dict[str, Any]:
@@ -87,14 +109,12 @@ def check_access(client_id: str) -> Dict[str, Any]:
     # ════════════════════════════════════════════
     # [3] ПРОВЕРКА: Оплата активна?
     # ════════════════════════════════════════════
-    payment_status = client.get('payment_status')
-
-    if payment_status not in ['trial', 'active']:
+    if not _payment_active(client):
         return {
             "allowed": False,
             "mode": "blocked",
             "reason": "payment_inactive",
-            "message_for_client": "Ваша подписка неактивна. Для продолжения работы обратитесь к нутрициологу."
+            "message_for_client": "Ваша подписка неактивна или срок оплаты истёк. Для продолжения обратитесь к нутрициологу."
         }
 
     # ════════════════════════════════════════════
@@ -136,7 +156,9 @@ def check_web_access(client_id: str) -> Dict[str, Any]:
     Проверка допуска клиента В ВЕБ-КАБИНЕТ (до диалога с агентом).
 
     Отличие от check_access: НЕ требует завершённого онбординга (клиент должен
-    войти, чтобы заполнить анкету). Блокирует только по оплате/заморозке/архиву.
+    войти, чтобы заполнить анкету). Блокирует по: архив, пауза, оплата (вкл. истёкший
+    paid_until). Единый рубильник «приостановлено» — client_status='paused' (access_status
+    убран как дублирующий).
 
     Returns: {"allowed": bool, "reason": str, "message_for_client": str}
     """
@@ -154,13 +176,13 @@ def check_web_access(client_id: str) -> Dict[str, Any]:
         return {"allowed": False, "reason": "client_archived",
                 "message_for_client": "Ваш аккаунт архивирован. Обратитесь к нутрициологу."}
 
-    if client.get('access_status') == 'frozen':
-        return {"allowed": False, "reason": "access_frozen",
-                "message_for_client": "Доступ временно приостановлен. Обратитесь к нутрициологу."}
+    if client.get('client_status') == 'paused':
+        return {"allowed": False, "reason": "program_paused",
+                "message_for_client": "Обслуживание приостановлено. Обратитесь к нутрициологу."}
 
-    if client.get('payment_status') not in ('trial', 'active'):
+    if not _payment_active(client):
         return {"allowed": False, "reason": "payment_inactive",
-                "message_for_client": "Доступ к кабинету закрыт: услуга не оплачена. Обратитесь к нутрициологу."}
+                "message_for_client": "Доступ к кабинету закрыт: услуга не оплачена или срок оплаты истёк. Обратитесь к нутрициологу."}
 
     return {"allowed": True, "reason": "ok", "message_for_client": ""}
 

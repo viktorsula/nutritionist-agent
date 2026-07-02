@@ -96,6 +96,12 @@ class CreateClientIn(BaseModel):
     paid_until: str | None = None              # 'YYYY-MM-DD'; обязателен при paid=True
 
 
+class ClientStatusIn(BaseModel):
+    client_status: str | None = None           # lead|onboarding|active|paused|completed|archived
+    payment_status: str | None = None          # trial|active|inactive
+    paid_until: str | None = None              # 'YYYY-MM-DD' | '' (сбросить)
+
+
 # ========================================
 # ЭНДПОИНТЫ
 # ========================================
@@ -647,6 +653,54 @@ def _telegram_deep_link(token: str) -> str:
     """Собирает t.me/<bot>?start=<token> из TELEGRAM_BOT_USERNAME (или '' если не задан)."""
     username = (os.environ.get("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
     return f"https://t.me/{username}?start={token}" if username else ""
+
+
+@app.post("/clients/{client_id}/status")
+def update_client_status_endpoint(
+    client_id: str,
+    body: ClientStatusIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Обновление статусов клиента нутрициологом (жизненный цикл + оплата + срок оплаты) с
+    записью в audit_logs. Модель — 2 оси: client_status + payment_status/paid_until
+    (access_status убран). paid_until авто-блокирует доступ при истечении (access_rules).
+    """
+    from database import queries
+
+    old = queries.get_client_by_id(client_id)
+    if not old:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+
+    fields = {
+        k: v for k, v in {
+            "client_status": body.client_status,
+            "payment_status": body.payment_status,
+            "paid_until": body.paid_until,
+        }.items() if v is not None
+    }
+    if not fields:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No status fields provided")
+
+    try:
+        queries.update_client_status(
+            client_id=client_id,
+            client_status=body.client_status,
+            payment_status=body.payment_status,
+            paid_until=body.paid_until,
+        )
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="change_status",
+            entity_type="client",
+            entity_id=client_id,
+            old_value={k: old.get(k) for k in fields},
+            new_value=fields,
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @app.post("/clients/{client_id}/telegram-link")
