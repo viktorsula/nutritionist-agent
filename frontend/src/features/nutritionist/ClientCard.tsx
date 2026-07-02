@@ -18,6 +18,7 @@ import { TaskEditor } from "./TaskEditor";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
 import { ReportsCard } from "./ReportsCard";
+import { StatusEditor } from "./StatusEditor";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -28,6 +29,43 @@ function age(birth?: string | null): number | null {
 }
 
 const list = (a?: string[] | null) => (a && a.length ? a.join(", ") : null);
+
+function num(v: unknown): number | null {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+  return null;
+}
+
+const MEAL_RU: Record<string, string> = {
+  breakfast: "Завтрак", lunch: "Обед", dinner: "Ужин", snack: "Перекус", all_day: "За день",
+};
+
+/** Человекочитаемое описание события из payload_json (а не сухой event_type). */
+function eventLine(e: { event_type: string; payload_json: Record<string, unknown> | null }): string {
+  const p = e.payload_json ?? {};
+  switch (e.event_type) {
+    case "calories_logged": {
+      const dish =
+        (p.dish_name as string) ||
+        ((p.ingredients as string[] | undefined) ?? []).join(", ") ||
+        "приём пищи";
+      const total = (p.total as Record<string, unknown> | undefined) ?? {};
+      const kcal = num(total.kcal);
+      const mt = p.meal_type ? `${MEAL_RU[p.meal_type as string] ?? p.meal_type}: ` : "";
+      return `${mt}${dish}${kcal ? ` (≈${Math.round(kcal)} ккал)` : ""}`;
+    }
+    case "water_logged":
+      return `Вода: ${num(p.water_ml) ?? "?"} мл`;
+    case "weight_logged":
+      return `Вес: ${num(p.weight) ?? "?"} кг`;
+    case "bad_wellbeing":
+      return `Самочувствие: ${(p.reason as string) || "плохое"}`;
+    case "wellbeing_logged":
+      return `Самочувствие: ${(p.status as string) || "—"}`;
+    default:
+      return e.event_type;
+  }
+}
 
 /** Карточка клиента для нутрициолога: профиль, планы, задачи, графики, события, заметки.
  *  Грузит строку клиента по clientId — открывается и из реестра, и из чата (Блок 2). */
@@ -172,9 +210,58 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
         <div className="flex flex-wrap gap-1">
           {badge(client?.client_status ? t(`registry.status_value.${client.client_status}`, { defaultValue: client.client_status }) : null)}
           {badge(client?.payment_status ? t(`registry.payment_value.${client.payment_status}`, { defaultValue: client.payment_status }) : null)}
-          {badge(client?.access_status ? t(`registry.access_value.${client.access_status}`, { defaultValue: client.access_status }) : null)}
         </div>
       </div>
+
+      <Card title={t("card.events")}>
+        <label className="mb-2 flex items-center gap-2 text-xs text-gray-600">
+          <input
+            type="checkbox"
+            checked={alertsOnly}
+            onChange={(e) => setAlertsOnly(e.target.checked)}
+          />
+          {t("card.alerts_only")}
+        </label>
+        {(() => {
+          const rows = alertsOnly
+            ? (events.data ?? []).filter((e) => e.severity)
+            : events.data ?? [];
+          return rows.length === 0 ? (
+            <div className="text-xs text-gray-400">
+              {alertsOnly ? t("card.no_alerts") : t("card.no_data")}
+            </div>
+          ) : (
+            <ul className="max-h-[30vh] space-y-1 overflow-y-auto pr-1 text-xs">
+              {rows.map((e, i) => {
+                const tone =
+                  e.severity === "critical"
+                    ? "border-l-red-600 bg-red-50"
+                    : e.severity === "high"
+                      ? "border-l-orange-500 bg-orange-50"
+                      : e.severity === "medium"
+                        ? "border-l-amber-400 bg-amber-50"
+                        : "border-l-transparent";
+                const d = new Date(e.event_date);
+                return (
+                  <li
+                    key={i}
+                    className={`flex items-start gap-2 rounded border-l-4 px-2 py-1 ${tone}`}
+                  >
+                    <span className="shrink-0 whitespace-nowrap text-gray-400">
+                      {d.toLocaleDateString()}{" "}
+                      {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <span className="text-gray-700">
+                      {eventLine(e)}
+                      {e.severity ? ` [${e.severity}]` : ""}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          );
+        })()}
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card title={t("card.profile")}>
@@ -197,11 +284,20 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           )}
         </Card>
 
-        <Card title={t("card.plan")}>
+        <Card title={t("card.recommendations")}>
+          <div className="mb-1 text-xs font-medium text-gray-600">{t("card.plan")}</div>
           {plan.data ? (
             <div className="space-y-1">
               <Row label={t("card.plan_title")} value={plan.data.title} />
               <Row label={t("card.plan_from")} value={plan.data.effective_from} />
+              <Row
+                label={t("card.plan_description")}
+                value={
+                  typeof plan.data.plan_json?.description === "string"
+                    ? plan.data.plan_json.description
+                    : null
+                }
+              />
               <Row
                 label={t("card.supplements")}
                 value={
@@ -214,43 +310,52 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           ) : (
             <div className="text-xs text-gray-400">{t("card.no_plan")}</div>
           )}
+          {/* «+новый план» и история — внутри PlanEditor, внизу раздела «План питания» */}
+          <div className="mt-2">
+            <PlanEditor clientId={clientId} />
+          </div>
           <div className="mt-3 border-t pt-2">
             <div className="mb-1 text-xs font-medium text-gray-600">{t("card.wellness")}</div>
             <WellnessEditor clientId={clientId} />
           </div>
+        </Card>
+
+        <Card title={t("card.tasks_notes")}>
+          <TaskEditor clientId={clientId} />
           <div className="mt-3 border-t pt-2">
-            <div className="mb-2 text-xs font-medium text-gray-600">{t("card.plan_history")}</div>
-            <PlanEditor clientId={clientId} />
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
+            <textarea
+              className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
+              value={notes}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                setNotesOk(false);
+              }}
+              placeholder={t("card.notes_placeholder")}
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <Button type="button" onClick={saveNotes} disabled={savingNotes}>
+                {savingNotes ? t("card.saving") : t("card.save_notes")}
+              </Button>
+              {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
+            </div>
           </div>
         </Card>
 
-        <Card title={t("card.tasks")}>
-          <TaskEditor clientId={clientId} />
+        <Card title={t("card.statuses")}>
+          <StatusEditor
+            clientId={clientId}
+            clientStatus={client?.client_status}
+            paymentStatus={client?.payment_status}
+            paidUntil={client?.paid_until}
+          />
         </Card>
 
         <Card title={t("card.reports")}>
           <ReportsCard clientId={clientId} />
         </Card>
 
-        <Card title={t("card.notes")}>
-          <textarea
-            className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
-            value={notes}
-            onChange={(e) => {
-              setNotes(e.target.value);
-              setNotesOk(false);
-            }}
-            placeholder={t("card.notes_placeholder")}
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <Button type="button" onClick={saveNotes} disabled={savingNotes}>
-              {savingNotes ? t("card.saving") : t("card.save_notes")}
-            </Button>
-            {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
-          </div>
-        </Card>
-
-        <Card title={t("card.tg_title")}>
+        <Card title={t("card.access")}>
           {client?.telegram_id ? (
             <div className="space-y-2">
               <div className="text-xs text-gray-700">
@@ -292,11 +397,10 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
             </div>
           )}
           {tgErr && <div className="mt-2 text-xs text-red-600">{tgErr}</div>}
-        </Card>
-
-        <Card title={t("card.pw_title")}>
-          <div className="space-y-2">
-            <div className="text-[11px] text-gray-500">{t("card.pw_hint")}</div>
+          <div className="mt-3 border-t pt-2">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.pw_title")}</div>
+            <div className="space-y-2">
+              <div className="text-[11px] text-gray-500">{t("card.pw_hint")}</div>
             <Button type="button" onClick={resetPassword} disabled={pwBusy}>
               {pwBusy ? t("card.pw_resetting") : t("card.pw_reset")}
             </Button>
@@ -326,7 +430,8 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               </div>
             )}
           </div>
-          {pwErr && <div className="mt-2 text-xs text-red-600">{pwErr}</div>}
+            {pwErr && <div className="mt-2 text-xs text-red-600">{pwErr}</div>}
+          </div>
         </Card>
       </div>
 
@@ -355,7 +460,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
         />
       </Card>
 
-      <Card title={t("card.labs")}>
+      <Card title={t("card.additional")}>
         {tracked.length > 0 ? (
           <div className="space-y-4">
             {tracked.map((ind) => (
@@ -376,55 +481,6 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
         )}
       </Card>
 
-      <Card title={t("card.events")}>
-        <label className="mb-2 flex items-center gap-2 text-xs text-gray-600">
-          <input
-            type="checkbox"
-            checked={alertsOnly}
-            onChange={(e) => setAlertsOnly(e.target.checked)}
-          />
-          {t("card.alerts_only")}
-        </label>
-        {(() => {
-          // Хронологический порядок (новые сверху) уже задан запросом;
-          // при включённом фильтре оставляем только события с severity (алерты).
-          const list = alertsOnly
-            ? (events.data ?? []).filter((e) => e.severity)
-            : events.data ?? [];
-          return list.length === 0 ? (
-            <div className="text-xs text-gray-400">
-              {alertsOnly ? t("card.no_alerts") : t("card.no_data")}
-            </div>
-          ) : (
-            <ul className="max-h-72 space-y-1 overflow-y-auto pr-1 text-xs">
-              {list.map((e, i) => {
-              const tone =
-                e.severity === "critical"
-                  ? "border-l-red-600 bg-red-50"
-                  : e.severity === "high"
-                    ? "border-l-orange-500 bg-orange-50"
-                    : e.severity === "medium"
-                      ? "border-l-amber-400 bg-amber-50"
-                      : "border-l-transparent";
-              return (
-                <li
-                  key={i}
-                  className={`flex items-center justify-between gap-2 rounded border-l-4 px-2 py-1 ${tone}`}
-                >
-                  <span className="text-gray-700">
-                    {e.event_type}
-                    {e.severity ? ` [${e.severity}]` : ""}
-                  </span>
-                  <span className="shrink-0 text-gray-400">
-                    {new Date(e.event_date).toLocaleString()}
-                  </span>
-                </li>
-              );
-              })}
-            </ul>
-          );
-        })()}
-      </Card>
     </div>
   );
 }
