@@ -147,6 +147,36 @@ def test_get_client_data_diary_reads_events():
         e.assert_called_once()
 
 
+# ── Fix B: уведомление нутрициолога + чистый ответ (E2E-дебаг) ────────────────
+def test_log_wellbeing_bad_tells_model_nutritionist_notified():
+    # При плохом самочувствии обработчик сообщает модели, что нутрициолог УЖЕ уведомлён,
+    # чтобы она сказала «я уже сообщил(а)», а не «будет в курсе».
+    state = {"client_id": "cid"}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record", return_value="wellbeing"):
+        out = ao._build_handlers(state)["log_wellbeing"]({"status": "bad", "reason": "болит печень"})
+    assert "уже уведомлён" in out
+    assert "Telegram" in out
+
+
+def test_log_wellbeing_good_has_no_notification_note():
+    state = {"client_id": "cid"}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record", return_value="wellbeing"):
+        out = ao._build_handlers(state)["log_wellbeing"]({"status": "good"})
+    assert "уведомлён" not in out
+
+
+def test_finalize_uses_model_reply_verbatim():
+    # _finalize не дописывает сырой текст алертов — ответ модели идёт как есть
+    # (модель сама вплетает предупреждения; безопасность — в persist/routing/scheduler).
+    state = {"alerts": [{"type": "bad_wellbeing", "severity": "medium",
+                         "message": "Клиент сообщает о плохом самочувствии: Болит печень"}],
+             "routing": {"notify_nutritionist": False}}
+    ao._finalize(state, "Записала обед и самочувствие. Уже сообщила нутрициологу.")
+    assert state["final_message"] == "Записала обед и самочувствие. Уже сообщила нутрициологу."
+    assert "Обратите внимание" not in state["final_message"]
+    assert "Клиент сообщает" not in state["final_message"]
+
+
 # ── Заземление на назначения нутрициолога (plan_json) ────────────────────────
 def test_plan_view_reads_from_plan_json():
     plan = {
