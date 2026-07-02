@@ -5,12 +5,13 @@ import { supabase } from "../../lib/supabase";
 import { api } from "../../lib/api";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
-import { WeightChart, LabChart } from "../client/charts";
+import { WeightChart, LabChart, NutritionChart } from "../client/charts";
 import {
   useClientProfile,
   useActivePlan,
   useMeasurements,
   useLabResults,
+  useNutritionDaily,
 } from "../client/queries";
 import { useClientEventsRecent, useClientRow } from "./queries";
 import { TaskEditor } from "./TaskEditor";
@@ -42,6 +43,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
   const plan = useActivePlan(clientId);
   const measurements = useMeasurements(clientId);
   const labs = useLabResults(clientId);
+  const nutrition = useNutritionDaily(clientId);
   const events = useClientEventsRecent(clientId);
 
   const [notes, setNotes] = useState("");
@@ -333,6 +335,23 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           data={measurements.data ?? []}
           target={p?.target_weight}
           emptyText={t("card.no_data")}
+        />
+      </Card>
+
+      <Card title={t("client.calories")}>
+        <NutritionChart
+          data={nutrition.data?.series ?? []}
+          targets={nutrition.data?.targets ?? {}}
+          emptyText={t("card.no_data")}
+          labels={{
+            nutrition: t("client.nutrition_macros"),
+            kcal: t("client.kcal"),
+            protein: t("client.protein"),
+            fat: t("client.fat"),
+            carbs: t("client.carbs"),
+            sugar: t("client.sugar"),
+            water: t("client.water"),
+          }}
         />
       </Card>
 
