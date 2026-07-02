@@ -62,6 +62,47 @@ def resolve_vision_model() -> str:
     return VISION_MODEL
 
 
+# Стратегия расшифровки фото по типу изображения:
+#   "direct"      — фото уходит НАПРЯМУЮ в оркестратор (Claude видит картинку): один
+#                   reasoning-цикл, фото+подпись+назначения в одном контексте (вариант A);
+#   "gemini_tool" — фото расшифровывает Gemini-инструмент, оркестратор получает готовый
+#                   IntakeRecord и решает (вариант B, прежняя схема).
+# Инвариант обоих путей — на выходе IntakeRecord → validate → persist; поэтому переключение
+# безопасно и обратимо. Дефолт — direct; бланк анализов (мелкий текст) — на Gemini.
+DEFAULT_VISION_STRATEGY = {
+    "food": "direct",
+    "fridge": "direct",
+    "lab_document": "gemini_tool",
+    "other": "direct",
+    "default": "direct",
+}
+
+
+def resolve_vision_strategy(image_kind: Optional[str]) -> str:
+    """
+    Стратегия расшифровки для данного типа фото: `llm_config['vision_strategy']` (БД,
+    правится из кабинета) → `DEFAULT_VISION_STRATEGY` (код). Возвращает "direct" | "gemini_tool".
+
+    Приоритет ключей: точный `image_kind` → `default`. Любая ошибка/пустой конфиг → код-дефолт
+    (фото-путь не падает). Неизвестное значение стратегии трактуем как "direct".
+    """
+    kind = (image_kind or "food").strip().lower()
+    strategy: Optional[str] = None
+    try:
+        from database import queries
+
+        cfg = queries.get_setting('llm_config')
+        if isinstance(cfg, dict) and isinstance(cfg.get('vision_strategy'), dict):
+            vs = cfg['vision_strategy']
+            strategy = vs.get(kind) or vs.get('default')
+    except Exception as e:
+        logger.warning(f"resolve_vision_strategy: llm_config недоступен, дефолт: {e}")
+
+    if strategy is None:
+        strategy = DEFAULT_VISION_STRATEGY.get(kind, DEFAULT_VISION_STRATEGY["default"])
+    return strategy if strategy in ("direct", "gemini_tool") else "direct"
+
+
 # ========================================
 # БАЗОВЫЙ АНАЛИЗ ИЗОБРАЖЕНИЯ
 # ========================================

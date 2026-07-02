@@ -9,9 +9,35 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
-from utils.llm import _call_claude, call_llm
+from utils.llm import _call_claude, call_llm, _content_to_text, _flatten_content
 
 CFG = {"model": "claude-sonnet-4-6", "temperature": 0.3, "max_tokens": 1000}
+
+
+# ── Ф1.5: деградация мультимодального content для не-Claude провайдеров ────────
+def test_content_to_text_passthrough_string():
+    assert _content_to_text("привет") == "привет"
+
+
+def test_content_to_text_flattens_blocks():
+    content = [
+        {"type": "image", "source": {"type": "base64", "data": "x"}},
+        {"type": "text", "text": "что на фото?"},
+    ]
+    out = _content_to_text(content)
+    assert "[изображение]" in out
+    assert "что на фото?" in out
+
+
+def test_flatten_content_makes_all_string():
+    msgs = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": [{"type": "text", "text": "t"},
+                                     {"type": "image", "source": {}}]},
+    ]
+    flat = _flatten_content(msgs)
+    assert all(isinstance(m["content"], str) for m in flat)
+    assert flat[1]["role"] == "user"  # прочие поля сохранены
 
 
 # ── Хелперы: лёгкие двойники блоков/ответов Anthropic ────────────────────────

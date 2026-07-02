@@ -39,6 +39,7 @@ def run_agent(
     tool_handlers: Dict[str, Callable],
     task_type: str,
     history_limit: int = 10,
+    images: Optional[List[Dict[str, Any]]] = None,
 ) -> AgentResult:
     """
     Один проход агента с инструментами.
@@ -52,15 +53,27 @@ def run_agent(
                        разрешённый scope роли (клиентские — на client_id).
         task_type: ключ в llm_config (модель управляется из кабинета нутрициолога).
         history_limit: сколько последних реплик истории подмешать.
+        images: опц. список Anthropic image-блоков ({"type":"image","source":{...}}).
+                Если задан — текущий ход клиента становится МУЛЬТИМОДАЛЬНЫМ (модель видит
+                фото вместе с подписью). Движок роле-агностичен: он просто собирает блоки,
+                а решение «нужно ли зрение» принимает адаптер роли (см. vision_strategy).
 
     Returns:
         AgentResult (текст ответа, модель, usage, трейс вызванных инструментов).
     """
-    messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     for msg in (history or [])[-history_limit:]:
         if msg.get("content"):
             messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": user_message or "—"})
+
+    if images:
+        # Мультимодальный ход: image-блоки + текст в одном user-сообщении.
+        # Провайдер (Claude) принимает content списком блоков напрямую.
+        blocks: List[Dict[str, Any]] = list(images)
+        blocks.append({"type": "text", "text": user_message or "—"})
+        messages.append({"role": "user", "content": blocks})
+    else:
+        messages.append({"role": "user", "content": user_message or "—"})
 
     resp = call_llm(
         task_type=task_type,

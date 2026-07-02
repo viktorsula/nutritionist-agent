@@ -1,26 +1,31 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ОТСЮДА (2 июля) — Ф1.5 мультимодальность оркестратора
+## ▶️ НАЧАТЬ ОТСЮДА — E2E Ф1.5 + `NutritionistAdapter` на общем ядре
 
 **Где мы:** LLM-оркестратор ветки клиента ЖИВОЙ на проде для 1 клиента (Екатерина,
-`d3c09f60-f4c6-4b0e-8271-85b7389a4d90`) за фиче-флагом `CLIENT_ORCHESTRATOR_ENABLED` +
-`CLIENT_ORCHESTRATOR_CLIENT_IDS`. PR #44–#47 влиты. Архитектура: **«один движок, две роли»** —
-общее ядро `agents/core/agent_engine.py::run_agent` + клиентский адаптер `agents/client/agent_orchestrator.py`.
-Модель `task_type='orchestrator'`=Claude Sonnet (из `llm_config`, кабинет). 276 passed.
+`d3c09f60-f4c6-4b0e-8271-85b7389a4d90`) за флагом `CLIENT_ORCHESTRATOR_ENABLED` +
+`CLIENT_ORCHESTRATOR_CLIENT_IDS`. Архитектура «один движок, две роли»: `agents/core/agent_engine.py::run_agent`
++ адаптер `agents/client/agent_orchestrator.py`. Модель `task_type='orchestrator'`=Claude Sonnet (`llm_config`).
 
-**▶️ ЗАДАЧА ЗАВТРА — Ф1.5 мультимодальность:** фото напрямую в Claude.
-- Добавить image-блоки в `call_llm`/`_call_claude` (сейчас текст-в-текст).
-- Фото еды/анализов/холодильника → через оркестратор (Claude видит фото); vision-инструменты или прямое зрение.
-- `agent_orchestrator.should_use` начинает пускать `message_type='photo'` (сейчас фото → граф).
-- Это закрывает исходный баг «фото+текст» (один связный ответ) и снимает единственную причину, по которой граф ещё нужен.
+**✅ Ф1.5 МУЛЬТИМОДАЛЬНОСТЬ — КОД ГОТОВ** (ветка `feat/orchestrator-multimodal`, 290 passed).
+Фото идёт через оркестратор. Два пути расшифровки, переключаются флагом `llm_config.vision_strategy` (кабинет):
+- **`direct`** (дефолт) — Claude видит фото image-блоком (еда, холодильник);
+- **`gemini_tool`** — Gemini расшифровывает → `IntakeRecord` оркестратору (бланк анализов; и как откат к схеме B).
+Граница обратимости — формат **`IntakeRecord`** (+`validate`-гейт), а не механизм зрения. Детали — `docs/progress.md` (2 июля).
 
-**⚠️ Блокер вне кода:** OpenAI 429 (квота) — база знаний/RAG молчит и в оркестраторе, пока владелец не пополнит биллинг.
+**▶️ СЕЙЧАС — E2E Ф1.5 (за владельцем):** флаг включён для Екатерины, её фото уже идёт через оркестратор.
+Проверить в Telegram: (1) фото еды + подпись → ОДИН связный ответ (не двойной); (2) фото холодильника → совет
+(не «записал»); (3) бланк анализов → показатели записаны (Gemini-путь). Откат без деплоя: `vision_strategy` всё в
+`gemini_tool`, либо снять `CLIENT_ORCHESTRATOR_ENABLED`.
 
-**Дальше после Ф1.5:** `NutritionistAdapter` на общем ядре (переезд Части B) → Ф3 (async + per-id + чистка графа
-по критериям: 100% ходов на оркестраторе, ноль `fallback to graph`, снят белый список).
+**⚠️ Блокер вне кода:** OpenAI 429 (квота) — RAG/советы по холодильнику молчат, пока владелец не пополнит биллинг.
+
+**▶️ ДАЛЬШЕ:** `NutritionistAdapter` на общем ядре `run_agent` (переезд Части B нутрициолога на оркестратор) →
+Ф3 (async + per-id + чистка графа по критериям: 100% ходов на оркестраторе, ноль `fallback to graph`, снят белый список).
 
 **Включение/откат оркестратора и E2E-чеклист** — в локальном `РАБОЧИЙ.md` (блок «🔧 ВКЛЮЧЕНИЕ LLM-ОРКЕСТРАТОРА НА RENDER»).
-Детали и решения — `docs/architecture_llm_orchestrator.md`, `docs/progress.md`, память [[project_llm_orchestrator_pivot]], [[project_plan_json_nesting]].
+Детали и решения — `docs/architecture_llm_orchestrator.md`, `docs/progress.md`, память [[project_llm_orchestrator_pivot]],
+[[project_orchestrator_multimodal]], [[project_plan_json_nesting]].
 
 ---
 

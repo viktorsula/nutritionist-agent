@@ -669,6 +669,33 @@ def test_model(provider: str, model: str) -> Dict[str, Any]:
 # ПРИВАТНЫЕ ФУНКЦИИ ДЛЯ ПРОВАЙДЕРОВ
 # ========================================
 
+def _content_to_text(content: Any) -> str:
+    """
+    Приводит content к строке. Мультимодальный content (список блоков text/image —
+    формат Claude) не поддерживается не-Claude провайдерами: берём только текстовые блоки,
+    image-блоки помечаем плейсхолдером. Так стороний ход с картинкой не роняет groq/gemini/
+    openai-совместимые (в проде фото идёт только в Claude, но это защита от будущих путей).
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                parts.append(str(block))
+            elif block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif block.get("type") == "image":
+                parts.append("[изображение]")
+        return "\n".join(p for p in parts if p)
+    return "" if content is None else str(content)
+
+
+def _flatten_content(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Копия messages со строковым content (для провайдеров без мультимодальности)."""
+    return [{**m, "content": _content_to_text(m.get("content"))} for m in messages]
+
+
 def _call_groq(
     messages: List[Dict[str, str]],
     config: Dict[str, Any],
@@ -699,7 +726,7 @@ def _call_groq(
 
         response = client.chat.completions.create(
             model=config['model'],
-            messages=messages,
+            messages=_flatten_content(messages),
             temperature=config['temperature'],
             max_tokens=config['max_tokens'],
             stream=stream,
@@ -764,7 +791,7 @@ def _call_openai_compatible(
         client = OpenAI(base_url=base_url, api_key=api_key)
         response = client.chat.completions.create(
             model=config['model'],
-            messages=messages,
+            messages=_flatten_content(messages),
             temperature=config.get('temperature', 0.7),
             max_tokens=config.get('max_tokens', 2000),
             stream=stream,
@@ -1020,7 +1047,7 @@ def _call_gemini(
             role = 'user' if msg['role'] in ['user', 'system'] else 'model'
             gemini_messages.append({
                 'role': role,
-                'parts': [msg['content']]
+                'parts': [_content_to_text(msg['content'])]
             })
 
         # Вызов API
