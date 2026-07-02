@@ -245,6 +245,27 @@ class TestAnalytics(unittest.TestCase):
         mock_clients.assert_called_once()
 
 
+def test_gather_client_data_includes_conversation_summary():
+    """
+    Нарративная память клиента (скользящая сводка) должна попадать в контекст аналитики —
+    иначе нутрициолог не видит субъективных жалоб (напр. «вчера болела голова»), которые
+    остались только в диалоге, а не в структурных событиях.
+    """
+    from agents.nutritionist.analytics_agent import _gather_client_data
+
+    summary = {"client": {"name": "Екатерина", "client_status": "active",
+                          "conversation_summary": "Вчера клиент жаловался на головную боль."}}
+    with patch("agents.nutritionist.analytics_agent.queries.get_client_summary", return_value=summary), \
+         patch("agents.nutritionist.analytics_agent.queries.get_client_profile", return_value={}), \
+         patch("agents.nutritionist.analytics_agent.queries.get_client_events", return_value=[]), \
+         patch("agents.nutritionist.analytics_agent.queries.get_recent_lab_results", return_value=[]), \
+         patch("agents.nutritionist.analytics_agent.queries.get_active_nutrition_plan", return_value=None):
+        ctx, _indicators = _gather_client_data("c1", 7)
+
+    assert "головную боль" in ctx
+    assert "Память диалога" in ctx
+
+
 def run_tests():
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()

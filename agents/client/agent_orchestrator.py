@@ -475,11 +475,14 @@ def _tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "get_client_data",
-            "description": "Получить данные клиента для ответа на вопрос о его показателях/плане.",
+            "description": "Получить данные клиента для ответа на вопрос о его показателях/плане/дневнике. "
+                           "scope='diary' — недавние записи дневника (что ел, сколько воды, вес, самочувствие) "
+                           "для ответов вида «что я вчера ел / сколько воды выпил».",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "scope": {"type": "string", "enum": ["measurements", "labs", "plan", "wellness", "tasks"]},
+                    "scope": {"type": "string",
+                              "enum": ["measurements", "labs", "plan", "wellness", "tasks", "diary"]},
                 },
                 "required": ["scope"],
             },
@@ -563,6 +566,11 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
             return queries.get_wellness_plan(cid)
         if scope == "tasks":
             return queries.get_pending_tasks(cid)
+        if scope == "diary":
+            # Недавние записи дневника: приёмы пищи (calories_logged), вода (water_logged),
+            # вес (weight_logged), самочувствие (bad_wellbeing). Модель сама отберёт нужное
+            # по дате/типу и ответит «что ел вчера / сколько воды».
+            return queries.get_client_events(cid, limit=40)
         return f"неизвестный scope: {scope}"
 
     def search_knowledge(inp: Dict[str, Any]) -> str:
