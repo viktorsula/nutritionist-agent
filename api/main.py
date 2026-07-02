@@ -274,6 +274,54 @@ def orchestrator_coverage(user: Dict[str, Any] = Depends(require_role("nutrition
     }
 
 
+@app.get("/nutrition/daily")
+def nutrition_daily(
+    days: int = 14,
+    client_id: Optional[str] = None,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Суточные тоталы питания (ккал/Б/Ж/У/сахар/вода) за период — для графиков питания.
+
+    Клиент видит ТОЛЬКО свои данные (client_id из токена, query игнорируется); нутрициолог —
+    любого клиента (client_id обязателен). targets — нормы из активного плана (целевые калории,
+    норма воды) для линий-ориентиров на графике.
+    """
+    from database import queries
+
+    role = user.get("role")
+    if role == "client":
+        cid = user.get("client_id")
+        if not cid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Client profile not found for this user")
+    elif role == "nutritionist":
+        cid = client_id
+        if not cid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="client_id is required")
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    days = max(1, min(int(days or 14), 90))
+    series = queries.get_nutrition_daily(cid, days=days)
+
+    targets: Dict[str, Any] = {}
+    try:
+        plan = queries.get_active_nutrition_plan(cid) or {}
+        pj = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+        tc = (pj or {}).get("target_calories", plan.get("target_calories"))
+        if tc:
+            targets["kcal"] = tc
+        wt = (pj or {}).get("water_ml_target")
+        if wt:
+            targets["water_ml"] = wt
+    except Exception:  # noqa: BLE001 — нормы опциональны, график рисуется и без них
+        pass
+
+    return {"client_id": cid, "days": days, "series": series, "targets": targets}
+
+
 @app.get("/nutritionist/prompts")
 def prompts_list(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> List[Dict[str, Any]]:
     """

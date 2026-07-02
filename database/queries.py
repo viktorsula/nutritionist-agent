@@ -687,6 +687,64 @@ def get_client_events(
     return _extract_data(response) or []
 
 
+def get_nutrition_daily(client_id: str, days: int = 14) -> List[Dict[str, Any]]:
+    """
+    Суточные тоталы питания за N дней из client_events (для графиков питания в кабинете).
+
+    Суммирует по дням (по дате события):
+    - calories_logged → payload_json.total: kcal / protein_g / fat_g / carb_g / sugar_g;
+    - water_logged    → payload_json.water_ml.
+
+    Ключи total канонизированы normalize()/kbju_from_legacy при записи. Возвращает список
+    {date 'YYYY-MM-DD', kcal, protein_g, fat_g, carb_g, sugar_g, water_ml} по возрастанию даты.
+    Дни без данных не включаются (фронт достроит ось при необходимости).
+    """
+    from datetime import datetime, timedelta
+
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    supabase = _service_client()
+    rows = _extract_data(
+        supabase.table("client_events")
+        .select("event_type, event_date, payload_json")
+        .eq("client_id", client_id)
+        .in_("event_type", ["calories_logged", "water_logged"])
+        .gte("event_date", since)
+        .order("event_date", desc=False)
+        .execute()
+    ) or []
+
+    daily: Dict[str, Dict[str, Any]] = {}
+
+    def _num(v: Any) -> float:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _day(d: str) -> Dict[str, Any]:
+        return daily.setdefault(d, {
+            "date": d, "kcal": 0.0, "protein_g": 0.0, "fat_g": 0.0,
+            "carb_g": 0.0, "sugar_g": 0.0, "water_ml": 0.0,
+        })
+
+    for ev in rows:
+        ed = (ev.get("event_date") or "")[:10]  # YYYY-MM-DD
+        if not ed:
+            continue
+        payload = ev.get("payload_json") or {}
+        etype = ev.get("event_type")
+        if etype == "calories_logged":
+            total = payload.get("total")
+            if isinstance(total, dict):
+                b = _day(ed)
+                for k in ("kcal", "protein_g", "fat_g", "carb_g", "sugar_g"):
+                    b[k] += _num(total.get(k))
+        elif etype == "water_logged":
+            _day(ed)["water_ml"] += _num(payload.get("water_ml"))
+
+    return [daily[d] for d in sorted(daily)]
+
+
 def get_notification_schedule(client_id: str) -> List[Dict[str, Any]]:
     """Получить расписание уведомлений клиента."""
     supabase = _service_client()
