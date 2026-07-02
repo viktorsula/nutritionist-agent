@@ -113,6 +113,32 @@ class TestApi(unittest.TestCase):
         self.assertAlmostEqual(body["orchestrator_rate"]["client"], 0.667, places=2)
         self.assertIsNone(body["orchestrator_rate"]["nutritionist"])  # ходов нет
 
+    # --- /nutrition/daily (графики питания, C1) ---
+    def test_nutrition_daily_client_uses_token_client_id(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_nutrition_daily", return_value=[{"date": "2026-07-01"}]) as g, \
+             patch("database.queries.get_active_nutrition_plan",
+                   return_value={"plan_json": {"target_calories": 1800, "water_ml_target": 2000}}):
+            r = self.client.get("/nutrition/daily?client_id=HACK&days=7")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(g.call_args.args[0], "c-1")  # из токена, не из query (HACK игнор)
+        body = r.json()
+        self.assertEqual(body["targets"], {"kcal": 1800, "water_ml": 2000})
+        self.assertEqual(body["series"], [{"date": "2026-07-01"}])
+
+    def test_nutrition_daily_nutritionist_requires_client_id(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.get("/nutrition/daily")
+        self.assertEqual(r.status_code, 400)
+
+    def test_nutrition_daily_nutritionist_ok_with_client_id(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_nutrition_daily", return_value=[]) as g, \
+             patch("database.queries.get_active_nutrition_plan", return_value={}):
+            r = self.client.get("/nutrition/daily?client_id=c-9")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(g.call_args.args[0], "c-9")
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
