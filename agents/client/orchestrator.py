@@ -92,10 +92,11 @@ def process_client_message(
     # на граф ниже (сеть безопасности strangler-миграции).
     from . import agent_orchestrator
     from utils.llm import LLMUnavailableError
+    from agents.core.coverage import record_turn
 
     if agent_orchestrator.should_use(client_id, message_type):
         try:
-            return agent_orchestrator.process(
+            result = agent_orchestrator.process(
                 client_id=client_id,
                 message=message,
                 channel=channel,
@@ -103,10 +104,16 @@ def process_client_message(
                 metadata=metadata,
                 access_info=access_info,
             )
+            record_turn("client", "orchestrator")
+            return result
         except LLMUnavailableError as e:
+            record_turn("client", "graph_fallback", reason="llm_unavailable")
             logger.warning(f"Orchestrator LLM unavailable, fallback to graph: {e}")
         except Exception as e:
+            record_turn("client", "graph_fallback", reason=type(e).__name__)
             logger.error(f"Orchestrator failed, fallback to graph: {e}", exc_info=True)
+    else:
+        record_turn("client", "graph_flag_off")
 
     try:
         # Создание графа

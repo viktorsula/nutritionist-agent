@@ -15,7 +15,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -245,6 +245,33 @@ def llm_defaults(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -
     from utils.llm import build_default_llm_config
 
     return build_default_llm_config()
+
+
+@app.get("/nutritionist/coverage")
+def orchestrator_coverage(user: Dict[str, Any] = Depends(require_role("nutritionist"))) -> Dict[str, Any]:
+    """
+    Покрытие ходов LLM-оркестраторами (Ф3, наблюдаемость). Счётчики in-memory за время
+    жизни процесса (сбрасываются на деплое/рестарте). Критерий чистки графа: за период
+    graph_fallback == 0, доля orchestrator растёт к 100%.
+    """
+    from agents.core.coverage import snapshot
+
+    counts = snapshot()
+
+    def _rate(role: str) -> Optional[float]:
+        total = sum(v for k, v in counts.items() if k.startswith(f"{role}:"))
+        if not total:
+            return None
+        return round(counts.get(f"{role}:orchestrator", 0) / total, 3)
+
+    return {
+        "counts": counts,
+        "orchestrator_rate": {"client": _rate("client"), "nutritionist": _rate("nutritionist")},
+        "fallbacks": {
+            "client": counts.get("client:graph_fallback", 0),
+            "nutritionist": counts.get("nutritionist:graph_fallback", 0),
+        },
+    }
 
 
 @app.get("/nutritionist/prompts")
