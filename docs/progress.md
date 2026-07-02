@@ -1,8 +1,46 @@
 # Журнал прогресса проекта
 
-## Статус: В разработке → ПРОД на Render (LLM-оркестратор ЖИВОЙ; Ф1.5 мультимодальность — код готов)
+## Статус: В разработке → ПРОД на Render (LLM-оркестратор ЖИВОЙ; Ф1.5 влита; Часть B на ядре — код готов)
 Последнее обновление: 2 июля 2026
-Сессия: Ф1.5 — мультимодальность оркестратора (фото через Claude, граница IntakeRecord, шов A/B по конфигу)
+Сессия: Ф1.5 мультимодальность (влита PR #49) + NutritionistAdapter (Часть B на общем ядре run_agent)
+
+### Сессия 2 июля 2026 (часть 2) — NutritionistAdapter: Часть B на общем ядре (ветка feat/nutritionist-adapter)
+
+**Задача.** Переезд ветки нутрициолога (Часть B: аналитика + управление) с жёсткого LangGraph
+на общее ядро `run_agent` — завершение архитектуры «один движок, две роли». Strangler за флагом,
+граф остаётся fallback.
+
+**Отличия Части B от клиента (учтены):** двухшаговое подтверждение записи (safety); аналитика —
+структурный вывод `analysis{markdown,charts}` для веб-панели; `view`-директивы; резолв клиента по имени.
+
+**Решения (согласованы, Р1–Р4).**
+1. **Р1 — подтверждение записи остаётся ДЕТЕРМИНИРОВАННЫМ, вне модели.** write-инструменты не пишут —
+   лишь ГОТОВЯТ `pending_action` (→ `conversations.metadata_json`) и просят подтверждения. Детект «да/нет»
+   (`_AFFIRM`/`_NEGATE` + подъём pending из треда) и ИСПОЛНЕНИЕ (`_execute_action`+audit) переиспользованы
+   из графа дословно, ход подтверждения МИНУЕТ LLM. Модель не может записать в карту сама.
+2. **Р2 — аналитика = инструмент-обёртка** `run_analytics` над существующим `analytics_node`
+   (RAG-конвейер + графики-из-данных + панель сохранены 1:1).
+3. **Р3 — `view`/резолв клиента** — детерминированный `_finalize` (analysis→analytics, клиент→client_card)
+   + инструмент `find_client` (→ `_resolve_client`).
+4. **Р4 — отдельный `task_type='nutritionist_orchestrator'`** (Claude Sonnet, резерв []=откат на граф),
+   модель нутрициолога настраивается из кабинета независимо от клиентской.
+
+**Реализация (308 passed, +18).**
+- `agents/nutritionist/agent_adapter.py` (новый) — `should_use` (флаг `NUTRITIONIST_ORCHESTRATOR_ENABLED`
+  + вайтлист `NUTRITIONIST_ORCHESTRATOR_IDS`), `process` (детерминир. confirm-гейт → иначе `run_agent`),
+  8 инструментов (`find_client`/`run_analytics`/`get_client_data`/`search_knowledge` + 4 write-staging),
+  `_finalize` (view). Per-nutritionist Lock.
+- `utils/llm.py` — task_type `nutritionist_orchestrator`.
+- `prompts/nutritionist/orchestrator_system.md` (новый) + реестр — промпт роли аналитик/контролёр/репортёр,
+  правила подтверждения записи; правится нутрициологом из кабинета.
+- `agents/router.py` — ветка нутрициолога: адаптер за флагом → откат на граф при ошибке/недоступности LLM.
+- Граф Части B (`orchestrator/analytics/management`) НЕ тронут — остаётся fallback; листовые функции
+  (`analytics_node`, `_execute_action`, `_resolve_client`, `_load_pending_action`, `save_to_db_node`) стали
+  переиспользуемыми узлами адаптера.
+
+**⏳ Осталось:** включить `NUTRITIONIST_ORCHESTRATOR_ENABLED` на Render + E2E (аналитика по клиенту/базе;
+команда→подтверждение да/нет→запись+audit; резолв неоднозначного имени). **Дальше:** Ф3 (async + per-id +
+чистка графа по критериям: 100% ходов на оркестраторе для обеих ролей, ноль fallback, сняты белые списки).
 
 ### Сессия 2 июля 2026 — Ф1.5 мультимодальность оркестратора (ветка feat/orchestrator-multimodal)
 

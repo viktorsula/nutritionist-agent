@@ -225,18 +225,35 @@ def route_to_nutritionist(
     """
     Маршрутизация для нутрициолога.
 
-    TODO Этап 6: Реализовать полноценный оркестратор
-    Сейчас: простая заглушка
+    LLM-оркестратор (Часть B на общем ядре run_agent) за фиче-флагом; при выключенном
+    флаге/ошибке/недоступности LLM — откат на граф process_nutritionist_message.
     """
     from agents.nutritionist.orchestrator import process_nutritionist_message
 
-    result = process_nutritionist_message(
-        nutritionist_id=nutritionist_id,
-        message=message,
-        channel=channel,
-        message_type=message_type,
-        metadata=metadata
-    )
+    result = None
+    try:
+        from agents.nutritionist import agent_adapter
+
+        if agent_adapter.should_use(nutritionist_id, message_type):
+            result = agent_adapter.process(
+                nutritionist_id=nutritionist_id,
+                message=message,
+                channel=channel,
+                message_type=message_type,
+                metadata=metadata,
+            )
+    except Exception as e:
+        logger.warning(f"Nutritionist orchestrator failed, fallback to graph: {e}")
+        result = None
+
+    if result is None:
+        result = process_nutritionist_message(
+            nutritionist_id=nutritionist_id,
+            message=message,
+            channel=channel,
+            message_type=message_type,
+            metadata=metadata,
+        )
 
     return {
         "success": True,

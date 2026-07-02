@@ -1,31 +1,35 @@
 # GOTO — НАЧАЛО СЛЕДУЮЩЕЙ СЕССИИ
 
-## ▶️ НАЧАТЬ ОТСЮДА — E2E Ф1.5 + `NutritionistAdapter` на общем ядре
+## ▶️ НАЧАТЬ ОТСЮДА — E2E двух оркестраторов (клиент Ф1.5 + нутрициолог Часть B) → Ф3
 
-**Где мы:** LLM-оркестратор ветки клиента ЖИВОЙ на проде для 1 клиента (Екатерина,
-`d3c09f60-f4c6-4b0e-8271-85b7389a4d90`) за флагом `CLIENT_ORCHESTRATOR_ENABLED` +
-`CLIENT_ORCHESTRATOR_CLIENT_IDS`. Архитектура «один движок, две роли»: `agents/core/agent_engine.py::run_agent`
-+ адаптер `agents/client/agent_orchestrator.py`. Модель `task_type='orchestrator'`=Claude Sonnet (`llm_config`).
+**Где мы:** архитектура «один движок, две роли» замкнута — общее ядро `agents/core/agent_engine.py::run_agent`
++ два тонких адаптера: клиент `agents/client/agent_orchestrator.py`, нутрициолог `agents/nutritionist/agent_adapter.py`.
+Оба за фиче-флагами, граф — fallback. Модели из `llm_config` (`task_type` `orchestrator` / `nutritionist_orchestrator`).
 
-**✅ Ф1.5 МУЛЬТИМОДАЛЬНОСТЬ — КОД ГОТОВ** (ветка `feat/orchestrator-multimodal`, 290 passed).
-Фото идёт через оркестратор. Два пути расшифровки, переключаются флагом `llm_config.vision_strategy` (кабинет):
-- **`direct`** (дефолт) — Claude видит фото image-блоком (еда, холодильник);
-- **`gemini_tool`** — Gemini расшифровывает → `IntakeRecord` оркестратору (бланк анализов; и как откат к схеме B).
-Граница обратимости — формат **`IntakeRecord`** (+`validate`-гейт), а не механизм зрения. Детали — `docs/progress.md` (2 июля).
+**✅ Ф1.5 МУЛЬТИМОДАЛЬНОСТЬ — ВЛИТА (PR #49 в main).** Фото клиента идёт через оркестратор; стратегия
+расшифровки флагом `llm_config.vision_strategy` (`direct` / `gemini_tool`, per-kind). Граница A/B — формат
+`IntakeRecord`. Детали — [[project_orchestrator_multimodal]].
 
-**▶️ СЕЙЧАС — E2E Ф1.5 (за владельцем):** флаг включён для Екатерины, её фото уже идёт через оркестратор.
-Проверить в Telegram: (1) фото еды + подпись → ОДИН связный ответ (не двойной); (2) фото холодильника → совет
-(не «записал»); (3) бланк анализов → показатели записаны (Gemini-путь). Откат без деплоя: `vision_strategy` всё в
-`gemini_tool`, либо снять `CLIENT_ORCHESTRATOR_ENABLED`.
+**✅ ЧАСТЬ B (NUTRITIONIST ADAPTER) — КОД ГОТОВ** (ветка `feat/nutritionist-adapter`, 308 passed).
+Ветка нутрициолога на `run_agent`. Подтверждение записи — **детерминированное, вне модели** (write-инструменты
+готовят `pending_action`, «да/нет» и исполнение — детерминированно). Аналитика — инструмент-обёртка над
+`analytics_node` (панель+графики 1:1). Флаг `NUTRITIONIST_ORCHESTRATOR_ENABLED` (+`NUTRITIONIST_ORCHESTRATOR_IDS`).
+Детали — `docs/progress.md` (2 июля, часть 2), [[project_nutritionist_adapter]].
 
-**⚠️ Блокер вне кода:** OpenAI 429 (квота) — RAG/советы по холодильнику молчат, пока владелец не пополнит биллинг.
+**▶️ СЕЙЧАС — E2E (за владельцем):**
+- **Клиент Ф1.5:** флаг включён для Екатерины (`d3c09f60-f4c6-4b0e-8271-85b7389a4d90`) — фото еды+подпись →
+  один связный ответ; холодильник → совет; бланк → показатели. Откат: `vision_strategy`→`gemini_tool` / снять флаг.
+- **Нутрициолог Часть B:** выставить на Render `NUTRITIONIST_ORCHESTRATOR_ENABLED=true` (+ опц. вайтлист id) →
+  проверить: аналитика по клиенту/базе (панель+графики); команда→резюме→«да»→запись+audit / «нет»→отмена;
+  неоднозначное имя → уточнение. Откат — снять флаг (мгновенно, граф Части B на месте).
 
-**▶️ ДАЛЬШЕ:** `NutritionistAdapter` на общем ядре `run_agent` (переезд Части B нутрициолога на оркестратор) →
-Ф3 (async + per-id + чистка графа по критериям: 100% ходов на оркестраторе, ноль `fallback to graph`, снят белый список).
+**⚠️ Блокер вне кода:** OpenAI 429 (квота) — RAG (советы клиента, vector-аналитика нутрициолога) молчит, пока не пополнить.
 
-**Включение/откат оркестратора и E2E-чеклист** — в локальном `РАБОЧИЙ.md` (блок «🔧 ВКЛЮЧЕНИЕ LLM-ОРКЕСТРАТОРА НА RENDER»).
-Детали и решения — `docs/architecture_llm_orchestrator.md`, `docs/progress.md`, память [[project_llm_orchestrator_pivot]],
-[[project_orchestrator_multimodal]], [[project_plan_json_nesting]].
+**▶️ ДАЛЬШЕ — Ф3:** async + per-id изоляция + **чистка графа** по критериям (для ОБЕИХ ролей): 100% ходов на
+оркестраторе, ноль `fallback to graph` за период, сняты белые списки. Домейн/персист/безопасность — переиспользуются, не удаляются.
+
+**Включение/откат и E2E-чеклист** — в локальном `РАБОЧИЙ.md`. Детали и решения — `docs/architecture_llm_orchestrator.md`,
+`docs/progress.md`, память [[project_llm_orchestrator_pivot]], [[project_orchestrator_multimodal]], [[project_nutritionist_adapter]].
 
 ---
 
