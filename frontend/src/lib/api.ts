@@ -58,9 +58,36 @@ export interface KnowledgeDoc {
   created_at: string;
 }
 
+export interface NutritionDay {
+  date: string;
+  kcal: number;
+  protein_g: number;
+  fat_g: number;
+  carb_g: number;
+  sugar_g: number;
+  water_ml: number;
+}
+
+export interface NutritionDaily {
+  client_id: string;
+  days: number;
+  series: NutritionDay[];
+  targets: { kcal?: number; water_ml?: number };
+}
+
 export const api = {
   /** Текущий пользователь (роль, client_id, статусы) — авторитетно из БД. */
   me: () => request<AppUser>("/me"),
+
+  /**
+   * Суточные тоталы питания (ккал/Б/Ж/У/сахар/вода) + нормы из плана.
+   * Клиент: client_id из токена (аргумент игнорируется сервером). Нутрициолог: обязателен.
+   */
+  nutritionDaily: (clientId?: string, days = 14) =>
+    request<NutritionDaily>(
+      `/nutrition/daily?days=${days}` +
+        (clientId ? `&client_id=${encodeURIComponent(clientId)}` : ""),
+    ),
 
   /** Сообщение клиента агенту. */
   chat: (message: string, messageType = "text") =>

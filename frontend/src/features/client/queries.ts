@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 
 /** Показатель анализов, выбранный нутрициологом для графика динамики клиента. */
 export interface TrackedIndicator {
@@ -156,5 +157,17 @@ export function useCalorieEvents(clientId: string) {
       if (error) throw error;
       return data ?? [];
     },
+  });
+}
+
+/**
+ * Суточные тоталы питания (ккал/Б/Ж/У/сахар/вода) + нормы — с бэкенда (общая агрегация
+ * для кабинета клиента и нутрициолога). Клиент: свои данные по токену; нутрициолог: любого.
+ */
+export function useNutritionDaily(clientId: string, days = 14) {
+  return useQuery({
+    queryKey: ["nutrition_daily", clientId, days],
+    queryFn: () => api.nutritionDaily(clientId, days),
+    enabled: !!clientId,
   });
 }
