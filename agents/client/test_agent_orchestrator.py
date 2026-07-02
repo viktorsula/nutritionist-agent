@@ -136,6 +136,17 @@ def test_get_client_data_dispatches_scopes():
     assert "неизвестный scope" in handlers["get_client_data"]({"scope": "wat"})
 
 
+def test_get_client_data_diary_reads_events():
+    # scope='diary' отдаёт недавние записи дневника (еда/вода/вес/самочувствие),
+    # чтобы клиент мог спросить «что я вчера ел / сколько воды выпил».
+    state = {"client_id": "cid"}
+    handlers = ao._build_handlers(state)
+    events = [{"event_type": "calories_logged"}, {"event_type": "water_logged"}]
+    with patch("database.queries.get_client_events", return_value=events) as e:
+        assert handlers["get_client_data"]({"scope": "diary"}) == events
+        e.assert_called_once()
+
+
 # ── Заземление на назначения нутрициолога (plan_json) ────────────────────────
 def test_plan_view_reads_from_plan_json():
     plan = {
