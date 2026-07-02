@@ -401,12 +401,15 @@ def _tool_schemas() -> List[Dict[str, Any]]:
             "fat_g": {"type": "number"}, "carb_g": {"type": "number"},
             "sugar_g": {"type": "number"}, "fiber_g": {"type": "number"},
         },
-        "description": "Итоговое КБЖУ приёма (справочно, если оценил).",
+        "description": "ОБЯЗАТЕЛЬНО заполни: оценка итогового КБЖУ приёма (ккал + белки/жиры/углеводы"
+                       " + сахар). Оценивай приблизительно по известным блюдам/порциям — это нужно"
+                       " для суточных тоталов и графиков питания. Без total приём не попадёт в динамику.",
     }
     return [
         {
             "name": "log_meal",
-            "description": "Записать приём пищи/еду, о которой сообщил клиент.",
+            "description": "Записать приём пищи/еду, о которой сообщил клиент. ВСЕГДА оценивай и"
+                           " передавай `total` (КБЖУ приёма) — приблизительно, это нормально.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -539,11 +542,19 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
                         "не понял значение веса")
 
     def log_wellbeing(inp: Dict[str, Any]) -> str:
-        return _persist(
+        status = inp.get("status")
+        result = _persist(
             {"kind": "wellbeing", "source": source,
-             "wellbeing": {"status": inp.get("status"), "reason": inp.get("reason")}},
+             "wellbeing": {"status": status, "reason": inp.get("reason")}},
             "не понял самочувствие",
         )
+        # Плохое самочувствие всегда уходит нутрициологу: событие-алерт в панели «Алерты»
+        # + Telegram-пуш планировщиком (bad_wellbeing включён в get_recent_alert_events).
+        # Сообщаем это модели, чтобы она сказала клиенту «я УЖЕ уведомила», а не «будет в курсе».
+        if status == "bad" and result.startswith("записано"):
+            result += (" — жалоба зафиксирована как алерт, нутрициолог уже уведомлён "
+                       "(панель «Алерты» + Telegram). Скажи клиенту, что уже сообщил(а) нутрициологу.")
+        return result
 
     def log_labs(inp: Dict[str, Any]) -> str:
         labs = [
@@ -599,16 +610,14 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
 # ==========================================
 
 def _finalize(state: Dict[str, Any], reply: str) -> None:
-    """Добавляет предупреждения безопасности/пометку нутрициологу поверх ответа модели."""
-    from utils.helpers import format_client_message
+    """
+    Финальный текст клиенту = ответ модели КАК ЕСТЬ.
 
-    routing = state.get("routing") or {}
-    try:
-        state["final_message"] = format_client_message(
-            text=reply,
-            alerts=state.get("alerts", []),
-            nutritionist_notified=routing.get("notify_nutritionist", False),
-        )
-    except Exception as e:
-        logger.error(f"orchestrator finalize failed: {e}")
-        state["final_message"] = reply
+    В отличие от графа, оркестратор САМ вплетает предупреждения/уведомления в тёплый ответ
+    (через данные, которые возвращают инструменты: log_wellbeing сообщает «нутрициолог уведомлён»,
+    план-ограничения — в системном промпте). Поэтому НЕ дописываем сюда сырой текст алертов
+    (`format_client_message`) — он дублировал ответ и звучал чуждо (третье лицо «Клиент…», «вы»).
+    Детерминированная безопасность (событие-алерт + severity + Telegram-пуш нутрициологу) не
+    зависит от этого текста — она в persist_record/routing/scheduler, а не в сообщении клиенту.
+    """
+    state["final_message"] = reply
