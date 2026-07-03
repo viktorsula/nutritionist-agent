@@ -451,6 +451,23 @@ def get_client_metrics(
     return _extract_data(query.execute()) or []
 
 
+def get_controlled_metrics(client_id: str) -> List[Dict[str, Any]]:
+    """Каталог контролируемых показателей клиента (client_profiles.controlled_metrics)."""
+    supabase = _service_client()
+    row = _execute_single(
+        supabase.table("client_profiles").select("controlled_metrics").eq("client_id", client_id).single()
+    )
+    return (row or {}).get("controlled_metrics") or []
+
+
+def set_controlled_metrics(client_id: str, metrics: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Перезаписать каталог контролируемых показателей клиента."""
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_profiles").update({"controlled_metrics": metrics}).eq("client_id", client_id)
+    )
+
+
 def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Недавние числовые анализы клиента из lab_results (миграция 003),

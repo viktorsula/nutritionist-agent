@@ -223,6 +223,28 @@ class TestApi(unittest.TestCase):
         dr.assert_called_once_with("rem-1")
         self.assertEqual(audit.call_args.kwargs["action"], "delete_reminder")
 
+    # --- /clients/{id}/controlled-metrics (каталог показателей, Слайс 2C) ---
+    def test_controlled_metrics_list_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.get("/clients/c-1/controlled-metrics")
+        self.assertEqual(r.status_code, 403)
+
+    def test_controlled_metrics_set_normalizes_category_and_audits(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.set_controlled_metrics") as setm, \
+             patch("database.queries.write_audit_log") as audit:
+            r = self.client.put("/clients/c-9/controlled-metrics", json={"metrics": [
+                {"key": "waist", "label_ru": "Талия", "unit": "см"},
+                {"key": "пульс", "label_ru": "Пульс", "unit": "уд/мин"},
+                {"key": "", "label_ru": "мусор"},  # без ключа — отбрасывается
+            ]})
+        self.assertEqual(r.status_code, 200)
+        saved = setm.call_args.args[1]
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(saved[0]["category"], "physical")  # waist
+        self.assertEqual(saved[1]["category"], "custom")    # пульс
+        self.assertEqual(audit.call_args.kwargs["action"], "set_controlled_metrics")
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

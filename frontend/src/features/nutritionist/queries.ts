@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
-import { api, type Reminder } from "../../lib/api";
+import { api, type Reminder, type ControlledMetric } from "../../lib/api";
 
 export interface RegistryRow {
   id: string;
@@ -117,6 +117,16 @@ export function useClientReminders(clientId: string) {
     queryKey: ["client_reminders", clientId],
     enabled: !!clientId,
     queryFn: async (): Promise<Reminder[]> => (await api.listReminders(clientId)).reminders,
+  });
+}
+
+/** Каталог контролируемых показателей клиента (через бэкенд). */
+export function useControlledMetrics(clientId: string) {
+  return useQuery({
+    queryKey: ["controlled_metrics", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<ControlledMetric[]> =>
+      (await api.listControlledMetrics(clientId)).metrics,
   });
 }
 
