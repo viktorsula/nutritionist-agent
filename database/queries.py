@@ -1045,6 +1045,100 @@ def get_overdue_tasks(client_id: Optional[str] = None) -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+# =============================================
+# НАПОМИНАНИЯ (Фаза 1) — см. docs/spec_reminders.md
+# =============================================
+
+
+def create_reminder(
+    client_id: str,
+    title: str,
+    remind_at: str,
+    recurrence: str = "daily",
+    weekday: Optional[int] = None,
+    remind_date: Optional[str] = None,
+    requires_response: bool = False,
+    created_by: str = "nutritionist",
+) -> Optional[Dict[str, Any]]:
+    """Создать напоминание клиенту."""
+    supabase = _service_client()
+    data = {
+        "client_id": client_id,
+        "title": title,
+        "remind_at": remind_at,
+        "recurrence": recurrence,
+        "weekday": weekday,
+        "remind_date": remind_date,
+        "requires_response": requires_response,
+        "created_by": created_by,
+    }
+    return _execute_one(supabase.table("reminders").insert(data))
+
+
+def update_reminder(reminder_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Обновить поля напоминания (partial)."""
+    supabase = _service_client()
+    from datetime import datetime
+
+    payload = {k: v for k, v in updates.items() if v is not None}
+    payload["updated_at"] = datetime.utcnow().isoformat()
+    return _execute_one(
+        supabase.table("reminders").update(payload).eq("id", reminder_id)
+    )
+
+
+def delete_reminder(reminder_id: str) -> None:
+    """Удалить напоминание (срабатывания уйдут каскадом)."""
+    supabase = _service_client()
+    supabase.table("reminders").delete().eq("id", reminder_id).execute()
+
+
+def get_reminders_by_client(client_id: str) -> List[Dict[str, Any]]:
+    """Все напоминания клиента (для редактора нутрициолога)."""
+    supabase = _service_client()
+    response = (
+        supabase.table("reminders")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("remind_at", desc=False)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def get_active_reminders() -> List[Dict[str, Any]]:
+    """Все активные напоминания + данные клиента (telegram_id, timezone) для планировщика."""
+    supabase = _service_client()
+    response = (
+        supabase.table("reminders")
+        .select("*, clients(telegram_id, timezone)")
+        .eq("active", True)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def occurrence_exists(reminder_id: str, due_date: str) -> bool:
+    """Было ли уже срабатывание этого напоминания в указанную локальную дату."""
+    supabase = _service_client()
+    response = (
+        supabase.table("reminder_occurrences")
+        .select("id")
+        .eq("reminder_id", reminder_id)
+        .eq("due_date", due_date)
+        .limit(1)
+        .execute()
+    )
+    return bool(_extract_data(response))
+
+
+def record_occurrence(reminder_id: str, client_id: str, due_date: str) -> Optional[Dict[str, Any]]:
+    """Зафиксировать срабатывание (дедуп гарантирован UNIQUE reminder_id+due_date)."""
+    supabase = _service_client()
+    data = {"reminder_id": reminder_id, "client_id": client_id, "due_date": due_date}
+    return _execute_one(supabase.table("reminder_occurrences").insert(data))
+
+
 def create_wellness_plan(
     client_id: str,
     sleep_target: Optional[str] = None,

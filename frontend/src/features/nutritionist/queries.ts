@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
+import { api, type Reminder } from "../../lib/api";
 
 export interface RegistryRow {
   id: string;
@@ -107,6 +108,15 @@ export function useClientTasks(clientId: string) {
       if (error) throw error;
       return data ?? [];
     },
+  });
+}
+
+/** Напоминания клиента (через бэкенд — таблица под RLS недоступна фронту напрямую). */
+export function useClientReminders(clientId: string) {
+  return useQuery({
+    queryKey: ["client_reminders", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<Reminder[]> => (await api.listReminders(clientId)).reminders,
   });
 }
 

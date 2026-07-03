@@ -15,6 +15,7 @@ import {
 } from "../client/queries";
 import { useClientEventsRecent, useClientRow } from "./queries";
 import { TaskEditor } from "./TaskEditor";
+import { ReminderEditor } from "./ReminderEditor";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
 import { ReportsCard } from "./ReportsCard";
@@ -322,6 +323,9 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
 
         <Card title={t("card.tasks_notes")}>
           <TaskEditor clientId={clientId} />
+          <div className="mt-3 border-t pt-3">
+            <ReminderEditor clientId={clientId} />
+          </div>
           <div className="mt-3 border-t pt-2">
             <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
             <textarea

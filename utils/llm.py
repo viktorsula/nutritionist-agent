@@ -114,6 +114,13 @@ DEFAULT_TASK_MODEL_MAPPING = {
         'temperature': 0.3,
         'max_tokens': 3000,
         'description': 'LLM-оркестратор ветки нутрициолога (tool-calling: аналитика + управление)'
+    },
+    'reminder': {
+        'provider': 'groq',
+        'model': 'llama-3.3-70b-versatile',
+        'temperature': 0.7,
+        'max_tokens': 500,
+        'description': 'Тёплый текст пакета напоминаний клиенту'
     }
 }
 
@@ -154,6 +161,9 @@ TASK_FALLBACK_CHAINS = {
     'orchestrator': [],
     # То же для оркестратора нутрициолога — резерв = откат на граф Части B.
     'nutritionist_orchestrator': [],
+    'reminder': [
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
+    ],
 }
 
 

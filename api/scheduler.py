@@ -167,9 +167,138 @@ async def run_nutritionist_alerts() -> None:
             logger.warning(f"scheduler: отправка алерта не удалась event={ev_id}: {e}")
 
 
+def _reminder_due_today(reminder: dict, now_local: datetime) -> bool:
+    """Совпадает ли текущий локальный день клиента с регулярностью напоминания."""
+    rec = reminder.get("recurrence")
+    if rec == "daily":
+        return True
+    if rec == "weekly":
+        return now_local.weekday() == reminder.get("weekday")
+    if rec == "once":
+        rd = reminder.get("remind_date")
+        return bool(rd) and str(rd) == now_local.strftime("%Y-%m-%d")
+    return False
+
+
+def _fallback_reminder_text(titles: list) -> str:
+    """Детерминированный текст пакета напоминаний (если LLM недоступен)."""
+    if len(titles) == 1:
+        return f"🔔 Напоминание: {titles[0]}"
+    lines = "\n".join(f"• {t}" for t in titles)
+    return f"🔔 Напоминания на сегодня:\n{lines}"
+
+
+def compose_reminder_message(titles: list) -> str:
+    """
+    Тёплый текст ОДНОГО сообщения на пакет напоминаний. Лёгкий LLM
+    (task_type='reminder', редактируемый промпт client/reminder_message) →
+    при любом сбое откат на детерминированный шаблон-список.
+    """
+    fallback = _fallback_reminder_text(titles)
+    try:
+        from utils.llm import call_llm
+        from prompts import load_prompt
+
+        system = load_prompt("client/reminder_message")
+        user = "Напоминания на сейчас:\n" + "\n".join(f"- {t}" for t in titles)
+        resp = call_llm(
+            task_type="reminder",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        text = (resp.get("content") or "").strip()
+        return text or fallback
+    except Exception as e:
+        logger.warning(f"scheduler: LLM-текст напоминаний не удался, шаблон: {e}")
+        return fallback
+
+
+async def run_reminders() -> None:
+    """
+    Один проход: разослать наступившие напоминания клиентам. Все напоминания клиента
+    на одно и то же локальное время идут ОДНИМ сообщением (пакет). Best-effort.
+
+    Дедуп — durable через reminder_occurrences (UNIQUE reminder_id+due_date).
+    """
+    from collections import defaultdict
+    from api.telegram_webhook import is_configured, get_bot
+
+    if not is_configured():
+        return
+
+    from database import queries
+
+    try:
+        reminders = queries.get_active_reminders()
+    except Exception as e:
+        logger.warning(f"scheduler: не удалось получить напоминания: {e}")
+        return
+
+    bot = get_bot()
+    if bot is None:
+        return
+
+    # Собрать наступившие в пакеты по (client_id, telegram_id, локальная дата).
+    buckets: dict = defaultdict(list)
+    for r in reminders or []:
+        client = r.get("clients") or {}
+        telegram_id = client.get("telegram_id")
+        if not telegram_id:
+            continue
+
+        try:
+            tz = pytz.timezone(client.get("timezone") or "UTC")
+        except Exception:
+            tz = pytz.UTC
+        now_local = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz)
+
+        parts = str(r.get("remind_at") or "").split(":")
+        try:
+            sh, sm = int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            continue
+        if now_local.hour != sh or now_local.minute != sm:
+            continue
+        if not _reminder_due_today(r, now_local):
+            continue
+
+        due_date = now_local.strftime("%Y-%m-%d")
+        try:
+            if queries.occurrence_exists(r["id"], due_date):
+                continue  # уже отправляли сегодня
+        except Exception as e:
+            logger.warning(f"scheduler: проверка occurrence не удалась reminder={r.get('id')}: {e}")
+            continue
+
+        buckets[(r["client_id"], telegram_id, due_date)].append(r)
+
+    for (client_id, telegram_id, due_date), items in buckets.items():
+        titles = [r.get("title", "").strip() for r in items if r.get("title")]
+        if not titles:
+            continue
+        text = compose_reminder_message(titles)
+        try:
+            await bot.send_message(chat_id=telegram_id, text=text)
+        except Exception as e:
+            logger.warning(f"scheduler: отправка напоминаний не удалась client={client_id}: {e}")
+            continue
+        # Фиксируем срабатывания только после успешной отправки (UNIQUE защитит от дублей).
+        for r in items:
+            try:
+                queries.record_occurrence(r["id"], client_id, due_date)
+            except Exception:
+                pass
+        logger.info(
+            f"scheduler: напоминания отправлены client={client_id} count={len(items)} ({due_date})"
+        )
+
+
 async def run_scheduler_pass() -> None:
     """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
     await run_due_notifications()
+    await run_reminders()
     await run_nutritionist_alerts()
 
 

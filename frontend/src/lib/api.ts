@@ -75,9 +75,55 @@ export interface NutritionDaily {
   targets: { kcal?: number; water_ml?: number };
 }
 
+export interface Reminder {
+  id: string;
+  client_id: string;
+  title: string;
+  remind_at: string; // 'HH:MM:SS'
+  recurrence: "once" | "daily" | "weekly";
+  weekday: number | null; // 0=Пн … 6=Вс
+  remind_date: string | null;
+  requires_response: boolean;
+  active: boolean;
+}
+
+export interface ReminderInput {
+  title: string;
+  remind_at: string; // 'HH:MM'
+  recurrence: "once" | "daily" | "weekly";
+  weekday?: number | null;
+  remind_date?: string | null;
+  requires_response?: boolean;
+}
+
 export const api = {
   /** Текущий пользователь (роль, client_id, статусы) — авторитетно из БД. */
   me: () => request<AppUser>("/me"),
+
+  /** Напоминания клиента (для редактора нутрициолога). */
+  listReminders: (clientId: string) =>
+    request<{ reminders: Reminder[] }>(`/clients/${encodeURIComponent(clientId)}/reminders`),
+
+  /** Создать напоминание клиенту (с аудитом). */
+  createReminder: (clientId: string, body: ReminderInput) =>
+    request<{ reminder: Reminder }>(`/clients/${encodeURIComponent(clientId)}/reminders`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Обновить напоминание (partial). */
+  updateReminder: (clientId: string, reminderId: string, body: Partial<ReminderInput> & { active?: boolean }) =>
+    request<{ reminder: Reminder }>(
+      `/clients/${encodeURIComponent(clientId)}/reminders/${encodeURIComponent(reminderId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  /** Удалить напоминание. */
+  deleteReminder: (clientId: string, reminderId: string) =>
+    request<{ ok: boolean }>(
+      `/clients/${encodeURIComponent(clientId)}/reminders/${encodeURIComponent(reminderId)}`,
+      { method: "DELETE" },
+    ),
 
   /**
    * Суточные тоталы питания (ккал/Б/Ж/У/сахар/вода) + нормы из плана.

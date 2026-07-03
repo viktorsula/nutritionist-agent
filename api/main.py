@@ -102,6 +102,25 @@ class ClientStatusIn(BaseModel):
     paid_until: str | None = None              # 'YYYY-MM-DD' | '' (сбросить)
 
 
+class ReminderIn(BaseModel):
+    title: str
+    remind_at: str                             # 'HH:MM' локального времени клиента
+    recurrence: str = "daily"                  # once|daily|weekly
+    weekday: int | None = None                 # weekly: 0=Пн … 6=Вс
+    remind_date: str | None = None             # once: 'YYYY-MM-DD'
+    requires_response: bool = False            # задел Фазы 2
+
+
+class ReminderPatchIn(BaseModel):
+    title: str | None = None
+    remind_at: str | None = None
+    recurrence: str | None = None
+    weekday: int | None = None
+    remind_date: str | None = None
+    requires_response: bool | None = None
+    active: bool | None = None
+
+
 # ========================================
 # ЭНДПОИНТЫ
 # ========================================
@@ -701,6 +720,129 @@ def update_client_status_endpoint(
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+def _validate_reminder(recurrence: str, weekday, remind_date, remind_at: str | None) -> None:
+    """Проверка полей напоминания. Кидает HTTPException 400 при ошибке."""
+    if recurrence is not None and recurrence not in ("once", "daily", "weekly"):
+        raise HTTPException(status_code=400, detail="recurrence must be once|daily|weekly")
+    if recurrence == "weekly" and weekday is None:
+        raise HTTPException(status_code=400, detail="weekday required for weekly reminder")
+    if weekday is not None and not (0 <= weekday <= 6):
+        raise HTTPException(status_code=400, detail="weekday must be 0..6 (Mon..Sun)")
+    if recurrence == "once" and not remind_date:
+        raise HTTPException(status_code=400, detail="remind_date required for once reminder")
+    if remind_at is not None and len(remind_at.split(":")) < 2:
+        raise HTTPException(status_code=400, detail="remind_at must be 'HH:MM'")
+
+
+@app.get("/clients/{client_id}/reminders")
+def list_reminders_endpoint(
+    client_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Список напоминаний клиента (для редактора в кабинете нутрициолога)."""
+    from database import queries
+
+    return {"reminders": queries.get_reminders_by_client(client_id)}
+
+
+@app.post("/clients/{client_id}/reminders", status_code=status.HTTP_201_CREATED)
+def create_reminder_endpoint(
+    client_id: str,
+    body: ReminderIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Создать напоминание клиенту (с аудитом)."""
+    from database import queries
+
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    _validate_reminder(body.recurrence, body.weekday, body.remind_date, body.remind_at)
+
+    try:
+        created = queries.create_reminder(
+            client_id=client_id,
+            title=title,
+            remind_at=body.remind_at,
+            recurrence=body.recurrence,
+            weekday=body.weekday,
+            remind_date=body.remind_date or None,
+            requires_response=body.requires_response,
+        )
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="create_reminder",
+            entity_type="reminder",
+            entity_id=(created or {}).get("id"),
+            new_value={"client_id": client_id, "title": title, "remind_at": body.remind_at,
+                       "recurrence": body.recurrence},
+        )
+        return {"reminder": created}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/clients/{client_id}/reminders/{reminder_id}")
+def update_reminder_endpoint(
+    client_id: str,
+    reminder_id: str,
+    body: ReminderPatchIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Обновить напоминание (partial). Пустое тело — 400."""
+    from database import queries
+
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    _validate_reminder(
+        updates.get("recurrence"), updates.get("weekday"),
+        updates.get("remind_date"), updates.get("remind_at"),
+    )
+
+    try:
+        updated = queries.update_reminder(reminder_id, updates)
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="update_reminder",
+            entity_type="reminder",
+            entity_id=reminder_id,
+            new_value=updates,
+        )
+        return {"reminder": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/clients/{client_id}/reminders/{reminder_id}")
+def delete_reminder_endpoint(
+    client_id: str,
+    reminder_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Удалить напоминание (срабатывания уйдут каскадом)."""
+    from database import queries
+
+    try:
+        queries.delete_reminder(reminder_id)
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="delete_reminder",
+            entity_type="reminder",
+            entity_id=reminder_id,
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/clients/{client_id}/telegram-link")
