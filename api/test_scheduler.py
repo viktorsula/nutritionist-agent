@@ -251,15 +251,35 @@ class TestDetectResponse(unittest.TestCase):
         with patch("database.queries.has_client_message_since", return_value=True):
             self.assertTrue(S._detect_response("c", "text", "2026-06-24T07:00:00"))
             self.assertTrue(S._detect_response("c", None, "2026-06-24T07:00:00"))
+        with patch("database.queries.has_event_since", return_value=True) as he:
+            self.assertTrue(S._detect_response("c", "water", "2026-06-24T07:00:00"))
+            self.assertEqual(he.call_args.args[1], "water_logged")
+        with patch("database.queries.has_meal_event_since", return_value=True) as hme:
+            self.assertTrue(S._detect_response("c", "lunch", "2026-06-24T07:00:00"))
+            self.assertEqual(hme.call_args.args[1], "lunch")
+
+
+class TestItemCadence(unittest.TestCase):
+    def test_per_item_overrides_profile(self):
+        with patch("database.queries.get_setting", return_value=None):
+            prof = S._item_cadence({"expected_response": "weight",
+                                    "followup_after_hours": 5, "max_followups": 3})
+            self.assertEqual(prof["followup_hours"], 5)   # переопределено
+            self.assertEqual(prof["max_followups"], 3)
+
+    def test_meal_and_water_keys(self):
+        self.assertEqual(S._cadence_key("breakfast"), "meals")
+        self.assertEqual(S._cadence_key("water"), "water")
+        self.assertEqual(S._cadence_key("chest"), "measurement")
 
 
 class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
-    def _occ(self, sent="2026-06-24T04:00:00", nfu=None, followups=0, expected="weight"):
+    def _occ(self, sent="2026-06-24T04:00:00", nfu=None, followups=0, expected="weight", deadline=None):
         return {
             "id": "occ1", "reminder_id": "r1", "client_id": "c1", "sent_at": sent,
-            "next_followup_at": nfu, "followups_sent": followups,
+            "due_date": "2026-06-24", "next_followup_at": nfu, "followups_sent": followups,
             "reminders": {"title": "Прислать вес", "expected_response": expected,
-                          "requires_response": True, "active": True},
+                          "requires_response": True, "active": True, "response_deadline": deadline},
             "clients": {"telegram_id": 777, "timezone": "Asia/Dubai"},
         }
 
@@ -278,6 +298,7 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
              patch("database.queries.log_client_event") as logged:
             mock_dt.utcnow.return_value = fake_now
             mock_dt.fromisoformat = datetime.fromisoformat
+            mock_dt.side_effect = datetime  # реальный конструктор datetime(...) для дедлайнов
             await S.run_reminder_followups()
         return bot, answered, expired, bumped, logged
 
@@ -316,6 +337,47 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
         bot, answered, expired, bumped, _ = await self._run(occ)
         for m in (answered, expired, bumped):
             m.assert_not_called()
+
+    async def test_meal_miss_alerts_medium_after_deadline(self):
+        # Обед, дедлайн 17:00 Asia/Dubai (=13:00 UTC). Сейчас 14:00 UTC → просрочка → пуш-алерт.
+        occ = self._occ(expected="lunch", deadline="17:00")
+        bot, answered, expired, _, logged = await self._run(occ, utc=(14, 0))
+        expired.assert_called_once()
+        self.assertEqual(logged.call_args.kwargs["event_type"], "meal_not_reported")
+        self.assertEqual(logged.call_args.kwargs["severity"], "medium")
+
+    async def test_meal_not_expired_before_deadline(self):
+        # 17:00 Dubai = 13:00 UTC; сейчас 10:00 UTC → до дедлайна, не просрочено.
+        occ = self._occ(expected="lunch", deadline="17:00")
+        bot, _, expired, _, logged = await self._run(occ, utc=(10, 0))
+        expired.assert_not_called()
+        logged.assert_not_called()
+
+
+class TestNoResponseCheck(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        S._no_response_guard.clear()
+        S._last_no_response_at = None
+
+    async def test_emits_no_response_event_once_per_day(self):
+        alert = {"severity": "high", "details": {"hours_since_last_message": 60}}
+        with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("business_rules.medical_rules._check_no_response", return_value=alert), \
+             patch("database.queries.log_client_event") as logged:
+            await S.run_no_response_check()
+            self.assertEqual(logged.call_args.kwargs["event_type"], "no_response")
+            self.assertEqual(logged.call_args.kwargs["severity"], "high")
+            # второй проход в тот же день (сбрасываем тротлинг) — дедуп, событие не дублируется
+            S._last_no_response_at = None
+            await S.run_no_response_check()
+            self.assertEqual(logged.call_count, 1)
+
+    async def test_no_alert_when_client_active(self):
+        with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("business_rules.medical_rules._check_no_response", return_value=None), \
+             patch("database.queries.log_client_event") as logged:
+            await S.run_no_response_check()
+            logged.assert_not_called()
 
 
 if __name__ == "__main__":

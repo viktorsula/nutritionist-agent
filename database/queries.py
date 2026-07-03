@@ -721,7 +721,7 @@ def get_recent_alert_events(minutes: int = 5) -> List[Dict[str, Any]]:
         supabase.table("client_events")
         .select("id, client_id, event_type, severity, event_date, payload_json, clients(name)")
         .gte("event_date", since)
-        .or_("severity.in.(high,critical),event_type.eq.bad_wellbeing")
+        .or_("severity.in.(high,critical),event_type.in.(bad_wellbeing,meal_not_reported)")
         .order("event_date", desc=True)
         .execute()
     ) or []
@@ -1118,6 +1118,9 @@ def create_reminder(
     remind_date: Optional[str] = None,
     requires_response: bool = False,
     expected_response: Optional[str] = None,
+    followup_after_hours: Optional[int] = None,
+    max_followups: Optional[int] = None,
+    response_deadline: Optional[str] = None,
     created_by: str = "nutritionist",
 ) -> Optional[Dict[str, Any]]:
     """Создать напоминание клиенту."""
@@ -1131,6 +1134,9 @@ def create_reminder(
         "remind_date": remind_date,
         "requires_response": requires_response,
         "expected_response": expected_response,
+        "followup_after_hours": followup_after_hours,
+        "max_followups": max_followups,
+        "response_deadline": response_deadline,
         "created_by": created_by,
     }
     return _execute_one(supabase.table("reminders").insert(data))
@@ -1221,7 +1227,8 @@ def get_open_occurrences() -> List[Dict[str, Any]]:
     supabase = _service_client()
     response = (
         supabase.table("reminder_occurrences")
-        .select("*, reminders(title, expected_response, requires_response, active), "
+        .select("*, reminders(title, expected_response, requires_response, active, "
+                "followup_after_hours, max_followups, response_deadline), "
                 "clients(telegram_id, timezone)")
         .eq("status", "sent")
         .execute()
@@ -1311,6 +1318,30 @@ def has_client_message_since(client_id: str, since: str) -> bool:
         .eq("client_id", client_id).eq("role", "client")
     )
     return _count_since(q, since) > 0
+
+
+def has_event_since(client_id: str, event_type: str, since: str) -> bool:
+    """Было ли событие данного типа (напр. water_logged) после `since`."""
+    supabase = _service_client()
+    q = (
+        supabase.table("client_events").select("id")
+        .eq("client_id", client_id).eq("event_type", event_type)
+    )
+    # client_events помечаются event_date, а не created_at.
+    rows = _extract_data(q.gt("event_date", since).limit(1).execute())
+    return len(rows or []) > 0
+
+
+def has_meal_event_since(client_id: str, meal_type: str, since: str) -> bool:
+    """Был ли приём пищи нужного типа (breakfast/lunch/dinner) после `since`."""
+    supabase = _service_client()
+    q = (
+        supabase.table("client_events").select("id")
+        .eq("client_id", client_id).eq("event_type", "calories_logged")
+        .filter("payload_json->>meal_type", "eq", meal_type)
+    )
+    rows = _extract_data(q.gt("event_date", since).limit(1).execute())
+    return len(rows or []) > 0
 
 
 def create_wellness_plan(

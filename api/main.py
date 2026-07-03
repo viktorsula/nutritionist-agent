@@ -110,6 +110,9 @@ class ReminderIn(BaseModel):
     remind_date: str | None = None             # once: 'YYYY-MM-DD'
     requires_response: bool = False            # ждём ответа клиента (контроль)
     expected_response: str | None = None       # ключ показателя | 'text' | None
+    followup_after_hours: int | None = None    # переопределяет профиль кадэнса
+    max_followups: int | None = None
+    response_deadline: str | None = None       # 'HH:MM' дедлайн отчёта (еда: 12/17/22)
 
 
 class ReminderPatchIn(BaseModel):
@@ -120,6 +123,9 @@ class ReminderPatchIn(BaseModel):
     remind_date: str | None = None
     requires_response: bool | None = None
     expected_response: str | None = None
+    followup_after_hours: int | None = None
+    max_followups: int | None = None
+    response_deadline: str | None = None
     active: bool | None = None
 
 
@@ -773,6 +779,9 @@ def create_reminder_endpoint(
             remind_date=body.remind_date or None,
             requires_response=body.requires_response,
             expected_response=body.expected_response or None,
+            followup_after_hours=body.followup_after_hours,
+            max_followups=body.max_followups,
+            response_deadline=body.response_deadline or None,
         )
         queries.write_audit_log(
             actor_type="nutritionist",
