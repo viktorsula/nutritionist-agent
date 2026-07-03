@@ -14,15 +14,6 @@ export interface RegistryRow {
   client_profiles: { goals: string | null; weight: number | null; target_weight: number | null } | null;
 }
 
-export interface Task {
-  id: string;
-  title: string;
-  description: string | null;
-  due_date: string | null;
-  status: string;
-  created_by: string;
-  created_at: string;
-}
 
 export interface EventRow {
   event_type: string;
@@ -90,23 +81,6 @@ export function useClientRow(clientId: string) {
         .maybeSingle();
       if (error) throw error;
       return (data as unknown as RegistryRow) ?? null;
-    },
-  });
-}
-
-/** Задачи клиента (свежие сверху). */
-export function useClientTasks(clientId: string) {
-  return useQuery({
-    queryKey: ["client_tasks", clientId],
-    enabled: !!clientId,
-    queryFn: async (): Promise<Task[]> => {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("id,title,description,due_date,status,created_by,created_at")
-        .eq("client_id", clientId)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data ?? [];
     },
   });
 }

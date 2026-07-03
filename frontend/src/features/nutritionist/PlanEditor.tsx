@@ -93,10 +93,10 @@ export function PlanEditor({ clientId }: { clientId: string }) {
         <div className="text-xs text-gray-400">{t("plan.none")}</div>
       ) : (
         <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-gray-600">
-            <span className="text-gray-500">{t("plan.history")}</span>
+          <label className="flex w-full items-center gap-2 text-xs text-gray-600">
+            <span className="shrink-0 text-gray-500">{t("plan.history")}</span>
             <select
-              className="flex-1 rounded-md border px-2 py-1 text-xs"
+              className="min-w-0 flex-1 truncate rounded-md border px-2 py-1 text-xs"
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
             >
