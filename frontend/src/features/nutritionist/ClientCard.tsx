@@ -16,6 +16,7 @@ import {
 import { useClientEventsRecent, useClientRow } from "./queries";
 import { TaskEditor } from "./TaskEditor";
 import { ReminderEditor } from "./ReminderEditor";
+import { MetricsCatalogEditor } from "./MetricsCatalogEditor";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
 import { ReportsCard } from "./ReportsCard";
@@ -323,6 +324,10 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
 
         <Card title={t("card.tasks_notes")}>
           <TaskEditor clientId={clientId} />
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 text-sm font-medium text-gray-700">{t("metrics.heading")}</div>
+            <MetricsCatalogEditor clientId={clientId} />
+          </div>
           <div className="mt-3 border-t pt-3">
             <ReminderEditor clientId={clientId} />
           </div>

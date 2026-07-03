@@ -848,6 +848,60 @@ def delete_reminder_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ControlledMetricsIn(BaseModel):
+    metrics: List[Dict[str, Any]]  # [{key,label_ru,label_en?,unit,category}]
+
+
+@app.get("/clients/{client_id}/controlled-metrics")
+def list_controlled_metrics_endpoint(
+    client_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Каталог контролируемых показателей клиента (для пикера напоминаний + редактора)."""
+    from database import queries
+
+    return {"metrics": queries.get_controlled_metrics(client_id)}
+
+
+@app.put("/clients/{client_id}/controlled-metrics")
+def set_controlled_metrics_endpoint(
+    client_id: str,
+    body: ControlledMetricsIn,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """Перезаписать каталог контролируемых показателей клиента (с аудитом)."""
+    from database import queries
+
+    # Нормализуем категорию по ключу (physical/sleep/custom), чтобы запись роутилась верно.
+    from agents.client.intake_store import metric_category
+
+    metrics = []
+    for m in body.metrics:
+        key = str(m.get("key") or "").strip()
+        if not key:
+            continue
+        metrics.append({
+            "key": key,
+            "label_ru": m.get("label_ru") or key,
+            "label_en": m.get("label_en") or m.get("label_ru") or key,
+            "unit": m.get("unit") or "",
+            "category": metric_category(key),
+        })
+    try:
+        queries.set_controlled_metrics(client_id, metrics)
+        queries.write_audit_log(
+            actor_type="nutritionist",
+            actor_id=user["user_id"],
+            action="set_controlled_metrics",
+            entity_type="profile",
+            entity_id=client_id,
+            new_value={"count": len(metrics)},
+        )
+        return {"metrics": metrics}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/clients/{client_id}/telegram-link")
 def create_telegram_link(
     client_id: str,

@@ -84,6 +84,7 @@ export interface Reminder {
   weekday: number | null; // 0=Пн … 6=Вс
   remind_date: string | null;
   requires_response: boolean;
+  expected_response: string | null; // ключ показателя | 'text' | null
   active: boolean;
 }
 
@@ -94,6 +95,16 @@ export interface ReminderInput {
   weekday?: number | null;
   remind_date?: string | null;
   requires_response?: boolean;
+  expected_response?: string | null;
+}
+
+/** Контролируемый показатель клиента (каталог). */
+export interface ControlledMetric {
+  key: string;
+  label_ru: string;
+  label_en?: string;
+  unit: string;
+  category?: "physical" | "sleep" | "custom";
 }
 
 export const api = {
@@ -123,6 +134,19 @@ export const api = {
     request<{ ok: boolean }>(
       `/clients/${encodeURIComponent(clientId)}/reminders/${encodeURIComponent(reminderId)}`,
       { method: "DELETE" },
+    ),
+
+  /** Каталог контролируемых показателей клиента. */
+  listControlledMetrics: (clientId: string) =>
+    request<{ metrics: ControlledMetric[] }>(
+      `/clients/${encodeURIComponent(clientId)}/controlled-metrics`,
+    ),
+
+  /** Перезаписать каталог контролируемых показателей клиента. */
+  setControlledMetrics: (clientId: string, metrics: ControlledMetric[]) =>
+    request<{ metrics: ControlledMetric[] }>(
+      `/clients/${encodeURIComponent(clientId)}/controlled-metrics`,
+      { method: "PUT", body: JSON.stringify({ metrics }) },
     ),
 
   /**

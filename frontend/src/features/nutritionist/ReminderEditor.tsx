@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, type ReminderInput } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
-import { useClientReminders } from "./queries";
+import { useClientReminders, useControlledMetrics } from "./queries";
 
 type Recurrence = "once" | "daily" | "weekly";
 
@@ -16,6 +16,7 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const reminders = useClientReminders(clientId);
+  const metrics = useControlledMetrics(clientId);
 
   const [title, setTitle] = useState("");
   const [time, setTime] = useState("07:00");
@@ -23,10 +24,16 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
   const [weekday, setWeekday] = useState(0);
   const [date, setDate] = useState("");
   const [needsResponse, setNeedsResponse] = useState(false);
+  const [expected, setExpected] = useState("text");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const weekdays = t("reminders.weekdays", { returnObjects: true }) as string[];
+  const catalog = metrics.data ?? [];
+  const expectedLabel = (key: string | null): string => {
+    if (!key || key === "text") return t("reminders.any_answer");
+    return catalog.find((m) => m.key === key)?.label_ru ?? key;
+  };
   const invalidate = () => qc.invalidateQueries({ queryKey: ["client_reminders", clientId] });
 
   async function create(e: FormEvent) {
@@ -42,11 +49,13 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
       weekday: recurrence === "weekly" ? weekday : null,
       remind_date: recurrence === "once" ? date || null : null,
       requires_response: needsResponse,
+      expected_response: needsResponse ? expected : null,
     };
     try {
       await api.createReminder(clientId, body);
       setTitle("");
       setNeedsResponse(false);
+      setExpected("text");
       invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -95,7 +104,9 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
               <span className="min-w-0 flex-1 truncate text-gray-800">
                 {r.title}
                 <span className="text-gray-400"> · {scheduleLabel(r)}</span>
-                {r.requires_response && <span className="text-amber-600"> · ✋</span>}
+                {r.requires_response && (
+                  <span className="text-amber-600"> · ✋ {expectedLabel(r.expected_response)}</span>
+                )}
               </span>
               <button className="text-red-600 hover:underline" onClick={() => remove(r.id)}>
                 {t("reminders.delete")}
@@ -136,7 +147,7 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
             <input type="date" className={input} value={date} onChange={(e) => setDate(e.target.value)} />
           )}
         </div>
-        <label className="flex items-center gap-2 text-xs text-gray-600" title={t("reminders.needs_response_hint")}>
+        <label className="flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
             checked={needsResponse}
@@ -144,6 +155,19 @@ export function ReminderEditor({ clientId }: { clientId: string }) {
           />
           {t("reminders.needs_response")}
         </label>
+        {needsResponse && (
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            <span className="text-gray-500">{t("reminders.expected")}</span>
+            <select className={input} value={expected} onChange={(e) => setExpected(e.target.value)}>
+              <option value="text">{t("reminders.any_answer")}</option>
+              {catalog.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.label_ru}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {error && <div className="text-xs text-red-600">{error}</div>}
         <Button type="submit" disabled={busy}>
           {busy ? t("reminders.adding") : t("reminders.add")}
