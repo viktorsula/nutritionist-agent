@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 _sent_guard: set = set()  # ключи "client_id:type:YYYY-MM-DD HH:MM" — анти-дубль
 _alert_guard: set = set()  # id уже отправленных нутрициологу событий — анти-дубль
+_no_response_guard: set = set()  # "client_id:YYYY-MM-DD" — один алерт молчания в день
+_last_no_response_at: Optional[datetime] = None
+NO_RESPONSE_CHECK_EVERY_MIN = 30
 
 CHECK_INTERVAL_SECONDS = 60
 # Окно выборки свежих алертов (минут). Чуть больше интервала прохода — на случай джиттера.
@@ -307,11 +310,15 @@ async def run_reminders() -> None:
 # system_settings.reminder_cadence; здесь — дефолты. give_up_hours подобран короче
 # интервала recurrence (для ежедневных <24ч), поэтому догон не заходит за следующее
 # плановое срабатывание (единая формула min(окно, следующее срабатывание)).
+MEAL_TYPES = ("breakfast", "lunch", "dinner")
+
 DEFAULT_REMINDER_CADENCE = {
     "weight":      {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
     "measurement": {"followup_hours": 24, "max_followups": 2, "give_up_hours": 72},
     "labs":        {"followup_hours": 72, "max_followups": 1, "give_up_hours": 168},
     "sleep":       {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
+    "water":       {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
+    "meals":       {"followup_hours": 2,  "max_followups": 1, "give_up_hours": 12},
     "text":        {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
     "default":     {"followup_hours": 24, "max_followups": 1, "give_up_hours": 72},
 }
@@ -323,10 +330,14 @@ def _cadence_key(expected: Optional[str]) -> str:
         return "text"
     if expected == "weight":
         return "weight"
-    if expected in ("waist", "neck", "hips"):
+    if expected in ("waist", "neck", "hips", "chest"):
         return "measurement"
     if expected == "sleep":
         return "sleep"
+    if expected == "water":
+        return "water"
+    if expected in MEAL_TYPES:
+        return "meals"
     if expected in ("labs", "lab"):
         return "labs"
     if expected == "text":
@@ -350,12 +361,39 @@ def resolve_cadence(expected: Optional[str]) -> dict:
     return profiles.get(_cadence_key(expected), profiles["default"])
 
 
+def _item_cadence(reminder: dict) -> dict:
+    """Профиль кадэнса с per-элемент переопределением (followup_after_hours/max_followups)."""
+    profile = dict(resolve_cadence(reminder.get("expected_response")))
+    fa = reminder.get("followup_after_hours")
+    mf = reminder.get("max_followups")
+    if fa is not None:
+        profile["followup_hours"] = fa
+    if mf is not None:
+        profile["max_followups"] = mf
+    return profile
+
+
 def _initial_followup_at(reminder: dict, now_utc: datetime) -> Optional[str]:
     """Время первого повтора для ждущего ответа напоминания (иначе None — без догона)."""
     if not reminder.get("requires_response"):
         return None
-    profile = resolve_cadence(reminder.get("expected_response"))
+    profile = _item_cadence(reminder)
     return (now_utc + timedelta(hours=profile["followup_hours"])).isoformat()
+
+
+def _deadline_utc(due_date: str, deadline: str, tz_str: Optional[str]) -> Optional[datetime]:
+    """Дедлайн отчёта: локальные due_date+deadline (HH:MM) → наивный UTC. None при ошибке."""
+    try:
+        tz = pytz.timezone(tz_str or "UTC")
+    except Exception:
+        tz = pytz.UTC
+    try:
+        y, m, d = (int(x) for x in str(due_date).split("-"))
+        hh, mm = (int(x) for x in str(deadline).split(":")[:2])
+        local = tz.localize(datetime(y, m, d, hh, mm))
+    except (ValueError, IndexError):
+        return None
+    return local.astimezone(pytz.UTC).replace(tzinfo=None)
 
 
 def _parse_ts(value: Optional[str]) -> Optional[datetime]:
@@ -381,10 +419,14 @@ def _detect_response(client_id: str, expected: Optional[str], since: str) -> boo
 
     if not expected or expected in ("text", "none"):
         return queries.has_client_message_since(client_id, since)
-    if expected == "weight" or expected in ("waist", "neck", "hips"):
+    if expected == "weight" or expected in ("waist", "neck", "hips", "chest"):
         return queries.has_measurement_since(client_id, expected, since)
     if expected in ("labs", "lab"):
         return queries.has_lab_result_since(client_id, since)
+    if expected == "water":
+        return queries.has_event_since(client_id, "water_logged", since)
+    if expected in MEAL_TYPES:
+        return queries.has_meal_event_since(client_id, expected, since)
     return queries.has_client_metric_since(client_id, expected, since)  # sleep / custom
 
 
@@ -433,20 +475,33 @@ async def run_reminder_followups() -> None:
             logger.info(f"scheduler: напоминание закрыто ответом occ={occ['id']} expected={expected}")
             continue
 
-        profile = resolve_cadence(expected)
+        profile = _item_cadence(reminder)
 
-        # 2) Срок вышел → «сдались»: просрочка + low-severity алерт в панель.
-        if now >= sent_dt + timedelta(hours=profile["give_up_hours"]):
+        # Срок «сдаться»: дедлайн отчёта (напр. еда 12/17/22 локально), иначе sent + окно профиля.
+        deadline = reminder.get("response_deadline")
+        tz_str = (occ.get("clients") or {}).get("timezone")
+        give_up_at = None
+        if deadline:
+            give_up_at = _deadline_utc(occ.get("due_date"), deadline, tz_str)
+        if give_up_at is None:
+            give_up_at = sent_dt + timedelta(hours=profile["give_up_hours"])
+
+        # 2) Срок вышел → «сдались». Пропуск ЕДЫ — важен нутрициологу (medium + пуш в Telegram);
+        #    прочее (вес/сон/…) — low в панель.
+        if now >= give_up_at:
             queries.mark_occurrence_expired(occ["id"])
+            is_meal = expected in MEAL_TYPES
             try:
                 queries.log_client_event(
-                    client_id=client_id, event_type="reminder_unanswered", severity="low",
+                    client_id=client_id,
+                    event_type="meal_not_reported" if is_meal else "reminder_unanswered",
+                    severity="medium" if is_meal else "low",
                     payload={"reminder_id": occ.get("reminder_id"),
                              "title": reminder.get("title"), "expected": expected},
                 )
             except Exception as e:
-                logger.warning(f"scheduler: алерт reminder_unanswered не записан occ={occ.get('id')}: {e}")
-            logger.info(f"scheduler: напоминание просрочено (без ответа) occ={occ['id']}")
+                logger.warning(f"scheduler: алерт просрочки не записан occ={occ.get('id')}: {e}")
+            logger.info(f"scheduler: напоминание просрочено (без ответа) occ={occ['id']} meal={is_meal}")
             continue
 
         # 3) Пора повторить (не превысив макс повторов).
@@ -464,11 +519,62 @@ async def run_reminder_followups() -> None:
             logger.info(f"scheduler: повтор напоминания отправлен occ={occ['id']}")
 
 
+async def run_no_response_check() -> None:
+    """
+    Периодически: активные клиенты, молчащие дольше порога → событие `no_response`
+    (severity из medical_rules; high пушится нутрициологу). Дедуп — один алерт в день на клиента.
+
+    Оживляет алерт молчания: медицинское правило существовало, но джоб не был на расписании.
+    Порог — `system_settings.no_response_threshold_hours`. Тротлинг — раз в NO_RESPONSE_CHECK_EVERY_MIN.
+    """
+    global _last_no_response_at
+    now = datetime.utcnow()
+    if _last_no_response_at and (now - _last_no_response_at).total_seconds() < NO_RESPONSE_CHECK_EVERY_MIN * 60:
+        return
+    _last_no_response_at = now
+
+    from database import queries
+    from business_rules import medical_rules
+
+    try:
+        clients = queries.get_all_clients(status="active")
+    except Exception as e:
+        logger.warning(f"scheduler: no_response — список клиентов не получен: {e}")
+        return
+
+    today = now.strftime("%Y-%m-%d")
+    for c in clients or []:
+        cid = c.get("id")
+        if not cid:
+            continue
+        key = f"{cid}:{today}"
+        if key in _no_response_guard:
+            continue
+        try:
+            alert = medical_rules._check_no_response(cid)
+        except Exception:
+            alert = None
+        if not alert:
+            continue
+        try:
+            queries.log_client_event(
+                client_id=cid, event_type="no_response",
+                severity=alert.get("severity") or "medium", payload=alert.get("details"),
+            )
+            _no_response_guard.add(key)
+            if len(_no_response_guard) > 5000:
+                _no_response_guard.clear()
+            logger.info(f"scheduler: no_response алерт создан client={cid}")
+        except Exception as e:
+            logger.warning(f"scheduler: no_response событие не записано client={cid}: {e}")
+
+
 async def run_scheduler_pass() -> None:
     """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
     await run_due_notifications()
     await run_reminders()
     await run_reminder_followups()
+    await run_no_response_check()
     await run_nutritionist_alerts()
 
 
