@@ -173,6 +173,12 @@ def _load_base_context(state: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"orchestrator: latest_measurement failed: {e}")
             state["latest_measurement"] = None
+
+        try:
+            state["controlled_metrics"] = queries.get_controlled_metrics(client_id) or []
+        except Exception as e:
+            logger.warning(f"orchestrator: controlled_metrics failed: {e}")
+            state["controlled_metrics"] = []
     except Exception as e:
         logger.error(f"orchestrator: base context load failed: {e}", exc_info=True)
 
@@ -323,6 +329,13 @@ def _system_prompt(state: Dict[str, Any]) -> str:
     if prescriptions:
         system += "\n\n" + prescriptions
 
+    # Контролируемые показатели: даём модели ТОЧНЫЕ ключи, чтобы произвольные показатели
+    # (пульс/стресс/…) логировались под ключом каталога → детерминированный детект ответа
+    # на напоминания (иначе custom-ключ модель выбирает наугад).
+    metrics_block = _format_controlled_metrics(state)
+    if metrics_block:
+        system += "\n\n" + metrics_block
+
     summary = (state.get("conversation_summary") or "").strip()
     if summary:
         system += "\n\n## Память о клиенте (сводка прошлых разговоров)\n" + summary
@@ -385,6 +398,32 @@ def _format_prescriptions(state: Dict[str, Any], view: Dict[str, Any]) -> str:
         )
     return (
         "## Назначения нутрициолога (обязательная опора ответа; не выдумывай сверх этого)\n"
+        + "\n".join(lines)
+    )
+
+
+def _format_controlled_metrics(state: Dict[str, Any]) -> str:
+    """Каталог контролируемых показателей клиента → точные ключи для log_measurement/log_sleep."""
+    metrics = state.get("controlled_metrics") or []
+    lines: List[str] = []
+    for m in metrics:
+        if not isinstance(m, dict):
+            continue
+        key = str(m.get("key") or "").strip()
+        if not key:
+            continue
+        label = m.get("label_ru") or key
+        if key == "sleep":
+            lines.append(f'- {label} (во сколько лёг/встал) → инструмент log_sleep')
+        else:
+            unit = f', ед.: {m["unit"]}' if m.get("unit") else ""
+            lines.append(f'- {label} → log_measurement(metric_key="{key}"{unit})')
+    if not lines:
+        return ""
+    return (
+        "## Контролируемые показатели клиента (нутрициолог их отслеживает)\n"
+        "Если клиент сообщает значение одного из них — ОБЯЗАТЕЛЬНО запиши указанным инструментом "
+        "с ТОЧНЫМ ключом (metric_key) ниже. Это вносит данные в карту и закрывает напоминания.\n"
         + "\n".join(lines)
     )
 
