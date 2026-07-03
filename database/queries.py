@@ -1100,6 +1100,7 @@ def create_reminder(
     weekday: Optional[int] = None,
     remind_date: Optional[str] = None,
     requires_response: bool = False,
+    expected_response: Optional[str] = None,
     created_by: str = "nutritionist",
 ) -> Optional[Dict[str, Any]]:
     """Создать напоминание клиенту."""
@@ -1112,6 +1113,7 @@ def create_reminder(
         "weekday": weekday,
         "remind_date": remind_date,
         "requires_response": requires_response,
+        "expected_response": expected_response,
         "created_by": created_by,
     }
     return _execute_one(supabase.table("reminders").insert(data))
@@ -1174,11 +1176,124 @@ def occurrence_exists(reminder_id: str, due_date: str) -> bool:
     return bool(_extract_data(response))
 
 
-def record_occurrence(reminder_id: str, client_id: str, due_date: str) -> Optional[Dict[str, Any]]:
-    """Зафиксировать срабатывание (дедуп гарантирован UNIQUE reminder_id+due_date)."""
+def record_occurrence(
+    reminder_id: str,
+    client_id: str,
+    due_date: str,
+    next_followup_at: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Зафиксировать срабатывание (дедуп гарантирован UNIQUE reminder_id+due_date).
+
+    next_followup_at задаётся для ждущих ответа напоминаний (когда слать первый повтор).
+    """
     supabase = _service_client()
-    data = {"reminder_id": reminder_id, "client_id": client_id, "due_date": due_date}
+    data: Dict[str, Any] = {"reminder_id": reminder_id, "client_id": client_id, "due_date": due_date}
+    if next_followup_at is not None:
+        data["next_followup_at"] = next_followup_at
     return _execute_one(supabase.table("reminder_occurrences").insert(data))
+
+
+# ── Контроль ответа (Слайс 2B) ────────────────────────────────────────────────
+
+
+def get_open_occurrences() -> List[Dict[str, Any]]:
+    """
+    Открытые срабатывания (status='sent') с данными напоминания и клиента — для пассов
+    детекта/догона/«сдались». Фильтр requires_response/active делается вызывающим (Python).
+    """
+    supabase = _service_client()
+    response = (
+        supabase.table("reminder_occurrences")
+        .select("*, reminders(title, expected_response, requires_response, active), "
+                "clients(telegram_id, timezone)")
+        .eq("status", "sent")
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def mark_occurrence_answered(
+    occurrence_id: str, response_ref: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
+    """Закрыть срабатывание как отвеченное (ответ получен)."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    payload = {"status": "answered", "resolved_at": datetime.utcnow().isoformat()}
+    if response_ref is not None:
+        payload["response_ref"] = response_ref
+    return _execute_one(
+        supabase.table("reminder_occurrences").update(payload).eq("id", occurrence_id)
+    )
+
+
+def mark_occurrence_expired(occurrence_id: str) -> Optional[Dict[str, Any]]:
+    """Закрыть срабатывание как просроченное (ответа так и не пришло)."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("reminder_occurrences")
+        .update({"status": "expired", "resolved_at": datetime.utcnow().isoformat()})
+        .eq("id", occurrence_id)
+    )
+
+
+def bump_occurrence_followup(occurrence_id: str, next_followup_at: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Инкремент счётчика повторов + новое время следующего повтора."""
+    supabase = _service_client()
+    row = _execute_single(
+        supabase.table("reminder_occurrences").select("followups_sent").eq("id", occurrence_id).single()
+    )
+    sent = (row or {}).get("followups_sent") or 0
+    return _execute_one(
+        supabase.table("reminder_occurrences")
+        .update({"followups_sent": sent + 1, "next_followup_at": next_followup_at})
+        .eq("id", occurrence_id)
+    )
+
+
+def _count_since(query, since: str) -> int:
+    """Есть ли хотя бы одна строка после `since` (created_at)."""
+    rows = _extract_data(query.gt("created_at", since).limit(1).execute())
+    return len(rows or [])
+
+
+def has_measurement_since(client_id: str, column: str, since: str) -> bool:
+    """Появился ли замер по колонке measurements (weight/waist/neck/hips) после `since`."""
+    supabase = _service_client()
+    q = (
+        supabase.table("measurements").select("id")
+        .eq("client_id", client_id).not_.is_(column, "null")
+    )
+    return _count_since(q, since) > 0
+
+
+def has_client_metric_since(client_id: str, metric_key: str, since: str) -> bool:
+    """Появилось ли значение показателя client_metrics (sleep/custom) после `since`."""
+    supabase = _service_client()
+    q = (
+        supabase.table("client_metrics").select("id")
+        .eq("client_id", client_id).eq("metric_key", metric_key)
+    )
+    return _count_since(q, since) > 0
+
+
+def has_lab_result_since(client_id: str, since: str) -> bool:
+    """Появились ли анализы после `since`."""
+    supabase = _service_client()
+    q = supabase.table("lab_results").select("id").eq("client_id", client_id)
+    return _count_since(q, since) > 0
+
+
+def has_client_message_since(client_id: str, since: str) -> bool:
+    """Прислал ли клиент любое сообщение после `since` (для типа 'text')."""
+    supabase = _service_client()
+    q = (
+        supabase.table("conversations").select("id")
+        .eq("client_id", client_id).eq("role", "client")
+    )
+    return _count_since(q, since) > 0
 
 
 def create_wellness_plan(

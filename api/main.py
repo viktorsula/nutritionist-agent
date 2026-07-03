@@ -108,7 +108,8 @@ class ReminderIn(BaseModel):
     recurrence: str = "daily"                  # once|daily|weekly
     weekday: int | None = None                 # weekly: 0=Пн … 6=Вс
     remind_date: str | None = None             # once: 'YYYY-MM-DD'
-    requires_response: bool = False            # задел Фазы 2
+    requires_response: bool = False            # ждём ответа клиента (контроль)
+    expected_response: str | None = None       # ключ показателя | 'text' | None
 
 
 class ReminderPatchIn(BaseModel):
@@ -118,6 +119,7 @@ class ReminderPatchIn(BaseModel):
     weekday: int | None = None
     remind_date: str | None = None
     requires_response: bool | None = None
+    expected_response: str | None = None
     active: bool | None = None
 
 
@@ -770,6 +772,7 @@ def create_reminder_endpoint(
             weekday=body.weekday,
             remind_date=body.remind_date or None,
             requires_response=body.requires_response,
+            expected_response=body.expected_response or None,
         )
         queries.write_audit_log(
             actor_type="nutritionist",

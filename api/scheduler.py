@@ -17,7 +17,7 @@ ENV: NOTIFICATIONS_ENABLED (по умолч. включено).
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 import pytz
@@ -285,9 +285,13 @@ async def run_reminders() -> None:
             logger.warning(f"scheduler: отправка напоминаний не удалась client={client_id}: {e}")
             continue
         # Фиксируем срабатывания только после успешной отправки (UNIQUE защитит от дублей).
+        # Для ждущих ответа сразу проставляем время первого повтора (контур ответа, Слайс 2B).
+        now_utc = datetime.utcnow()
         for r in items:
             try:
-                queries.record_occurrence(r["id"], client_id, due_date)
+                queries.record_occurrence(
+                    r["id"], client_id, due_date, next_followup_at=_initial_followup_at(r, now_utc)
+                )
             except Exception:
                 pass
         logger.info(
@@ -295,10 +299,176 @@ async def run_reminders() -> None:
         )
 
 
+# ==========================================================================
+# Контроль ответа на напоминания (Слайс 2B) — детект / догон / «сдались»
+# ==========================================================================
+
+# Профили кадэнса догона по типу ожидаемого ответа (часы). Правятся без кода через
+# system_settings.reminder_cadence; здесь — дефолты. give_up_hours подобран короче
+# интервала recurrence (для ежедневных <24ч), поэтому догон не заходит за следующее
+# плановое срабатывание (единая формула min(окно, следующее срабатывание)).
+DEFAULT_REMINDER_CADENCE = {
+    "weight":      {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
+    "measurement": {"followup_hours": 24, "max_followups": 2, "give_up_hours": 72},
+    "labs":        {"followup_hours": 72, "max_followups": 1, "give_up_hours": 168},
+    "sleep":       {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
+    "text":        {"followup_hours": 3,  "max_followups": 1, "give_up_hours": 14},
+    "default":     {"followup_hours": 24, "max_followups": 1, "give_up_hours": 72},
+}
+
+
+def _cadence_key(expected: Optional[str]) -> str:
+    """Ключ профиля кадэнса по ожидаемому ответу."""
+    if not expected or expected == "none":
+        return "text"
+    if expected == "weight":
+        return "weight"
+    if expected in ("waist", "neck", "hips"):
+        return "measurement"
+    if expected == "sleep":
+        return "sleep"
+    if expected in ("labs", "lab"):
+        return "labs"
+    if expected == "text":
+        return "text"
+    return "default"  # произвольный контролируемый показатель
+
+
+def resolve_cadence(expected: Optional[str]) -> dict:
+    """Профиль догона по типу ответа: БД-override (reminder_cadence) → код-дефолт."""
+    profiles = {k: dict(v) for k, v in DEFAULT_REMINDER_CADENCE.items()}
+    try:
+        from database import queries
+
+        override = queries.get_setting("reminder_cadence")
+        if isinstance(override, dict):
+            for key, val in override.items():
+                if isinstance(val, dict):
+                    profiles[key] = {**profiles.get(key, {}), **val}
+    except Exception:
+        pass
+    return profiles.get(_cadence_key(expected), profiles["default"])
+
+
+def _initial_followup_at(reminder: dict, now_utc: datetime) -> Optional[str]:
+    """Время первого повтора для ждущего ответа напоминания (иначе None — без догона)."""
+    if not reminder.get("requires_response"):
+        return None
+    profile = resolve_cadence(reminder.get("expected_response"))
+    return (now_utc + timedelta(hours=profile["followup_hours"])).isoformat()
+
+
+def _parse_ts(value: Optional[str]) -> Optional[datetime]:
+    """ISO-таймстамп (с tz или без) → наивный datetime в UTC. None при ошибке."""
+    if not value:
+        return None
+    s = str(value).replace("Z", "+00:00").replace(" ", "T")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(s.split(".")[0])
+        except ValueError:
+            return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(pytz.UTC).replace(tzinfo=None)
+    return dt
+
+
+def _detect_response(client_id: str, expected: Optional[str], since: str) -> bool:
+    """Пришёл ли ожидаемый ответ после отправки (по типу показателя)."""
+    from database import queries
+
+    if not expected or expected in ("text", "none"):
+        return queries.has_client_message_since(client_id, since)
+    if expected == "weight" or expected in ("waist", "neck", "hips"):
+        return queries.has_measurement_since(client_id, expected, since)
+    if expected in ("labs", "lab"):
+        return queries.has_lab_result_since(client_id, since)
+    return queries.has_client_metric_since(client_id, expected, since)  # sleep / custom
+
+
+async def run_reminder_followups() -> None:
+    """
+    Один проход контроля ответа: для открытых срабатываний ждущих ответа напоминаний —
+    детект ответа (закрыть), догон (повтор), «сдались» (просрочка → low-severity алерт).
+    """
+    from api.telegram_webhook import is_configured, get_bot
+
+    if not is_configured():
+        return
+
+    from database import queries
+
+    try:
+        occurrences = queries.get_open_occurrences()
+    except Exception as e:
+        logger.warning(f"scheduler: не удалось получить открытые срабатывания: {e}")
+        return
+
+    bot = get_bot()
+    if bot is None:
+        return
+
+    now = datetime.utcnow()
+    for occ in occurrences or []:
+        reminder = occ.get("reminders") or {}
+        if not reminder.get("requires_response") or not reminder.get("active"):
+            continue
+
+        client_id = occ.get("client_id")
+        expected = reminder.get("expected_response")
+        sent_dt = _parse_ts(occ.get("sent_at"))
+        if not client_id or sent_dt is None:
+            continue
+
+        # 1) Ответ пришёл → закрываем срабатывание.
+        try:
+            answered = _detect_response(client_id, expected, occ.get("sent_at"))
+        except Exception as e:
+            logger.warning(f"scheduler: детект ответа не удался occ={occ.get('id')}: {e}")
+            answered = False
+        if answered:
+            queries.mark_occurrence_answered(occ["id"], {"expected": expected})
+            logger.info(f"scheduler: напоминание закрыто ответом occ={occ['id']} expected={expected}")
+            continue
+
+        profile = resolve_cadence(expected)
+
+        # 2) Срок вышел → «сдались»: просрочка + low-severity алерт в панель.
+        if now >= sent_dt + timedelta(hours=profile["give_up_hours"]):
+            queries.mark_occurrence_expired(occ["id"])
+            try:
+                queries.log_client_event(
+                    client_id=client_id, event_type="reminder_unanswered", severity="low",
+                    payload={"reminder_id": occ.get("reminder_id"),
+                             "title": reminder.get("title"), "expected": expected},
+                )
+            except Exception as e:
+                logger.warning(f"scheduler: алерт reminder_unanswered не записан occ={occ.get('id')}: {e}")
+            logger.info(f"scheduler: напоминание просрочено (без ответа) occ={occ['id']}")
+            continue
+
+        # 3) Пора повторить (не превысив макс повторов).
+        telegram_id = (occ.get("clients") or {}).get("telegram_id")
+        nfu = _parse_ts(occ.get("next_followup_at"))
+        if telegram_id and nfu and now >= nfu and (occ.get("followups_sent") or 0) < profile["max_followups"]:
+            title = (reminder.get("title") or "").strip()
+            try:
+                await bot.send_message(chat_id=telegram_id, text=compose_reminder_message([title]))
+            except Exception as e:
+                logger.warning(f"scheduler: повтор напоминания не отправлен occ={occ.get('id')}: {e}")
+                continue
+            next_at = (now + timedelta(hours=profile["followup_hours"])).isoformat()
+            queries.bump_occurrence_followup(occ["id"], next_at)
+            logger.info(f"scheduler: повтор напоминания отправлен occ={occ['id']}")
+
+
 async def run_scheduler_pass() -> None:
     """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
     await run_due_notifications()
     await run_reminders()
+    await run_reminder_followups()
     await run_nutritionist_alerts()
 
 
