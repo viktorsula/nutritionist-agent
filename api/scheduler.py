@@ -17,7 +17,7 @@ ENV: NOTIFICATIONS_ENABLED (по умолч. включено).
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, Tuple
 
 import pytz
@@ -183,32 +183,52 @@ def _reminder_due_today(reminder: dict, now_local: datetime) -> bool:
     return False
 
 
-def _fallback_reminder_text(titles: list) -> str:
-    """Детерминированный текст пакета напоминаний (если LLM недоступен)."""
-    if len(titles) == 1:
-        return f"🔔 Напоминание: {titles[0]}"
-    lines = "\n".join(f"• {t}" for t in titles)
-    return f"🔔 Напоминания на сегодня:\n{lines}"
+def _fallback_reminder_text(brief: dict) -> str:
+    """Детерминированный текст сообщения из брифа (если LLM недоступен)."""
+    parts: list = []
+    recs = (brief.get("recommendations") or "").strip()
+    if recs:
+        parts.append(recs)
+    for t in brief.get("requests") or []:
+        parts.append(f"• {t}")
+    for t in brief.get("outstanding") or []:
+        parts.append(f"• (со вчера) {t}")
+    body = "\n".join(parts) if parts else "Напоминание от вашего нутрициолога 🙂"
+    return f"🔔 Напоминания:\n{body}"
 
 
-def compose_reminder_message(titles: list) -> str:
+def _brief_to_prompt(brief: dict) -> str:
+    """Структурный бриф → текст для LLM (секции: рекомендации / запросы / неотвеченное)."""
+    blocks: list = []
+    recs = (brief.get("recommendations") or "").strip()
+    if recs:
+        blocks.append("Рекомендации нутрициолога (вплети уместно, без давления):\n" + recs)
+    reqs = brief.get("requests") or []
+    if reqs:
+        blocks.append("Сегодня попроси клиента прислать:\n" + "\n".join(f"- {t}" for t in reqs))
+    out = brief.get("outstanding") or []
+    if out:
+        blocks.append("Осталось со вчера (мягко напомни, без упрёка):\n" + "\n".join(f"- {t}" for t in out))
+    return "\n\n".join(blocks) or "Составь короткое тёплое напоминание клиенту."
+
+
+def compose_reminder_message(brief: dict) -> str:
     """
-    Тёплый текст ОДНОГО сообщения на пакет напоминаний. Лёгкий LLM
-    (task_type='reminder', редактируемый промпт client/reminder_message) →
-    при любом сбое откат на детерминированный шаблон-список.
+    Тёплый текст ОДНОГО сообщения из структурного брифа (рекомендации плана + сегодняшние
+    запросы данных + неотвеченное со вчера). Лёгкий LLM (task_type='reminder', редактируемый
+    промпт client/reminder_message) → при любом сбое откат на детерминированный шаблон.
     """
-    fallback = _fallback_reminder_text(titles)
+    fallback = _fallback_reminder_text(brief)
     try:
         from utils.llm import call_llm
         from prompts import load_prompt
 
         system = load_prompt("client/reminder_message")
-        user = "Напоминания на сейчас:\n" + "\n".join(f"- {t}" for t in titles)
         resp = call_llm(
             task_type="reminder",
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": _brief_to_prompt(brief)},
             ],
         )
         text = (resp.get("content") or "").strip()
@@ -281,7 +301,28 @@ async def run_reminders() -> None:
         titles = [r.get("title", "").strip() for r in items if r.get("title")]
         if not titles:
             continue
-        text = compose_reminder_message(titles)
+
+        # Бриф: рекомендации активного плана + неотвеченное со вчера (вплетаем «напомни»).
+        recommendations = None
+        try:
+            plan = queries.get_active_nutrition_plan(client_id) or {}
+            pj = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+            recommendations = (pj or {}).get("description") or plan.get("description")
+        except Exception as e:
+            logger.warning(f"scheduler: план для брифа не получен client={client_id}: {e}")
+
+        outstanding: list = []
+        try:
+            yesterday = (date.fromisoformat(due_date) - timedelta(days=1)).isoformat()
+            for occ in queries.get_outstanding_occurrences(client_id, yesterday):
+                t = ((occ.get("reminders") or {}).get("title") or "").strip()
+                if t:
+                    outstanding.append(t)
+        except Exception as e:
+            logger.warning(f"scheduler: неотвеченное для брифа не получено client={client_id}: {e}")
+
+        brief = {"requests": titles, "recommendations": recommendations, "outstanding": outstanding}
+        text = compose_reminder_message(brief)
         try:
             await bot.send_message(chat_id=telegram_id, text=text)
         except Exception as e:
@@ -510,7 +551,9 @@ async def run_reminder_followups() -> None:
         if telegram_id and nfu and now >= nfu and (occ.get("followups_sent") or 0) < profile["max_followups"]:
             title = (reminder.get("title") or "").strip()
             try:
-                await bot.send_message(chat_id=telegram_id, text=compose_reminder_message([title]))
+                await bot.send_message(
+                    chat_id=telegram_id, text=compose_reminder_message({"requests": [title]})
+                )
             except Exception as e:
                 logger.warning(f"scheduler: повтор напоминания не отправлен occ={occ.get('id')}: {e}")
                 continue
