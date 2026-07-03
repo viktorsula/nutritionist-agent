@@ -143,25 +143,46 @@ class TestReminderDueToday(unittest.TestCase):
 
 
 class TestFallbackReminderText(unittest.TestCase):
-    def test_single(self):
-        self.assertEqual(S._fallback_reminder_text(["Выпить воды"]), "🔔 Напоминание: Выпить воды")
-
-    def test_multiple_lists_all(self):
-        text = S._fallback_reminder_text(["Выпить воды", "Прислать вес"])
+    def test_lists_requests(self):
+        text = S._fallback_reminder_text({"requests": ["Выпить воды", "Прислать вес"]})
         self.assertIn("• Выпить воды", text)
         self.assertIn("• Прислать вес", text)
+
+    def test_includes_recommendations_and_outstanding(self):
+        text = S._fallback_reminder_text({
+            "requests": ["Прислать вес"],
+            "recommendations": "Стакан воды утром",
+            "outstanding": ["Вода"],
+        })
+        self.assertIn("Стакан воды утром", text)
+        self.assertIn("• Прислать вес", text)
+        self.assertIn("(со вчера) Вода", text)
+
+
+class TestBriefToPrompt(unittest.TestCase):
+    def test_sections(self):
+        p = S._brief_to_prompt({
+            "requests": ["Прислать вес"], "recommendations": "Горькая зелень",
+            "outstanding": ["Вода"],
+        })
+        self.assertIn("Горькая зелень", p)
+        self.assertIn("Прислать вес", p)
+        self.assertIn("Осталось со вчера", p)
 
 
 class TestComposeReminderMessage(unittest.TestCase):
     def test_uses_llm_when_available(self):
         with patch("utils.llm.call_llm", return_value={"content": "Доброе утро! Не забудьте про воду 💧"}), \
              patch("prompts.load_prompt", return_value="sys"):
-            self.assertEqual(S.compose_reminder_message(["Выпить воды"]), "Доброе утро! Не забудьте про воду 💧")
+            self.assertEqual(
+                S.compose_reminder_message({"requests": ["Выпить воды"]}),
+                "Доброе утро! Не забудьте про воду 💧",
+            )
 
     def test_falls_back_on_llm_error(self):
         with patch("utils.llm.call_llm", side_effect=RuntimeError("429")), \
              patch("prompts.load_prompt", return_value="sys"):
-            self.assertEqual(S.compose_reminder_message(["Выпить воды"]), "🔔 Напоминание: Выпить воды")
+            self.assertIn("Выпить воды", S.compose_reminder_message({"requests": ["Выпить воды"]}))
 
 
 class TestRunReminders(unittest.IsolatedAsyncioTestCase):
@@ -171,9 +192,10 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
         r.update(extra)
         return r
 
-    async def _run(self, reminders, *, exists=False, utc=(4, 0), configured=True):
+    async def _run(self, reminders, *, exists=False, utc=(4, 0), configured=True, outstanding=None):
         bot = AsyncMock()
         recorded = []
+        outstanding = outstanding or []
         # 04:00 UTC = 08:00 Asia/Dubai
         fake_now = datetime(2026, 6, 24, utc[0], utc[1])
         with patch("api.scheduler.datetime") as mock_dt, \
@@ -182,8 +204,13 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
              patch("database.queries.get_active_reminders", return_value=reminders), \
              patch("database.queries.occurrence_exists", return_value=exists), \
              patch("database.queries.record_occurrence", side_effect=lambda *a, **k: recorded.append(a)), \
-             patch("api.scheduler.compose_reminder_message", side_effect=lambda titles: " | ".join(titles)):
+             patch("database.queries.get_active_nutrition_plan", return_value=None), \
+             patch("database.queries.get_outstanding_occurrences", return_value=outstanding), \
+             patch("api.scheduler.compose_reminder_message",
+                   side_effect=lambda b: " | ".join(b.get("requests", [])
+                                                    + [f"OUT:{t}" for t in b.get("outstanding", [])])):
             mock_dt.utcnow.return_value = fake_now
+            mock_dt.side_effect = datetime  # реальный datetime для date.fromisoformat не нужен, но безопасно
             await S.run_reminders()
         return bot, recorded
 
@@ -214,6 +241,13 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
         r["clients"] = {"telegram_id": None, "timezone": "Asia/Dubai"}
         bot, _ = await self._run([r])
         bot.send_message.assert_not_called()
+
+    async def test_weaves_outstanding_from_yesterday(self):
+        out = [{"reminders": {"title": "Вода"}}]
+        bot, _ = await self._run([self._reminder("r1", "Прислать вес")], outstanding=out)
+        text = bot.send_message.call_args.kwargs["text"]
+        self.assertIn("Прислать вес", text)
+        self.assertIn("OUT:Вода", text)  # вплетено «со вчера»
 
 
 class TestCadence(unittest.TestCase):
@@ -291,7 +325,7 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
              patch("api.telegram_webhook.get_bot", return_value=bot), \
              patch("database.queries.get_open_occurrences", return_value=[occ]), \
              patch("api.scheduler._detect_response", return_value=detected), \
-             patch("api.scheduler.compose_reminder_message", side_effect=lambda t: " | ".join(t)), \
+             patch("api.scheduler.compose_reminder_message", side_effect=lambda b: " | ".join(b.get("requests", []))), \
              patch("database.queries.mark_occurrence_answered") as answered, \
              patch("database.queries.mark_occurrence_expired") as expired, \
              patch("database.queries.bump_occurrence_followup") as bumped, \

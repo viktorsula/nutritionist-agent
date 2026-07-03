@@ -1236,6 +1236,28 @@ def get_open_occurrences() -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def get_outstanding_occurrences(client_id: str, due_date: str) -> List[Dict[str, Any]]:
+    """
+    Незакрытые (без ответа) срабатывания ждущих ответа напоминаний за указанную локальную
+    дату — для вплетения в следующее сообщение («вчера не прислали воду»).
+    """
+    supabase = _service_client()
+    response = (
+        supabase.table("reminder_occurrences")
+        .select("*, reminders(title, expected_response, requires_response, active)")
+        .eq("client_id", client_id)
+        .eq("due_date", due_date)
+        .neq("status", "answered")
+        .execute()
+    )
+    rows = _extract_data(response) or []
+    return [
+        r for r in rows
+        if (r.get("reminders") or {}).get("requires_response")
+        and (r.get("reminders") or {}).get("active")
+    ]
+
+
 def mark_occurrence_answered(
     occurrence_id: str, response_ref: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
