@@ -239,6 +239,26 @@ def test_prescriptions_block_honest_when_plan_empty():
     assert "ещё не заполнен" in system or "не назначил" in system
 
 
+def test_controlled_metrics_block_gives_exact_keys():
+    state = {
+        "client_profile": {"name": "Катя"}, "active_plan": None,
+        "controlled_metrics": [
+            {"key": "waist", "label_ru": "Талия", "unit": "см"},
+            {"key": "пульс", "label_ru": "Пульс", "unit": "уд/мин"},
+            {"key": "sleep", "label_ru": "Сон"},
+        ],
+    }
+    system = ao._system_prompt(state)
+    assert "Контролируемые показатели клиента" in system
+    assert 'log_measurement(metric_key="пульс"' in system  # точный ключ для custom
+    assert "log_sleep" in system
+
+
+def test_controlled_metrics_block_absent_when_empty():
+    system = ao._system_prompt({"client_profile": {"name": "Катя"}, "active_plan": None})
+    assert "Контролируемые показатели клиента" not in system
+
+
 # ── Цикл агента ──────────────────────────────────────────────────────────────
 def test_run_agent_loop_sets_state_and_returns_text():
     state = {"client_id": "cid", "client_profile": {"name": "Катя"}, "conversation_history": []}
