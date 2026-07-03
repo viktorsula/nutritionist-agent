@@ -409,6 +409,48 @@ def insert_measurement(
     return (rows or [None])[0]
 
 
+# ── Контролируемые показатели (client_metrics, миграция 014) ──────────────────
+
+
+def insert_client_metric(
+    client_id: str,
+    metric_key: str,
+    category: Optional[str] = None,
+    value_num: Optional[float] = None,
+    value_text: Optional[str] = None,
+    unit: Optional[str] = None,
+    meta: Optional[Dict[str, Any]] = None,
+    measured_at: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Записать значение контролируемого показателя (sleep/custom) в client_metrics."""
+    supabase = _service_client()
+    data: Dict[str, Any] = {"client_id": client_id, "metric_key": metric_key}
+    for key, value in (
+        ("category", category), ("value_num", value_num), ("value_text", value_text),
+        ("unit", unit), ("meta", meta), ("measured_at", measured_at),
+    ):
+        if value is not None:
+            data[key] = value
+    return _execute_one(supabase.table("client_metrics").insert(data))
+
+
+def get_client_metrics(
+    client_id: str,
+    metric_key: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    """Значения контролируемых показателей клиента (свежие сверху). Фильтры по ключу/дате."""
+    supabase = _service_client()
+    query = supabase.table("client_metrics").select("*").eq("client_id", client_id)
+    if metric_key:
+        query = query.eq("metric_key", metric_key)
+    if since:
+        query = query.gte("measured_at", since)
+    query = query.order("measured_at", desc=True).limit(limit)
+    return _extract_data(query.execute()) or []
+
+
 def get_recent_lab_results(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Недавние числовые анализы клиента из lab_results (миграция 003),

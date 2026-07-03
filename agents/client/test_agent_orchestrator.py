@@ -78,6 +78,26 @@ def test_log_water_weight_wellbeing_labs_records():
         assert pr.call_args.args[1]["labs"][0]["indicator"] == "холестерин"
 
 
+def test_log_measurement_and_sleep_records():
+    state = {"client_id": "cid"}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record") as pr:
+        handlers = ao._build_handlers(state)
+        pr.return_value = "measurement"
+        handlers["log_measurement"]({"metric_key": "waist", "value": 80, "unit": "см"})
+        assert pr.call_args.args[1]["measurement"] == {"metric_key": "waist", "value": 80, "unit": "см"}
+
+        pr.return_value = "sleep"
+        handlers["log_sleep"]({"bedtime": "23:30", "wake": "07:00"})
+        assert pr.call_args.args[1]["sleep"] == {"bedtime": "23:30", "wake": "07:00"}
+
+
+def test_measurement_sleep_tools_registered():
+    names = {t["name"] for t in ao._tool_schemas()}
+    assert {"log_measurement", "log_sleep"} <= names
+    handlers = ao._build_handlers({"client_id": "cid"})
+    assert "log_measurement" in handlers and "log_sleep" in handlers
+
+
 def test_log_meal_empty_items_blocked_by_validate():
     # Пустой приём пищи не доходит до persist: validate-гейт → просим уточнить.
     state = {"client_id": "cid"}

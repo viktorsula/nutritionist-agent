@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 SCHEMA_VERSION = 1
 
-KINDS = ("meal", "water", "weight", "wellbeing", "lab", "none")
+KINDS = ("meal", "water", "weight", "wellbeing", "lab", "measurement", "sleep", "none")
 SOURCES = ("text", "photo", "voice")
 CONFIDENCE = ("high", "medium", "low")
 MEAL_TYPES = ("breakfast", "lunch", "dinner", "snack", "all_day")
@@ -145,7 +145,27 @@ def empty_record(kind: str, source: str, confidence: str = "medium") -> Dict[str
         "weight_kg": None,
         "wellbeing": None,
         "labs": None,
+        "measurement": None,
+        "sleep": None,
     }
+
+
+def norm_hhmm(value: Any) -> Optional[str]:
+    """Приводит время к 'HH:MM' (принимает '23:30', '23.30', '2330'). Иначе None."""
+    if value is None:
+        return None
+    s = str(value).strip().replace(".", ":").replace("-", ":")
+    if ":" not in s and s.isdigit() and len(s) in (3, 4):
+        s = s.zfill(4)
+        s = f"{s[:2]}:{s[2:]}"
+    parts = s.split(":")
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return None
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return f"{h:02d}:{m:02d}"
 
 
 # ==========================================
@@ -227,6 +247,25 @@ def normalize(record: Dict[str, Any]) -> Dict[str, Any]:
             })
         r["labs"] = labs
 
+    # measurement (произвольный контролируемый показатель: metric_key + число)
+    meas = r.get("measurement")
+    if r["kind"] == "measurement" and isinstance(meas, dict):
+        key = str(meas.get("metric_key") or "").strip().lower()
+        r["measurement"] = {
+            "metric_key": key or None,
+            "value": _to_float(meas.get("value")),
+            "unit": (str(meas.get("unit")).strip() or None) if meas.get("unit") else None,
+        }
+    else:
+        r["measurement"] = meas if r["kind"] == "measurement" else None
+
+    # sleep (лёг/встал; продолжительность досчитывается при записи)
+    sl = r.get("sleep")
+    if r["kind"] == "sleep" and isinstance(sl, dict):
+        r["sleep"] = {"bedtime": norm_hhmm(sl.get("bedtime")), "wake": norm_hhmm(sl.get("wake"))}
+    else:
+        r["sleep"] = sl if r["kind"] == "sleep" else None
+
     return r
 
 
@@ -279,6 +318,16 @@ def validate(record: Dict[str, Any]) -> Dict[str, Any]:
         if not (r.get("labs")):
             needs_clarify = True
             issues.append("lab without values")
+    elif kind == "measurement":
+        m = r.get("measurement") or {}
+        if not (m.get("metric_key") and _to_float(m.get("value")) is not None):
+            needs_clarify = True
+            issues.append("measurement without key/value")
+    elif kind == "sleep":
+        s = r.get("sleep") or {}
+        if not (s.get("bedtime") and s.get("wake")):
+            needs_clarify = True
+            issues.append("sleep without bedtime/wake")
 
     return {
         "ok": not issues or needs_clarify,
