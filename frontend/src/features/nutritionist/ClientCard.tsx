@@ -14,7 +14,6 @@ import {
   useNutritionDaily,
 } from "../client/queries";
 import { useClientEventsRecent, useClientRow } from "./queries";
-import { TaskEditor } from "./TaskEditor";
 import { ReminderEditor } from "./ReminderEditor";
 import { MetricsCatalogEditor } from "./MetricsCatalogEditor";
 import { PlanEditor } from "./PlanEditor";
@@ -266,7 +265,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title={t("card.profile")}>
+        <Card title={t("card.profile_access")}>
           {profile.isLoading ? (
             <div className="text-xs text-gray-400">{t("loading")}</div>
           ) : (
@@ -284,6 +283,87 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               <Row label={t("card.restrictions")} value={list(p?.restrictions)} />
             </div>
           )}
+
+          {/* Доступ клиента — объединён с профилем */}
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.tg_section")}</div>
+            {client?.telegram_id ? (
+              <div className="space-y-2">
+                <div className="text-xs text-gray-700">
+                  {t("card.tg_linked")}: <span className="font-mono">{client.telegram_id}</span>
+                </div>
+                <Button type="button" onClick={unlinkTg} disabled={tgBusy}>
+                  {t("card.tg_unlink")}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-xs text-gray-500">{t("card.tg_not_linked")}</div>
+                <Button type="button" onClick={createTgLink} disabled={tgBusy}>
+                  {tgBusy ? t("card.tg_creating") : t("card.tg_create_link")}
+                </Button>
+                {tgLink && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-gray-500">{t("card.tg_link_hint")}</div>
+                    <div className="flex gap-2">
+                      <input
+                        readOnly
+                        value={tgLink}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="w-full rounded-md border px-2 py-1 font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(tgLink);
+                          setTgCopied(true);
+                        }}
+                      >
+                        {tgCopied ? t("card.tg_copied") : t("card.tg_copy")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {tgErr && <div className="mt-2 text-xs text-red-600">{tgErr}</div>}
+
+            <div className="mt-3 border-t pt-2">
+              <div className="mb-1 text-xs font-medium text-gray-600">{t("card.pw_title")}</div>
+              <div className="space-y-2">
+                <div className="text-[11px] text-gray-500">{t("card.pw_hint")}</div>
+                <Button type="button" onClick={resetPassword} disabled={pwBusy}>
+                  {pwBusy ? t("card.pw_resetting") : t("card.pw_reset")}
+                </Button>
+                {pwValue && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-gray-500">{t("card.pw_new")}</div>
+                    <div className="flex gap-2">
+                      <input
+                        readOnly
+                        value={pwValue}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="w-full rounded-md border px-2 py-1 font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(pwValue);
+                          setPwCopied(true);
+                        }}
+                      >
+                        {pwCopied ? t("card.pw_copied") : t("card.pw_copy")}
+                      </Button>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {pwEmailSent ? t("card.pw_email_sent") : t("card.pw_email_not_sent")}
+                    </div>
+                  </div>
+                )}
+                {pwErr && <div className="mt-2 text-xs text-red-600">{pwErr}</div>}
+              </div>
+            </div>
+          </div>
         </Card>
 
         <Card title={t("card.recommendations")}>
@@ -322,126 +402,46 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           </div>
         </Card>
 
-        <Card title={t("card.tasks_notes")}>
-          <TaskEditor clientId={clientId} />
-          <div className="mt-3 border-t pt-3">
-            <div className="mb-1 text-sm font-medium text-gray-700">{t("metrics.heading")}</div>
-            <MetricsCatalogEditor clientId={clientId} />
-          </div>
-          <div className="mt-3 border-t pt-3">
-            <ReminderEditor clientId={clientId} />
-          </div>
-          <div className="mt-3 border-t pt-2">
-            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
-            <textarea
-              className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
-              value={notes}
-              onChange={(e) => {
-                setNotes(e.target.value);
-                setNotesOk(false);
-              }}
-              placeholder={t("card.notes_placeholder")}
-            />
-            <div className="mt-2 flex items-center gap-2">
-              <Button type="button" onClick={saveNotes} disabled={savingNotes}>
-                {savingNotes ? t("card.saving") : t("card.save_notes")}
-              </Button>
-              {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
-            </div>
-          </div>
-        </Card>
-
-        <Card title={t("card.statuses")}>
+        <Card title={t("card.statuses_reports")}>
           <StatusEditor
             clientId={clientId}
             clientStatus={client?.client_status}
             paymentStatus={client?.payment_status}
             paidUntil={client?.paid_until}
           />
-        </Card>
-
-        <Card title={t("card.reports")}>
-          <ReportsCard clientId={clientId} />
-        </Card>
-
-        <Card title={t("card.access")}>
-          {client?.telegram_id ? (
-            <div className="space-y-2">
-              <div className="text-xs text-gray-700">
-                {t("card.tg_linked")}:{" "}
-                <span className="font-mono">{client.telegram_id}</span>
-              </div>
-              <Button type="button" onClick={unlinkTg} disabled={tgBusy}>
-                {t("card.tg_unlink")}
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-xs text-gray-500">{t("card.tg_not_linked")}</div>
-              <Button type="button" onClick={createTgLink} disabled={tgBusy}>
-                {tgBusy ? t("card.tg_creating") : t("card.tg_create_link")}
-              </Button>
-              {tgLink && (
-                <div className="space-y-1">
-                  <div className="text-[11px] text-gray-500">{t("card.tg_link_hint")}</div>
-                  <div className="flex gap-2">
-                    <input
-                      readOnly
-                      value={tgLink}
-                      onFocus={(e) => e.currentTarget.select()}
-                      className="w-full rounded-md border px-2 py-1 font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(tgLink);
-                        setTgCopied(true);
-                      }}
-                    >
-                      {tgCopied ? t("card.tg_copied") : t("card.tg_copy")}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {tgErr && <div className="mt-2 text-xs text-red-600">{tgErr}</div>}
-          <div className="mt-3 border-t pt-2">
-            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.pw_title")}</div>
-            <div className="space-y-2">
-              <div className="text-[11px] text-gray-500">{t("card.pw_hint")}</div>
-            <Button type="button" onClick={resetPassword} disabled={pwBusy}>
-              {pwBusy ? t("card.pw_resetting") : t("card.pw_reset")}
-            </Button>
-            {pwValue && (
-              <div className="space-y-1">
-                <div className="text-[11px] text-gray-500">{t("card.pw_new")}</div>
-                <div className="flex gap-2">
-                  <input
-                    readOnly
-                    value={pwValue}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="w-full rounded-md border px-2 py-1 font-mono text-xs"
-                  />
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(pwValue);
-                      setPwCopied(true);
-                    }}
-                  >
-                    {pwCopied ? t("card.pw_copied") : t("card.pw_copy")}
-                  </Button>
-                </div>
-                <div className="text-[11px] text-gray-500">
-                  {pwEmailSent ? t("card.pw_email_sent") : t("card.pw_email_not_sent")}
-                </div>
-              </div>
-            )}
-          </div>
-            {pwErr && <div className="mt-2 text-xs text-red-600">{pwErr}</div>}
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.reports")}</div>
+            <ReportsCard clientId={clientId} />
           </div>
         </Card>
+
+        <div className="lg:col-span-2">
+          <Card title={t("card.tasks_notes")}>
+            <div className="mb-1 text-sm font-medium text-gray-700">{t("metrics.heading")}</div>
+            <MetricsCatalogEditor clientId={clientId} />
+            <div className="mt-3 border-t pt-3">
+              <ReminderEditor clientId={clientId} />
+            </div>
+            <div className="mt-3 border-t pt-2">
+              <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
+              <textarea
+                className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
+                value={notes}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  setNotesOk(false);
+                }}
+                placeholder={t("card.notes_placeholder")}
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <Button type="button" onClick={saveNotes} disabled={savingNotes}>
+                  {savingNotes ? t("card.saving") : t("card.save_notes")}
+                </Button>
+                {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
 
       <Card title={t("card.weight_chart")}>
