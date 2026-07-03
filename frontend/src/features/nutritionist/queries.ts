@@ -165,6 +165,12 @@ export interface PlanRow {
   effective_from: string;
   effective_to: string | null;
   is_active: boolean;
+  plan_json: {
+    description?: string | null;
+    target_calories?: number | null;
+    restrictions?: string[] | null;
+  } | null;
+  supplements_json: { items?: string[] } | null;
 }
 
 /** История планов питания клиента (все версии, свежие сверху). */
@@ -175,7 +181,7 @@ export function useClientPlans(clientId: string) {
     queryFn: async (): Promise<PlanRow[]> => {
       const { data, error } = await supabase
         .from("nutrition_plans")
-        .select("id,version,title,effective_from,effective_to,is_active")
+        .select("id,version,title,effective_from,effective_to,is_active,plan_json,supplements_json")
         .eq("client_id", clientId)
         .order("version", { ascending: false });
       if (error) throw error;
