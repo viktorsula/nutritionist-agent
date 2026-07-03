@@ -123,5 +123,98 @@ class TestRunNutritionistAlerts(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_called()
 
 
+class TestReminderDueToday(unittest.TestCase):
+    def _local(self, y, mo, d, h=8, mi=0):
+        return pytz.timezone("Asia/Dubai").localize(datetime(y, mo, d, h, mi))
+
+    def test_daily_always_due(self):
+        self.assertTrue(S._reminder_due_today({"recurrence": "daily"}, self._local(2026, 6, 24)))
+
+    def test_weekly_matches_weekday(self):
+        now = self._local(2026, 6, 24)  # среда
+        self.assertTrue(S._reminder_due_today({"recurrence": "weekly", "weekday": now.weekday()}, now))
+        self.assertFalse(S._reminder_due_today({"recurrence": "weekly", "weekday": (now.weekday() + 1) % 7}, now))
+
+    def test_once_matches_date(self):
+        now = self._local(2026, 6, 24)
+        self.assertTrue(S._reminder_due_today({"recurrence": "once", "remind_date": "2026-06-24"}, now))
+        self.assertFalse(S._reminder_due_today({"recurrence": "once", "remind_date": "2026-06-25"}, now))
+        self.assertFalse(S._reminder_due_today({"recurrence": "once", "remind_date": None}, now))
+
+
+class TestFallbackReminderText(unittest.TestCase):
+    def test_single(self):
+        self.assertEqual(S._fallback_reminder_text(["Выпить воды"]), "🔔 Напоминание: Выпить воды")
+
+    def test_multiple_lists_all(self):
+        text = S._fallback_reminder_text(["Выпить воды", "Прислать вес"])
+        self.assertIn("• Выпить воды", text)
+        self.assertIn("• Прислать вес", text)
+
+
+class TestComposeReminderMessage(unittest.TestCase):
+    def test_uses_llm_when_available(self):
+        with patch("utils.llm.call_llm", return_value={"content": "Доброе утро! Не забудьте про воду 💧"}), \
+             patch("prompts.load_prompt", return_value="sys"):
+            self.assertEqual(S.compose_reminder_message(["Выпить воды"]), "Доброе утро! Не забудьте про воду 💧")
+
+    def test_falls_back_on_llm_error(self):
+        with patch("utils.llm.call_llm", side_effect=RuntimeError("429")), \
+             patch("prompts.load_prompt", return_value="sys"):
+            self.assertEqual(S.compose_reminder_message(["Выпить воды"]), "🔔 Напоминание: Выпить воды")
+
+
+class TestRunReminders(unittest.IsolatedAsyncioTestCase):
+    def _reminder(self, rid, title, at="08:00:00", rec="daily", **extra):
+        r = {"id": rid, "client_id": "c1", "title": title, "remind_at": at, "recurrence": rec,
+             "weekday": None, "remind_date": None, "clients": {"telegram_id": 777, "timezone": "Asia/Dubai"}}
+        r.update(extra)
+        return r
+
+    async def _run(self, reminders, *, exists=False, utc=(4, 0), configured=True):
+        bot = AsyncMock()
+        recorded = []
+        # 04:00 UTC = 08:00 Asia/Dubai
+        fake_now = datetime(2026, 6, 24, utc[0], utc[1])
+        with patch("api.scheduler.datetime") as mock_dt, \
+             patch("api.telegram_webhook.is_configured", return_value=configured), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_active_reminders", return_value=reminders), \
+             patch("database.queries.occurrence_exists", return_value=exists), \
+             patch("database.queries.record_occurrence", side_effect=lambda *a: recorded.append(a)), \
+             patch("api.scheduler.compose_reminder_message", side_effect=lambda titles: " | ".join(titles)):
+            mock_dt.utcnow.return_value = fake_now
+            await S.run_reminders()
+        return bot, recorded
+
+    async def test_batches_same_time_into_one_message(self):
+        reminders = [self._reminder("r1", "Выпить воды"), self._reminder("r2", "Прислать вес")]
+        bot, recorded = await self._run(reminders)
+        self.assertEqual(bot.send_message.call_count, 1)  # один пакет
+        text = bot.send_message.call_args.kwargs["text"]
+        self.assertIn("Выпить воды", text)
+        self.assertIn("Прислать вес", text)
+        self.assertEqual(len(recorded), 2)  # оба срабатывания зафиксированы
+
+    async def test_dedup_skips_already_sent(self):
+        bot, _ = await self._run([self._reminder("r1", "Выпить воды")], exists=True)
+        bot.send_message.assert_not_called()
+
+    async def test_wrong_minute_no_send(self):
+        bot, _ = await self._run([self._reminder("r1", "Выпить воды")], utc=(4, 5))  # 08:05, не 08:00
+        bot.send_message.assert_not_called()
+
+    async def test_weekly_wrong_day_no_send(self):
+        # 2026-06-24 среда (weekday 2); ставим понедельник (0) → не шлём
+        bot, _ = await self._run([self._reminder("r1", "Замеры", rec="weekly", weekday=0)])
+        bot.send_message.assert_not_called()
+
+    async def test_skips_client_without_telegram(self):
+        r = self._reminder("r1", "Выпить воды")
+        r["clients"] = {"telegram_id": None, "timezone": "Asia/Dubai"}
+        bot, _ = await self._run([r])
+        bot.send_message.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

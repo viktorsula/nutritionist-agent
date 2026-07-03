@@ -165,6 +165,53 @@ class TestApi(unittest.TestCase):
             r = self.client.post("/clients/c-9/status", json={})
         self.assertEqual(r.status_code, 400)
 
+    # --- /clients/{id}/reminders (напоминания, Фаза 1) ---
+    def test_reminders_list_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.get("/clients/c-1/reminders")
+        self.assertEqual(r.status_code, 403)
+
+    def test_reminders_create_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.post("/clients/c-1/reminders", json={"title": "x", "remind_at": "07:00"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_reminders_create_ok_and_audits(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.create_reminder", return_value={"id": "rem-1"}) as cr, \
+             patch("database.queries.write_audit_log") as audit:
+            r = self.client.post("/clients/c-9/reminders",
+                                 json={"title": "Прислать вес", "remind_at": "07:00", "recurrence": "daily"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(cr.call_args.kwargs["title"], "Прислать вес")
+        self.assertEqual(audit.call_args.kwargs["action"], "create_reminder")
+        self.assertEqual(audit.call_args.kwargs["entity_type"], "reminder")
+
+    def test_reminders_create_weekly_without_weekday_400(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.post("/clients/c-9/reminders",
+                             json={"title": "Замеры", "remind_at": "18:00", "recurrence": "weekly"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_reminders_create_empty_title_400(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.post("/clients/c-9/reminders", json={"title": "  ", "remind_at": "07:00"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_reminders_patch_empty_400(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.patch("/clients/c-9/reminders/rem-1", json={})
+        self.assertEqual(r.status_code, 400)
+
+    def test_reminders_delete_ok_and_audits(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.delete_reminder") as dr, \
+             patch("database.queries.write_audit_log") as audit:
+            r = self.client.delete("/clients/c-9/reminders/rem-1")
+        self.assertEqual(r.status_code, 200)
+        dr.assert_called_once_with("rem-1")
+        self.assertEqual(audit.call_args.kwargs["action"], "delete_reminder")
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

@@ -57,6 +57,13 @@ PROMPTS: List[Dict[str, str]] = [
         "llm": "Groq",
     },
     {
+        "key": "client/reminder_message",
+        "label_ru": "Текст напоминания клиенту",
+        "label_en": "Client reminder message",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Groq",
+    },
+    {
         "key": "nutritionist/orchestrator_system",
         "label_ru": "Оркестратор нутрициолога (главный промпт)",
         "label_en": "Nutritionist orchestrator (main)",
