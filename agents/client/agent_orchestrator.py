@@ -477,6 +477,34 @@ def _tool_schemas() -> List[Dict[str, Any]]:
             },
         },
         {
+            "name": "log_measurement",
+            "description": "Записать контролируемый показатель клиента: замер тела "
+                           "(metric_key: waist=талия, neck=шея, hips=бёдра, weight=вес) или "
+                           "произвольный показатель нутрициолога (пульс, стресс и т.п.). Значение — число.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "metric_key": {"type": "string", "description": "ключ показателя (waist/neck/hips/weight/пульс…)"},
+                    "value": {"type": "number"},
+                    "unit": {"type": "string", "description": "напр. 'см', 'уд/мин'"},
+                },
+                "required": ["metric_key", "value"],
+            },
+        },
+        {
+            "name": "log_sleep",
+            "description": "Записать сон клиента: во сколько лёг и во сколько встал ('HH:MM'). "
+                           "Продолжительность считается автоматически.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "bedtime": {"type": "string", "description": "время отхода ко сну, 'HH:MM'"},
+                    "wake": {"type": "string", "description": "время подъёма, 'HH:MM'"},
+                },
+                "required": ["bedtime", "wake"],
+            },
+        },
+        {
             "name": "get_client_data",
             "description": "Получить данные клиента для ответа на вопрос о его показателях/плане/дневнике. "
                            "scope='diary' — недавние записи дневника (что ел, сколько воды, вес, самочувствие) "
@@ -563,6 +591,21 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         ]
         return _persist({"kind": "lab", "source": source, "labs": labs}, "не понял показатели анализов")
 
+    def log_measurement(inp: Dict[str, Any]) -> str:
+        return _persist(
+            {"kind": "measurement", "source": source,
+             "measurement": {"metric_key": inp.get("metric_key"), "value": inp.get("value"),
+                             "unit": inp.get("unit")}},
+            "не понял показатель или значение",
+        )
+
+    def log_sleep(inp: Dict[str, Any]) -> str:
+        return _persist(
+            {"kind": "sleep", "source": source,
+             "sleep": {"bedtime": inp.get("bedtime"), "wake": inp.get("wake")}},
+            "не понял время сна",
+        )
+
     def get_client_data(inp: Dict[str, Any]) -> Any:
         from database import queries
         cid = state["client_id"]
@@ -600,6 +643,8 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         "log_weight": log_weight,
         "log_wellbeing": log_wellbeing,
         "log_labs": log_labs,
+        "log_measurement": log_measurement,
+        "log_sleep": log_sleep,
         "get_client_data": get_client_data,
         "search_knowledge": search_knowledge,
     }

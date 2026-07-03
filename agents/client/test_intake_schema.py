@@ -259,5 +259,42 @@ class TestCoerceToRecord(unittest.TestCase):
         self.assertEqual(rec["meal"]["total"]["sugar_g"], 1.0)
 
 
+class TestNormHhmm(unittest.TestCase):
+    def test_variants(self):
+        self.assertEqual(s.norm_hhmm("23:30"), "23:30")
+        self.assertEqual(s.norm_hhmm("23.30"), "23:30")
+        self.assertEqual(s.norm_hhmm("2330"), "23:30")
+        self.assertEqual(s.norm_hhmm("7:00"), "07:00")
+        self.assertEqual(s.norm_hhmm("700"), "07:00")
+
+    def test_invalid(self):
+        self.assertIsNone(s.norm_hhmm("25:00"))
+        self.assertIsNone(s.norm_hhmm("notime"))
+        self.assertIsNone(s.norm_hhmm(None))
+
+
+class TestMeasurementSleepSchema(unittest.TestCase):
+    def test_normalize_measurement_lowercases_and_floats(self):
+        r = s.normalize({"kind": "measurement",
+                         "measurement": {"metric_key": "Waist", "value": "80,5", "unit": "см"}})
+        self.assertEqual(r["measurement"], {"metric_key": "waist", "value": 80.5, "unit": "см"})
+
+    def test_validate_measurement_needs_value(self):
+        self.assertTrue(s.validate(s.normalize(
+            {"kind": "measurement", "measurement": {"metric_key": "waist"}}))["needs_clarify"])
+        self.assertFalse(s.validate(s.normalize(
+            {"kind": "measurement", "measurement": {"metric_key": "waist", "value": 80}}))["needs_clarify"])
+
+    def test_normalize_sleep_times(self):
+        r = s.normalize({"kind": "sleep", "sleep": {"bedtime": "2330", "wake": "7:00"}})
+        self.assertEqual(r["sleep"], {"bedtime": "23:30", "wake": "07:00"})
+
+    def test_validate_sleep_needs_both_times(self):
+        self.assertTrue(s.validate(s.normalize(
+            {"kind": "sleep", "sleep": {"bedtime": "23:30"}}))["needs_clarify"])
+        self.assertFalse(s.validate(s.normalize(
+            {"kind": "sleep", "sleep": {"bedtime": "23:30", "wake": "07:00"}}))["needs_clarify"])
+
+
 if __name__ == "__main__":
     unittest.main()

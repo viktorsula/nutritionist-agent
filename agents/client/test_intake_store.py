@@ -110,6 +110,67 @@ class TestPersistLab(unittest.TestCase):
         self.assertEqual(state["saved_labs"][0]["indicator"], "холестерин")
 
 
+class TestPersistMeasurement(unittest.TestCase):
+    def test_physical_goes_to_measurements(self):
+        rec = {"kind": "measurement", "source": "text",
+               "measurement": {"metric_key": "waist", "value": 80, "unit": "см"}}
+        with patch("database.queries.insert_measurement") as ins:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertEqual(out, "measurement")
+        self.assertEqual(ins.call_args.kwargs["waist"], 80.0)
+        self.assertEqual(ins.call_args.kwargs["client_id"], "c")
+
+    def test_custom_goes_to_client_metrics(self):
+        rec = {"kind": "measurement", "source": "text",
+               "measurement": {"metric_key": "пульс", "value": 62, "unit": "уд/мин"}}
+        with patch("database.queries.insert_client_metric") as icm:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertEqual(out, "measurement")
+        self.assertEqual(icm.call_args.kwargs["metric_key"], "пульс")
+        self.assertEqual(icm.call_args.kwargs["category"], "custom")
+        self.assertEqual(icm.call_args.kwargs["value_num"], 62.0)
+
+    def test_missing_value_is_none(self):
+        rec = {"kind": "measurement", "source": "text", "measurement": {"metric_key": "waist"}}
+        with patch("database.queries.insert_measurement") as ins:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertIsNone(out)
+        ins.assert_not_called()
+
+
+class TestPersistSleep(unittest.TestCase):
+    def test_computes_duration_over_midnight(self):
+        rec = {"kind": "sleep", "source": "text", "sleep": {"bedtime": "23:30", "wake": "07:00"}}
+        with patch("database.queries.insert_client_metric") as icm:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertEqual(out, "sleep")
+        self.assertEqual(icm.call_args.kwargs["metric_key"], "sleep")
+        self.assertEqual(icm.call_args.kwargs["value_num"], 7.5)
+        self.assertEqual(icm.call_args.kwargs["meta"], {"bedtime": "23:30", "wake": "07:00"})
+
+    def test_same_evening_duration(self):
+        rec = {"kind": "sleep", "source": "text", "sleep": {"bedtime": "22:00", "wake": "06:00"}}
+        with patch("database.queries.insert_client_metric") as icm:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertEqual(out, "sleep")
+        self.assertEqual(icm.call_args.kwargs["value_num"], 8.0)
+
+    def test_missing_times_is_none(self):
+        rec = {"kind": "sleep", "source": "text", "sleep": {"bedtime": "23:00"}}
+        with patch("database.queries.insert_client_metric") as icm:
+            out = intake_store.persist_record(_state(), rec)
+        self.assertIsNone(out)
+        icm.assert_not_called()
+
+
+class TestMetricCategory(unittest.TestCase):
+    def test_categories(self):
+        self.assertEqual(intake_store.metric_category("waist"), "physical")
+        self.assertEqual(intake_store.metric_category("weight"), "physical")
+        self.assertEqual(intake_store.metric_category("sleep"), "sleep")
+        self.assertEqual(intake_store.metric_category("пульс"), "custom")
+
+
 class TestPersistNone(unittest.TestCase):
     def test_none_kind_returns_none(self):
         rec = from_diary_extract({"kind": "other"})

@@ -39,7 +39,38 @@ def persist_record(state: Dict[str, Any], record: Dict[str, Any]) -> Optional[st
         return _persist_wellbeing(state, record, mode)
     if kind == "lab":
         return _persist_lab(state, record)
+    if kind == "measurement":
+        return _persist_measurement(state, record)
+    if kind == "sleep":
+        return _persist_sleep(state, record)
     return None
+
+
+# Показатели, у которых есть колонка в measurements (пишем туда, а не в client_metrics).
+PHYSICAL_METRIC_COLUMNS = ("weight", "waist", "neck", "hips")
+
+
+def metric_category(metric_key: str) -> str:
+    """Категория показателя по ключу → куда писать значение."""
+    if metric_key in PHYSICAL_METRIC_COLUMNS:
+        return "physical"
+    if metric_key == "sleep":
+        return "sleep"
+    return "custom"
+
+
+def _sleep_duration_hours(bedtime: str, wake: str) -> Optional[float]:
+    """Продолжительность сна в часах по 'HH:MM' лёг/встал (учёт перехода через полночь)."""
+    try:
+        bh, bm = (int(x) for x in bedtime.split(":"))
+        wh, wm = (int(x) for x in wake.split(":"))
+    except (ValueError, AttributeError):
+        return None
+    bed = bh * 60 + bm
+    up = wh * 60 + wm
+    if up <= bed:
+        up += 24 * 60  # встал на следующие сутки
+    return round((up - bed) / 60.0, 2)
 
 
 def _persist_meal(state: Dict[str, Any], record: Dict[str, Any], mode: str) -> Optional[str]:
@@ -209,3 +240,56 @@ def _persist_lab(state: Dict[str, Any], record: Dict[str, Any]) -> Optional[str]
 
     state["saved_labs"] = saved
     return "labs"
+
+
+def _persist_measurement(state: Dict[str, Any], record: Dict[str, Any]) -> Optional[str]:
+    """Контролируемый показатель → measurements (physical) или client_metrics (custom)."""
+    from database import queries
+
+    client_id = state["client_id"]
+    m = record.get("measurement") or {}
+    key = m.get("metric_key")
+    value = m.get("value")
+    if not key or value is None:
+        return None
+
+    category = metric_category(key)
+    try:
+        if category == "physical":
+            queries.insert_measurement(client_id=client_id, **{key: value})
+        else:
+            queries.insert_client_metric(
+                client_id=client_id, metric_key=key, category=category,
+                value_num=value, unit=m.get("unit"),
+            )
+    except Exception as e:
+        logger.error(f"persist_measurement failed for '{key}': {e}")
+        return None
+
+    state["saved_metric"] = {"metric_key": key, "value": value, "unit": m.get("unit")}
+    return "measurement"
+
+
+def _persist_sleep(state: Dict[str, Any], record: Dict[str, Any]) -> Optional[str]:
+    """Сон: лёг/встал → client_metrics (metric_key='sleep', продолжительность в часах + meta)."""
+    from database import queries
+
+    client_id = state["client_id"]
+    s = record.get("sleep") or {}
+    bedtime = s.get("bedtime")
+    wake = s.get("wake")
+    if not bedtime or not wake:
+        return None
+
+    duration = _sleep_duration_hours(bedtime, wake)
+    try:
+        queries.insert_client_metric(
+            client_id=client_id, metric_key="sleep", category="sleep",
+            value_num=duration, unit="ч", meta={"bedtime": bedtime, "wake": wake},
+        )
+    except Exception as e:
+        logger.error(f"persist_sleep failed: {e}")
+        return None
+
+    state["saved_sleep"] = {"bedtime": bedtime, "wake": wake, "duration_h": duration}
+    return "sleep"
