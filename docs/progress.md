@@ -1,8 +1,49 @@
 # Журнал прогресса проекта
 
-## Статус: В разработке → ПРОД (оркестраторы + графики питания + редизайн кабинета — всё влито, #49–#57)
+## Статус: В разработке → ПРОД (напоминания с контролём ответа — Фаза 1 + Фаза 2 влиты, #59–#62)
 Последнее обновление: 3 июля 2026
-Сессия: Напоминания клиенту — Фаза 1 (ветка feat/reminders-phase1)
+Сессия: Напоминания клиенту — Фаза 1 (#59) + Фаза 2 (2A #60 / 2B #61 / 2C #62)
+
+### Сессия 3 июля 2026 — Напоминания: Фаза 2 (контроль ответа + контролируемые показатели, #60–#62)
+
+Фаза 2 завершена тремя слайсами поверх Фазы 1 (напоминания живут в блоке «Задачи и заметки»).
+Каждый слайс — отдельный PR, влит в main. Спецификация: `docs/spec_reminders.md`.
+
+**Слайс 2A — контролируемые показатели (фундамент, PR #60, миграция 014 применена).**
+Единая модель произвольных показателей клиента (по образцу `tracked_lab_indicators`).
+- Миграция `014`: `client_profiles.controlled_metrics` (JSONB каталог) + таблица `client_metrics`
+  (metric_key/value_num/value_text/unit/meta/measured_at) + RLS backend-only.
+- `intake_schema`: kinds `measurement`/`sleep` + `norm_hhmm`. `intake_store`: `_persist_measurement`
+  (роутинг physical weight/waist/neck/hips→`measurements`, custom→`client_metrics`) + `_persist_sleep`
+  (лёг/встал → продолжительность, **переход через полночь**, meta); `metric_category()`.
+- queries `insert_client_metric`/`get_client_metrics`. Оркестратор: инструменты
+  `log_measurement(key,value,unit)` + `log_sleep(bedtime,wake)` + промпт. 355 passed.
+
+**Слайс 2B — контур ответа (PR #61, миграция 015 применена).**
+Напоминание может ЖДАТЬ ответа определённого типа; планировщик отслеживает срабатывание.
+- Миграция `015`: `reminders.expected_response` (ключ показателя|`text`|NULL) + жизненный цикл
+  `reminder_occurrences` (status sent/answered/expired, followups_sent, next_followup_at,
+  resolved_at, response_ref).
+- Планировщик `run_reminder_followups()` в тике: **детект** (событие нужного типа после `sent_at`
+  → `answered`) → **догон** (`next_followup_at`, до `max_followups`) → **«сдались»**
+  (`give_up_hours` → `expired` + low-severity `reminder_unanswered` в панель, без Telegram-спама).
+- Профили кадэнса `DEFAULT_REMINDER_CADENCE` (код) + override `system_settings.reminder_cadence`;
+  формула `give_up = sent + окно` (< интервала recurrence → догон не заходит за следующее срабатывание).
+- Детект по типу: weight/waist/neck/hips→`measurements`, sleep/custom→`client_metrics`,
+  labs→`lab_results`, text/None→любое сообщение клиента (`has_*_since`). 384 passed.
+
+**Слайс 2C — фронт показателей + пикер (PR #62, без новой миграции).**
+- queries `get/set_controlled_metrics`; API `GET/PUT /clients/{id}/controlled-metrics` (аудит,
+  нормализация category по ключу).
+- Фронт `MetricsCatalogEditor` (пресеты вес/талия/шея/бёдра/сон + произвольные) в блоке «Задачи и
+  заметки»; `ReminderEditor` — при «нужен ответ» пикер ожидаемого показателя (каталог + «Любой
+  ответ»); бейдж ✋+показатель. i18n ru/en. 386 passed, tsc + 19 vitest.
+
+**E2E-путь замкнут:** каталог показателя → напоминание «нужен ответ=Вес» → ответ клиента (закрытие)
+или молчание (повтор → алерт). Встроенные показатели (вес/талия/шея/бёдра/сон) — детерминированно.
+**⚠️ Follow-up:** детект ПРОИЗВОЛЬНЫХ показателей best-effort — каталог `controlled_metrics` пока не
+подаётся в промпт оркестратора (built-in ключи известны, custom — по совпадению ключа). Улучшение —
+подать каталог клиента в контекст оркестратора. Опц.: графики `client_metrics` (сон/произвольные).
 
 ### Сессия 3 июля 2026 — Напоминания клиенту в Telegram, Фаза 1 (ветка feat/reminders-phase1)
 
