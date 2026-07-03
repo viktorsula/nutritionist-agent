@@ -181,7 +181,7 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
              patch("api.telegram_webhook.get_bot", return_value=bot), \
              patch("database.queries.get_active_reminders", return_value=reminders), \
              patch("database.queries.occurrence_exists", return_value=exists), \
-             patch("database.queries.record_occurrence", side_effect=lambda *a: recorded.append(a)), \
+             patch("database.queries.record_occurrence", side_effect=lambda *a, **k: recorded.append(a)), \
              patch("api.scheduler.compose_reminder_message", side_effect=lambda titles: " | ".join(titles)):
             mock_dt.utcnow.return_value = fake_now
             await S.run_reminders()
@@ -214,6 +214,108 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
         r["clients"] = {"telegram_id": None, "timezone": "Asia/Dubai"}
         bot, _ = await self._run([r])
         bot.send_message.assert_not_called()
+
+
+class TestCadence(unittest.TestCase):
+    def test_cadence_keys(self):
+        self.assertEqual(S._cadence_key("weight"), "weight")
+        self.assertEqual(S._cadence_key("waist"), "measurement")
+        self.assertEqual(S._cadence_key("sleep"), "sleep")
+        self.assertEqual(S._cadence_key("labs"), "labs")
+        self.assertEqual(S._cadence_key("text"), "text")
+        self.assertEqual(S._cadence_key(None), "text")
+        self.assertEqual(S._cadence_key("пульс"), "default")
+
+    def test_resolve_cadence_uses_code_defaults(self):
+        with patch("database.queries.get_setting", return_value=None):
+            self.assertEqual(S.resolve_cadence("weight")["give_up_hours"], 14)
+            self.assertEqual(S.resolve_cadence("labs")["give_up_hours"], 168)
+
+    def test_resolve_cadence_db_override_merges(self):
+        with patch("database.queries.get_setting", return_value={"weight": {"give_up_hours": 6}}):
+            prof = S.resolve_cadence("weight")
+            self.assertEqual(prof["give_up_hours"], 6)      # переопределено
+            self.assertEqual(prof["followup_hours"], 3)     # дефолт сохранён
+
+
+class TestDetectResponse(unittest.TestCase):
+    def test_routes_by_type(self):
+        with patch("database.queries.has_measurement_since", return_value=True) as hm:
+            self.assertTrue(S._detect_response("c", "weight", "2026-06-24T07:00:00"))
+            self.assertEqual(hm.call_args.args[1], "weight")
+        with patch("database.queries.has_client_metric_since", return_value=True) as hcm:
+            self.assertTrue(S._detect_response("c", "sleep", "2026-06-24T07:00:00"))
+            self.assertEqual(hcm.call_args.args[1], "sleep")
+        with patch("database.queries.has_lab_result_since", return_value=False):
+            self.assertFalse(S._detect_response("c", "labs", "2026-06-24T07:00:00"))
+        with patch("database.queries.has_client_message_since", return_value=True):
+            self.assertTrue(S._detect_response("c", "text", "2026-06-24T07:00:00"))
+            self.assertTrue(S._detect_response("c", None, "2026-06-24T07:00:00"))
+
+
+class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
+    def _occ(self, sent="2026-06-24T04:00:00", nfu=None, followups=0, expected="weight"):
+        return {
+            "id": "occ1", "reminder_id": "r1", "client_id": "c1", "sent_at": sent,
+            "next_followup_at": nfu, "followups_sent": followups,
+            "reminders": {"title": "Прислать вес", "expected_response": expected,
+                          "requires_response": True, "active": True},
+            "clients": {"telegram_id": 777, "timezone": "Asia/Dubai"},
+        }
+
+    async def _run(self, occ, *, detected=False, utc=(4, 0)):
+        bot = AsyncMock()
+        fake_now = datetime(2026, 6, 24, utc[0], utc[1])
+        with patch("api.scheduler.datetime") as mock_dt, \
+             patch("api.telegram_webhook.is_configured", return_value=True), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_open_occurrences", return_value=[occ]), \
+             patch("api.scheduler._detect_response", return_value=detected), \
+             patch("api.scheduler.compose_reminder_message", side_effect=lambda t: " | ".join(t)), \
+             patch("database.queries.mark_occurrence_answered") as answered, \
+             patch("database.queries.mark_occurrence_expired") as expired, \
+             patch("database.queries.bump_occurrence_followup") as bumped, \
+             patch("database.queries.log_client_event") as logged:
+            mock_dt.utcnow.return_value = fake_now
+            mock_dt.fromisoformat = datetime.fromisoformat
+            await S.run_reminder_followups()
+        return bot, answered, expired, bumped, logged
+
+    async def test_answer_closes_occurrence(self):
+        bot, answered, expired, bumped, _ = await self._run(self._occ(), detected=True)
+        answered.assert_called_once()
+        expired.assert_not_called()
+        bumped.assert_not_called()
+        bot.send_message.assert_not_called()
+
+    async def test_give_up_expires_and_alerts(self):
+        # sent 04:00 UTC, give_up 14ч (weight) → 18:00 UTC; сейчас 19:00 UTC → просрочка
+        bot, answered, expired, _, logged = await self._run(self._occ(), utc=(19, 0))
+        expired.assert_called_once()
+        self.assertEqual(logged.call_args.kwargs["event_type"], "reminder_unanswered")
+        self.assertEqual(logged.call_args.kwargs["severity"], "low")
+        answered.assert_not_called()
+
+    async def test_followup_sent_when_due(self):
+        # nfu 07:00 UTC, сейчас 08:00 UTC, followups 0 < max 1 → повтор
+        occ = self._occ(nfu="2026-06-24T07:00:00")
+        bot, _, expired, bumped, _ = await self._run(occ, utc=(8, 0))
+        bot.send_message.assert_called_once()
+        bumped.assert_called_once()
+        expired.assert_not_called()
+
+    async def test_no_followup_before_time(self):
+        occ = self._occ(nfu="2026-06-24T07:00:00")
+        bot, _, _, bumped, _ = await self._run(occ, utc=(6, 0))  # ещё рано
+        bot.send_message.assert_not_called()
+        bumped.assert_not_called()
+
+    async def test_skips_non_requires_response(self):
+        occ = self._occ()
+        occ["reminders"]["requires_response"] = False
+        bot, answered, expired, bumped, _ = await self._run(occ)
+        for m in (answered, expired, bumped):
+            m.assert_not_called()
 
 
 if __name__ == "__main__":

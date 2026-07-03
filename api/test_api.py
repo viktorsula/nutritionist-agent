@@ -187,6 +187,17 @@ class TestApi(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["action"], "create_reminder")
         self.assertEqual(audit.call_args.kwargs["entity_type"], "reminder")
 
+    def test_reminders_create_passes_expected_response(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.create_reminder", return_value={"id": "rem-2"}) as cr, \
+             patch("database.queries.write_audit_log"):
+            r = self.client.post("/clients/c-9/reminders",
+                                 json={"title": "Прислать вес", "remind_at": "07:00",
+                                       "requires_response": True, "expected_response": "weight"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(cr.call_args.kwargs["requires_response"], True)
+        self.assertEqual(cr.call_args.kwargs["expected_response"], "weight")
+
     def test_reminders_create_weekly_without_weekday_400(self):
         app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
         r = self.client.post("/clients/c-9/reminders",
