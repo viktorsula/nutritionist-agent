@@ -518,12 +518,12 @@ def _tool_schemas() -> List[Dict[str, Any]]:
         {
             "name": "log_measurement",
             "description": "Записать контролируемый показатель клиента: замер тела "
-                           "(metric_key: waist=талия, neck=шея, hips=бёдра, weight=вес) или "
+                           "(metric_key: waist=талия, neck=шея, hips=бёдра, chest=грудь, weight=вес) или "
                            "произвольный показатель нутрициолога (пульс, стресс и т.п.). Значение — число.",
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "metric_key": {"type": "string", "description": "ключ показателя (waist/neck/hips/weight/пульс…)"},
+                    "metric_key": {"type": "string", "description": "ключ показателя (waist/neck/hips/chest/weight/пульс…)"},
                     "value": {"type": "number"},
                     "unit": {"type": "string", "description": "напр. 'см', 'уд/мин'"},
                 },

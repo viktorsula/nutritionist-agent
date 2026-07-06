@@ -545,7 +545,10 @@ async def run_reminder_followups() -> None:
             logger.info(f"scheduler: напоминание просрочено (без ответа) occ={occ['id']} meal={is_meal}")
             continue
 
-        # 3) Пора повторить (не превысив макс повторов).
+        # 3) Пора повторить (не превысив макс повторов). Еду НЕ пингуем внутри дня —
+        #    приём пищи привязан к моменту; контроль = детект + дедлайн-алерт (шаг 2), без догона.
+        if expected in MEAL_TYPES:
+            continue
         telegram_id = (occ.get("clients") or {}).get("telegram_id")
         nfu = _parse_ts(occ.get("next_followup_at"))
         if telegram_id and nfu and now >= nfu and (occ.get("followups_sent") or 0) < profile["max_followups"]:

@@ -47,7 +47,7 @@ def persist_record(state: Dict[str, Any], record: Dict[str, Any]) -> Optional[st
 
 
 # Показатели, у которых есть колонка в measurements (пишем туда, а не в client_metrics).
-PHYSICAL_METRIC_COLUMNS = ("weight", "waist", "neck", "hips")
+PHYSICAL_METRIC_COLUMNS = ("weight", "waist", "neck", "hips", "chest")
 
 
 def metric_category(metric_key: str) -> str:

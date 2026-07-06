@@ -387,6 +387,15 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
         expired.assert_not_called()
         logged.assert_not_called()
 
+    async def test_meal_no_intraday_followup_ping(self):
+        # Обед: время догона настало (nfu 07:00, сейчас 08:00 UTC), дедлайн ещё не прошёл —
+        # еду внутри дня НЕ пингуем (контроль = детект + дедлайн-алерт, без догона).
+        occ = self._occ(expected="lunch", deadline="17:00", nfu="2026-06-24T07:00:00")
+        bot, _, expired, bumped, _ = await self._run(occ, utc=(8, 0))
+        bot.send_message.assert_not_called()
+        bumped.assert_not_called()
+        expired.assert_not_called()
+
 
 class TestNoResponseCheck(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
