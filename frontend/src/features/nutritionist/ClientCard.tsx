@@ -264,7 +264,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
       </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title={t("card.profile_access")}>
+        <Card title={t("card.profile_client")}>
           {profile.isLoading ? (
             <div className="text-xs text-gray-400">{t("loading")}</div>
           ) : (
@@ -282,6 +282,17 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               <Row label={t("card.restrictions")} value={list(p?.restrictions)} />
             </div>
           )}
+
+          {/* Статусы клиента — объединены с профилем */}
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.statuses")}</div>
+            <StatusEditor
+              clientId={clientId}
+              clientStatus={client?.client_status}
+              paymentStatus={client?.payment_status}
+              paidUntil={client?.paid_until}
+            />
+          </div>
 
           {/* Доступ клиента — объединён с профилем */}
           <div className="mt-3 border-t pt-3">
@@ -363,6 +374,12 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               </div>
             </div>
           </div>
+
+          {/* Отчёты — объединены с профилем */}
+          <div className="mt-3 border-t pt-3">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.reports")}</div>
+            <ReportsCard clientId={clientId} />
+          </div>
         </Card>
 
         <Card title={t("card.recommendations")}>
@@ -416,19 +433,6 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               </Button>
               {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
             </div>
-          </div>
-        </Card>
-
-        <Card title={t("card.statuses_reports")}>
-          <StatusEditor
-            clientId={clientId}
-            clientStatus={client?.client_status}
-            paymentStatus={client?.payment_status}
-            paidUntil={client?.paid_until}
-          />
-          <div className="mt-3 border-t pt-3">
-            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.reports")}</div>
-            <ReportsCard clientId={clientId} />
           </div>
         </Card>
 
