@@ -388,6 +388,7 @@ def insert_measurement(
     neck: Optional[float] = None,
     waist: Optional[float] = None,
     hips: Optional[float] = None,
+    chest: Optional[float] = None,
     notes: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Добавляет замер тела клиента (вес/объёмы) в measurements. measured_at → сегодня по умолчанию."""
@@ -399,6 +400,7 @@ def insert_measurement(
         ("neck", neck),
         ("waist", waist),
         ("hips", hips),
+        ("chest", chest),
         ("notes", notes),
     ):
         if value is not None:
@@ -1236,10 +1238,16 @@ def get_open_occurrences() -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+# Приёмы пищи привязаны к моменту дня: пропуск к дедлайну → алерт нутрициологу, и на этом всё.
+# Тащить их «со вчера» в следующее сообщение бессмысленно (момент прошёл), поэтому исключаем.
+_MEAL_EXPECTED = ("breakfast", "lunch", "dinner")
+
+
 def get_outstanding_occurrences(client_id: str, due_date: str) -> List[Dict[str, Any]]:
     """
     Незакрытые (без ответа) срабатывания ждущих ответа напоминаний за указанную локальную
-    дату — для вплетения в следующее сообщение («вчера не прислали воду»).
+    дату — для вплетения в следующее сообщение («вчера не прислали воду»). Приёмы пищи
+    исключаются: они one-shot в пределах дня (пропуск → алерт), на завтра не переносятся.
     """
     supabase = _service_client()
     response = (
@@ -1255,6 +1263,7 @@ def get_outstanding_occurrences(client_id: str, due_date: str) -> List[Dict[str,
         r for r in rows
         if (r.get("reminders") or {}).get("requires_response")
         and (r.get("reminders") or {}).get("active")
+        and (r.get("reminders") or {}).get("expected_response") not in _MEAL_EXPECTED
     ]
 
 

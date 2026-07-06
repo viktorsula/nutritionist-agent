@@ -14,8 +14,7 @@ import {
   useNutritionDaily,
 } from "../client/queries";
 import { useClientEventsRecent, useClientRow } from "./queries";
-import { ReminderEditor } from "./ReminderEditor";
-import { MetricsCatalogEditor } from "./MetricsCatalogEditor";
+import { NotificationSettings } from "./NotificationSettings";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
 import { ReportsCard } from "./ReportsCard";
@@ -400,6 +399,24 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
             <div className="mb-1 text-xs font-medium text-gray-600">{t("card.wellness")}</div>
             <WellnessEditor clientId={clientId} />
           </div>
+          <div className="mt-3 border-t pt-2">
+            <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
+            <textarea
+              className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
+              value={notes}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                setNotesOk(false);
+              }}
+              placeholder={t("card.notes_placeholder")}
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <Button type="button" onClick={saveNotes} disabled={savingNotes}>
+                {savingNotes ? t("card.saving") : t("card.save_notes")}
+              </Button>
+              {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
+            </div>
+          </div>
         </Card>
 
         <Card title={t("card.statuses_reports")}>
@@ -416,30 +433,8 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
         </Card>
 
         <div className="lg:col-span-2">
-          <Card title={t("card.tasks_notes")}>
-            <div className="mb-1 text-sm font-medium text-gray-700">{t("metrics.heading")}</div>
-            <MetricsCatalogEditor clientId={clientId} />
-            <div className="mt-3 border-t pt-3">
-              <ReminderEditor clientId={clientId} />
-            </div>
-            <div className="mt-3 border-t pt-2">
-              <div className="mb-1 text-xs font-medium text-gray-600">{t("card.notes")}</div>
-              <textarea
-                className="h-24 w-full resize-none rounded-md border px-3 py-2 text-sm"
-                value={notes}
-                onChange={(e) => {
-                  setNotes(e.target.value);
-                  setNotesOk(false);
-                }}
-                placeholder={t("card.notes_placeholder")}
-              />
-              <div className="mt-2 flex items-center gap-2">
-                <Button type="button" onClick={saveNotes} disabled={savingNotes}>
-                  {savingNotes ? t("card.saving") : t("card.save_notes")}
-                </Button>
-                {notesOk && <span className="text-xs text-green-600">{t("card.saved")}</span>}
-              </div>
-            </div>
+          <Card title={t("card.notifications")}>
+            <NotificationSettings clientId={clientId} />
           </Card>
         </div>
       </div>

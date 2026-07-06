@@ -85,6 +85,9 @@ export interface Reminder {
   remind_date: string | null;
   requires_response: boolean;
   expected_response: string | null; // ключ показателя | 'text' | null
+  response_deadline?: string | null; // 'HH:MM' дедлайн отчёта (еда: 12/17/22)
+  followup_after_hours?: number | null;
+  max_followups?: number | null;
   active: boolean;
 }
 
@@ -96,6 +99,9 @@ export interface ReminderInput {
   remind_date?: string | null;
   requires_response?: boolean;
   expected_response?: string | null;
+  response_deadline?: string | null; // 'HH:MM' дедлайн отчёта (еда: 12/17/22)
+  followup_after_hours?: number | null;
+  max_followups?: number | null;
 }
 
 /** Контролируемый показатель клиента (каталог). */
