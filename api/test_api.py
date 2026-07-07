@@ -314,5 +314,53 @@ class TestApi(unittest.TestCase):
         self.assertEqual(r.status_code, 502)
 
 
+class TestConfigureLogging(unittest.TestCase):
+    """Логирование веб-процесса: наши модули на INFO, COVERAGE эмитится, 3rd-party тихо."""
+
+    import logging as _logging
+
+    def _names(self):
+        return ("agents", "api", "database", "utils", "business_rules", "monitoring")
+
+    def test_our_namespaces_at_info_by_default(self):
+        import logging
+        import os
+        from api.main import _configure_logging
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LOG_LEVEL", None)
+            _configure_logging()
+        for name in self._names():
+            self.assertEqual(logging.getLogger(name).level, logging.INFO, name)
+
+    def test_coverage_logger_emits_info(self):
+        import logging
+        import os
+        from api.main import _configure_logging
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LOG_LEVEL", None)
+            _configure_logging()
+        # COVERAGE пишет agents.core.coverage.logger.info — должен пройти по уровню
+        self.assertTrue(
+            logging.getLogger("agents.core.coverage").isEnabledFor(logging.INFO)
+        )
+        # сторонние (например, httpx) наследуют корень WARNING — INFO не проходит
+        self.assertFalse(logging.getLogger("httpx").isEnabledFor(logging.INFO))
+
+    def test_log_level_override(self):
+        import logging
+        import os
+        from api.main import _configure_logging
+
+        with patch.dict(os.environ, {"LOG_LEVEL": "WARNING"}, clear=False):
+            _configure_logging()
+        self.assertEqual(logging.getLogger("agents").level, logging.WARNING)
+        # вернём INFO, чтобы не влиять на другие тесты
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LOG_LEVEL", None)
+            _configure_logging()
+
+
 if __name__ == "__main__":
     unittest.main()
