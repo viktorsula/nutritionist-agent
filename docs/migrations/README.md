@@ -132,21 +132,21 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 002_add_vector_search.sql | 19 июня 2026 | ✅ | RPC match_* (подтв. интроспекцией 25 июня) |
 | 003_questionnaire_and_measurements.sql | 19 июня 2026 | ✅ | Анкета + measurements + lab_results |
 | 004_rls_policies.sql | 19 июня 2026 | ✅ | RLS-политики |
-| 005_storage_client_documents.sql | — | ⚠️ | Бакет client-documents; загрузка документов на проде работает → вероятно применена, подтвердить verify-SQL |
+| 005_storage_client_documents.sql | 7 июля 2026 | ✅ | Бакет client-documents + storage RLS (подтв. verify-SQL) |
 | 006_tracked_lab_indicators.sql | — | ✅ | Per-client показатели анализов (фича живая) |
 | 007_client_paid_until.sql | — | ✅ | clients.paid_until (гейт доступа по оплате живой) |
 | 008_client_reports.sql | — | ✅ | Таблица client_reports (отчёты) |
 | 009_conversation_summary.sql | — | ✅ | rolling-summary (подтв. интроспекцией 25 июня) |
 | 010_telegram_link_token.sql | — | ✅ | Самопривязка Telegram (E2E пройден) |
 | 011_seed_llm_config.sql | 30 июня 2026 | ✅ | Сидинг llm_config |
-| 012_add_orchestrator_llm_config.sql | — | ⚠️ | orchestrator/nutritionist_orchestrator в llm_config; резолвер падает в код-дефолт даже без неё → подтвердить verify-SQL |
+| 012_add_orchestrator_llm_config.sql | 7 июля 2026 | ✅ | orchestrator/nutritionist_orchestrator в llm_config (подтв. verify-SQL) |
 | 013_reminders.sql | 3 июля 2026 | ✅ | Напоминания (Фаза 1) |
 | 014_controlled_metrics.sql | 3 июля 2026 | ✅ | Контролируемые показатели |
 | 015_reminder_response_control.sql | 3 июля 2026 | ✅ | Контроль ответа на напоминания |
 | 016_reminder_deadlines_meals.sql | **7 июля 2026** | ✅ | Дедлайны еды + per-item кадэнс + measurements.chest (см. инцидент выше) |
 
-⚠️ = требует подтверждения интроспекцией (verify-SQL ниже). Все прочие ✅ — либо помечены
-как применённые в журнале, либо соответствующая фича работает на проде.
+Все миграции 001–016 подтверждены применёнными на проде (verify-SQL прогнан 7 июля 2026).
+При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
 
 ---
 
