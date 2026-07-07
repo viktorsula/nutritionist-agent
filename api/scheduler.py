@@ -12,6 +12,10 @@ scheduled_time, шлём сообщение в Telegram.
 Инертность: если Telegram-бот не настроен (нет токена) — рассылка пропускается.
 Полное отключение: NOTIFICATIONS_ENABLED=0.
 
+Отдельным проходом идёт еженедельный автоотчёт нутрициологу (run_weekly_report, ТЗ 6.2.1):
+сводка по активным клиентам раз в неделю (Пн 09:00 в timezone нутрициолога по умолчанию,
+настраивается system_settings.weekly_report), дедуп по ISO-неделе.
+
 ENV: NOTIFICATIONS_ENABLED (по умолч. включено).
 """
 
@@ -30,6 +34,19 @@ _alert_guard: set = set()  # id уже отправленных нутрицио
 _no_response_guard: set = set()  # "client_id:YYYY-MM-DD" — один алерт молчания в день
 _last_no_response_at: Optional[datetime] = None
 NO_RESPONSE_CHECK_EVERY_MIN = 30
+
+_weekly_report_guard: set = set()  # ISO-недели ('GGGG-Www'), за которые отчёт уже отправлен
+
+# Еженедельный автоотчёт нутрициологу (ТЗ 6.2.1). Настраивается system_settings.weekly_report;
+# дефолт — понедельник 09:00 в часовом поясе владельца (Дубай).
+DEFAULT_WEEKLY_REPORT = {
+    "enabled": True,
+    "weekday": 0,          # 0 = понедельник (datetime.weekday())
+    "hour": 9,
+    "minute": 0,
+    "timezone": "Asia/Dubai",
+    "period_days": 7,
+}
 
 CHECK_INTERVAL_SECONDS = 60
 # Окно выборки свежих алертов (минут). Чуть больше интервала прохода — на случай джиттера.
@@ -615,6 +632,125 @@ async def run_no_response_check() -> None:
             logger.warning(f"scheduler: no_response событие не записано client={cid}: {e}")
 
 
+def _weekly_report_config() -> dict:
+    """Конфиг отчёта: system_settings.weekly_report поверх дефолта (Пн 09:00 Asia/Dubai)."""
+    cfg = dict(DEFAULT_WEEKLY_REPORT)
+    try:
+        from database import queries
+
+        override = queries.get_setting("weekly_report")
+        if isinstance(override, dict):
+            cfg.update({k: override[k] for k in override if k in DEFAULT_WEEKLY_REPORT})
+    except Exception as e:
+        logger.warning(f"scheduler: weekly_report конфиг не прочитан, дефолт: {e}")
+    return cfg
+
+
+def _weekly_report_due(cfg: dict, now_utc: Optional[datetime] = None) -> Tuple[bool, str]:
+    """
+    Наступило ли время еженедельного отчёта в часовом поясе нутрициолога.
+
+    Returns: (due, week_key) — week_key 'GGGG-Www' (ISO год-неделя) для анти-дубля.
+    Минутная точность (тик 60с) + guard по неделе → один отчёт в неделю.
+    """
+    try:
+        tz = pytz.timezone(cfg.get("timezone") or "Asia/Dubai")
+    except Exception:
+        tz = pytz.UTC
+
+    base = now_utc or datetime.utcnow().replace(tzinfo=pytz.UTC)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=pytz.UTC)
+    now_local = base.astimezone(tz)
+
+    week_key = now_local.strftime("%G-W%V")
+    due = (
+        now_local.weekday() == int(cfg.get("weekday", 0))
+        and now_local.hour == int(cfg.get("hour", 9))
+        and now_local.minute == int(cfg.get("minute", 0))
+    )
+    return due, week_key
+
+
+def _format_weekly_report(summaries: list, period_days: int) -> str:
+    """Компактный текст еженедельной сводки по клиентам (для нутрициолога)."""
+    header = f"📊 Еженедельная сводка (за {period_days} дн.)"
+    rows = []
+    for s in summaries or []:
+        client = (s or {}).get("client") or {}
+        name = client.get("name") or "Клиент"
+        crit = s.get("critical_alerts", 0) or 0
+        high = s.get("high_alerts", 0) or 0
+        flag = " ⚠️" if (crit + high) else ""
+        rows.append(
+            f"• {name}{flag}: сообщений {s.get('message_count', 0)}, "
+            f"событий {s.get('total_events', 0)}, "
+            f"алертов {crit + high} (crit {crit}/high {high}), "
+            f"задачи {s.get('completed_tasks', 0)}✓/{s.get('pending_tasks', 0)}⏳"
+        )
+    if not rows:
+        return header + "\n\nНет активных клиентов."
+    return "\n".join([header, ""] + rows)
+
+
+async def run_weekly_report() -> None:
+    """
+    Раз в неделю (по умолч. Пн 09:00 в часовом поясе нутрициолога) шлёт нутрициологу
+    компактную сводку по всем активным клиентам. Дедуп — по ISO-неделе. Тихо пропускается
+    без бота/chat_id или если отчёт выключен (system_settings.weekly_report.enabled=false).
+    """
+    cfg = _weekly_report_config()
+    if not cfg.get("enabled", True):
+        return
+
+    due, week_key = _weekly_report_due(cfg)
+    if not due or week_key in _weekly_report_guard:
+        return
+
+    from api.telegram_webhook import is_configured, get_bot
+    from utils.notify import nutritionist_chat_id
+
+    if not is_configured():
+        return
+    chat_id = nutritionist_chat_id()
+    if not chat_id:
+        return  # некому слать — нутрициолог не привязал Telegram
+    bot = get_bot()
+    if bot is None:
+        return
+
+    from database import queries
+
+    try:
+        clients = queries.get_clients_for_weekly_report()
+    except Exception as e:
+        logger.warning(f"scheduler: weekly_report — список клиентов не получен: {e}")
+        return
+
+    period_days = int(cfg.get("period_days", 7))
+    summaries = []
+    for c in clients or []:
+        cid = c.get("id")
+        if not cid:
+            continue
+        try:
+            summaries.append(queries.get_client_summary(cid, days=period_days))
+        except Exception as e:
+            logger.warning(f"scheduler: weekly_report — сводка клиента {cid} не получена: {e}")
+
+    text = _format_weekly_report(summaries, period_days)
+    try:
+        await bot.send_message(chat_id=chat_id, text=text)
+        _weekly_report_guard.add(week_key)
+        if len(_weekly_report_guard) > 500:  # не растём бесконечно
+            _weekly_report_guard.clear()
+        logger.info(
+            f"scheduler: еженедельный отчёт отправлен неделя={week_key} клиентов={len(summaries)}"
+        )
+    except Exception as e:
+        logger.warning(f"scheduler: weekly_report отправка не удалась: {e}")
+
+
 async def run_scheduler_pass() -> None:
     """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
     await run_due_notifications()
@@ -622,6 +758,7 @@ async def run_scheduler_pass() -> None:
     await run_reminder_followups()
     await run_no_response_check()
     await run_nutritionist_alerts()
+    await run_weekly_report()
 
 
 def start_scheduler() -> None:
