@@ -6,6 +6,9 @@
 
 ## 📋 СПИСОК МИГРАЦИЙ
 
+> Детальные карточки ниже описывают только 001–006 (исторически). **Полный реестр всех
+> миграций и их статус на проде — в таблице «Отслеживание статуса» ниже** + verify-SQL.
+
 ### **001_add_observer_role.sql**
 - **Дата:** 10 июня 2026
 - **Описание:** Добавление роли `observer` для продакшн-версии
@@ -118,16 +121,73 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 
 ## 📊 ОТСЛЕЖИВАНИЕ СТАТУСА МИГРАЦИЙ
 
-После выполнения миграции отметь статус:
+После выполнения миграции отметь статус. **Эта таблица — единственный источник правды
+по тому, что накатано на прод.** Держи её в актуальном состоянии: инцидент с миграцией 016
+(7 июля 2026 — сохранение «Настройки уведомлений» падало с `PGRST204: followup_after_hours`)
+случился именно потому, что реестр обрывался на 006 и 016 молча сочли применённой.
 
 | Миграция | Дата выполнения | Статус | Примечания |
 |----------|-----------------|--------|------------|
-| 001_add_observer_role.sql | 19 июня 2026 | ✅ | Применена |
-| 002_add_vector_search.sql | 19 июня 2026 | ✅ | Применена |
-| 003_questionnaire_and_measurements.sql | 19 июня 2026 | ✅ | Применена |
-| 004_rls_policies.sql | 19 июня 2026 | ✅ | Применена |
-| 005_storage_client_documents.sql | ___ | ⏳ | Бакет client-documents + storage RLS (требует 004) |
-| 006_tracked_lab_indicators.sql | ___ | ⏳ | Per-client показатели анализов (требует 003/004) |
+| 001_add_observer_role.sql | 19 июня 2026 | ✅ | Роль observer |
+| 002_add_vector_search.sql | 19 июня 2026 | ✅ | RPC match_* (подтв. интроспекцией 25 июня) |
+| 003_questionnaire_and_measurements.sql | 19 июня 2026 | ✅ | Анкета + measurements + lab_results |
+| 004_rls_policies.sql | 19 июня 2026 | ✅ | RLS-политики |
+| 005_storage_client_documents.sql | 7 июля 2026 | ✅ | Бакет client-documents + storage RLS (подтв. verify-SQL) |
+| 006_tracked_lab_indicators.sql | — | ✅ | Per-client показатели анализов (фича живая) |
+| 007_client_paid_until.sql | — | ✅ | clients.paid_until (гейт доступа по оплате живой) |
+| 008_client_reports.sql | — | ✅ | Таблица client_reports (отчёты) |
+| 009_conversation_summary.sql | — | ✅ | rolling-summary (подтв. интроспекцией 25 июня) |
+| 010_telegram_link_token.sql | — | ✅ | Самопривязка Telegram (E2E пройден) |
+| 011_seed_llm_config.sql | 30 июня 2026 | ✅ | Сидинг llm_config |
+| 012_add_orchestrator_llm_config.sql | 7 июля 2026 | ✅ | orchestrator/nutritionist_orchestrator в llm_config (подтв. verify-SQL) |
+| 013_reminders.sql | 3 июля 2026 | ✅ | Напоминания (Фаза 1) |
+| 014_controlled_metrics.sql | 3 июля 2026 | ✅ | Контролируемые показатели |
+| 015_reminder_response_control.sql | 3 июля 2026 | ✅ | Контроль ответа на напоминания |
+| 016_reminder_deadlines_meals.sql | **7 июля 2026** | ✅ | Дедлайны еды + per-item кадэнс + measurements.chest (см. инцидент выше) |
+
+Все миграции 001–016 подтверждены применёнными на проде (verify-SQL прогнан 7 июля 2026).
+При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
+
+---
+
+## 🔎 ПРОВЕРКА ДРЕЙФА (verify-SQL)
+
+Один запрос в Supabase → SQL Editor показывает, какие объекты миграций реально есть на проде.
+Любая строка `ok = false` = непринятая миграция.
+
+```sql
+SELECT '005 bucket client-documents' AS migration,
+       EXISTS(SELECT 1 FROM storage.buckets WHERE id='client-documents') AS ok
+UNION ALL SELECT '006 client_profiles.tracked_lab_indicators',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='client_profiles' AND column_name='tracked_lab_indicators')
+UNION ALL SELECT '007 clients.paid_until',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='clients' AND column_name='paid_until')
+UNION ALL SELECT '008 client_reports table',
+       to_regclass('public.client_reports') IS NOT NULL
+UNION ALL SELECT '009 clients.conversation_summary',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='clients' AND column_name='conversation_summary')
+UNION ALL SELECT '010 clients.telegram_link_token',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='clients' AND column_name='telegram_link_token')
+UNION ALL SELECT '012 llm_config.orchestrator',
+       EXISTS(SELECT 1 FROM system_settings WHERE key='llm_config' AND value ? 'orchestrator')
+UNION ALL SELECT '013 reminders table',
+       to_regclass('public.reminders') IS NOT NULL
+UNION ALL SELECT '013 reminder_occurrences table',
+       to_regclass('public.reminder_occurrences') IS NOT NULL
+UNION ALL SELECT '014 client_metrics table',
+       to_regclass('public.client_metrics') IS NOT NULL
+UNION ALL SELECT '014 client_profiles.controlled_metrics',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='client_profiles' AND column_name='controlled_metrics')
+UNION ALL SELECT '015 reminders.expected_response',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminders' AND column_name='expected_response')
+UNION ALL SELECT '015 reminder_occurrences.status',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminder_occurrences' AND column_name='status')
+UNION ALL SELECT '016 reminders.followup_after_hours',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminders' AND column_name='followup_after_hours')
+UNION ALL SELECT '016 measurements.chest',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='measurements' AND column_name='chest')
+ORDER BY migration;
+```
 
 ---
 
@@ -161,5 +221,5 @@ ALTER TABLE users ADD CONSTRAINT users_role_check
 
 ---
 
-**Последнее обновление:** 19 июня 2026  
-**Версия схемы:** v1.4 (опросник + замеры + анализы + RLS для веб-доступа)
+**Последнее обновление:** 7 июля 2026  
+**Версия схемы:** v1.5 (напоминания + контролируемые показатели + дедлайны еды + measurements.chest)

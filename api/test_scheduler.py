@@ -423,5 +423,103 @@ class TestNoResponseCheck(unittest.IsolatedAsyncioTestCase):
             logged.assert_not_called()
 
 
+class TestWeeklyReportDue(unittest.TestCase):
+    def _utc(self, y, mo, d, h, mi):
+        return datetime(y, mo, d, h, mi, tzinfo=pytz.UTC)
+
+    def test_due_monday_9am_dubai(self):
+        # 2026-07-06 — понедельник. 09:00 Asia/Dubai (UTC+4) = 05:00 UTC.
+        cfg = dict(S.DEFAULT_WEEKLY_REPORT)
+        due, week_key = S._weekly_report_due(cfg, now_utc=self._utc(2026, 7, 6, 5, 0))
+        self.assertTrue(due)
+        self.assertEqual(week_key, "2026-W28")
+
+    def test_not_due_wrong_minute(self):
+        cfg = dict(S.DEFAULT_WEEKLY_REPORT)
+        due, _ = S._weekly_report_due(cfg, now_utc=self._utc(2026, 7, 6, 5, 1))
+        self.assertFalse(due)
+
+    def test_not_due_wrong_weekday(self):
+        cfg = dict(S.DEFAULT_WEEKLY_REPORT)
+        # вторник 07-07 в то же локальное время
+        due, _ = S._weekly_report_due(cfg, now_utc=self._utc(2026, 7, 7, 5, 0))
+        self.assertFalse(due)
+
+    def test_custom_config_honored(self):
+        cfg = {"weekday": 6, "hour": 20, "minute": 30, "timezone": "UTC"}  # Вс 20:30 UTC
+        due, _ = S._weekly_report_due(cfg, now_utc=self._utc(2026, 7, 12, 20, 30))
+        self.assertTrue(due)
+
+
+class TestFormatWeeklyReport(unittest.TestCase):
+    def test_empty_no_clients(self):
+        text = S._format_weekly_report([], 7)
+        self.assertIn("Нет активных клиентов", text)
+
+    def test_rows_and_alert_flag(self):
+        summaries = [
+            {"client": {"name": "Иван"}, "message_count": 12, "total_events": 8,
+             "critical_alerts": 0, "high_alerts": 2, "completed_tasks": 3, "pending_tasks": 1},
+            {"client": {"name": "Ольга"}, "message_count": 4, "total_events": 2,
+             "critical_alerts": 0, "high_alerts": 0, "completed_tasks": 0, "pending_tasks": 0},
+        ]
+        text = S._format_weekly_report(summaries, 7)
+        self.assertIn("Иван ⚠️", text)      # есть high-алерты → флаг
+        self.assertIn("Ольга:", text)        # без алертов → без флага
+        self.assertNotIn("Ольга ⚠️", text)
+        self.assertIn("сообщений 12", text)
+
+
+class TestRunWeeklyReport(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        S._weekly_report_guard.clear()
+
+    async def _run(self, *, due=True, configured=True, chat_id="555",
+                   enabled=True, clients=None):
+        bot = AsyncMock()
+        clients = clients if clients is not None else [{"id": "c1"}, {"id": "c2"}]
+        cfg = dict(S.DEFAULT_WEEKLY_REPORT)
+        cfg["enabled"] = enabled
+        env = {"NUTRITIONIST_TELEGRAM_ID": chat_id} if chat_id is not None else {}
+        with patch("api.scheduler._weekly_report_config", return_value=cfg), \
+             patch("api.scheduler._weekly_report_due", return_value=(due, "2026-W28")), \
+             patch("api.telegram_webhook.is_configured", return_value=configured), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_clients_for_weekly_report", return_value=clients), \
+             patch("database.queries.get_client_summary",
+                   side_effect=lambda cid, days=7: {"client": {"name": cid},
+                                                    "message_count": 1, "total_events": 0,
+                                                    "critical_alerts": 0, "high_alerts": 0,
+                                                    "completed_tasks": 0, "pending_tasks": 0}), \
+             patch.dict(os.environ, env, clear=False):
+            if chat_id is None:
+                os.environ.pop("NUTRITIONIST_TELEGRAM_ID", None)
+            await S.run_weekly_report()
+        return bot
+
+    async def test_sends_once_and_dedups_by_week(self):
+        bot = await self._run()
+        self.assertEqual(bot.send_message.call_count, 1)
+        # повторный проход той же недели — дедуп
+        bot2 = await self._run()
+        bot2.send_message.assert_not_called()
+
+    async def test_skips_when_not_due(self):
+        bot = await self._run(due=False)
+        bot.send_message.assert_not_called()
+
+    async def test_skips_when_disabled(self):
+        bot = await self._run(enabled=False)
+        bot.send_message.assert_not_called()
+
+    async def test_skips_when_no_chat_id(self):
+        bot = await self._run(chat_id=None)
+        bot.send_message.assert_not_called()
+
+    async def test_skips_when_bot_not_configured(self):
+        bot = await self._run(configured=False)
+        bot.send_message.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
