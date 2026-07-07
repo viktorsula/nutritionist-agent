@@ -24,6 +24,26 @@ from pydantic import BaseModel, Field
 from api.auth import get_current_user, require_role
 
 
+def _configure_logging() -> None:
+    """
+    Настройка логирования веб-процесса (uvicorn сам корневой логгер не трогает → INFO
+    из наших модулей по умолчанию подавляется на уровне WARNING). Поднимаем INFO для
+    наших пакетов, сторонние библиотеки оставляем тихими (иначе httpx/supabase шумят).
+
+    Это делает видимыми в Render наши info-диагностики (COVERAGE покрытия оркестратора,
+    планировщик, failover LLM). Уровень наших модулей — LOG_LEVEL (по умолчанию INFO).
+    """
+    import logging
+
+    level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(level=logging.WARNING)  # корень/3rd-party — тихо
+    for name in ("agents", "api", "database", "utils", "business_rules", "monitoring"):
+        logging.getLogger(name).setLevel(level)
+
+
+_configure_logging()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Жизненный цикл: Telegram-бот + планировщик уведомлений на старте, остановка на выходе."""
