@@ -204,7 +204,7 @@ nutritionist-agent/
   - [x] commands.py — /start, /help, /status
   - [x] handlers.py — текст (работает); фото/голос ← Шаг 3 (контракт metadata готов)
   - [x] test_bot.py — тесты команд и обработчиков
-- [ ] monitoring/langfuse.py ← Этап 9
+- [x] monitoring/langfuse.py — РЕАЛИЗОВАН (подключён через _trace() в utils/llm.py::call_llm; graceful no-op без ключей/пакета)
 
 ## Следующий шаг
 **Этап 6 Часть A — Шаг 3:** telegram/handlers.py — подключить фото/голос к графу
