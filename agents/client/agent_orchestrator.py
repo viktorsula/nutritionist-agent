@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 
 from prompts import load_prompt
 from agents.core.agent_engine import run_agent
+from utils.format import tables_to_text
 from .state import create_initial_state, extract_response
 from .intake_present import format_list, format_allergies
 from . import intake_store
@@ -123,6 +124,9 @@ def process(
         images = _prepare_vision(state)
 
         reply = _run_agent_loop(state, images)
+        # Презентация: развернуть Markdown-таблицы в текст (Claude их любит вопреки промпту,
+        # а в Telegram они ломаются). Чистим ДО сохранения и ответа — оба идут без таблиц.
+        reply = tables_to_text(reply)
         state["agent_response"] = reply
         _finalize(state, reply)
 
