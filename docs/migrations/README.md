@@ -223,3 +223,4 @@ ALTER TABLE users ADD CONSTRAINT users_role_check
 
 **Последнее обновление:** 7 июля 2026  
 **Версия схемы:** v1.5 (напоминания + контролируемые показатели + дедлайны еды + measurements.chest)
+1
