@@ -51,11 +51,15 @@ class TestPersistMeal(unittest.TestCase):
         state = _state()
         alert = {"type": "food_forbidden", "severity": "high", "message": "запрещено"}
         with patch("agents.client.intake_store.analyze_against_plan", return_value=[alert]), \
-             patch("database.queries.log_client_event"):
+             patch("database.queries.log_client_event") as log:
             out = intake_store.persist_record(state, rec)
         self.assertEqual(out, "meal")
         self.assertIn(alert, state["alerts"])
         self.assertIsNotNone(state.get("routing"))
+        # Текст алерта должен уйти в payload под ключом "alerts" (не "deviations") —
+        # именно его читает фронт AlertsPanel для calories_logged.
+        payload = log.call_args.kwargs["payload"]
+        self.assertEqual(payload["alerts"], [alert])
 
     def test_no_items_is_none(self):
         rec = empty_record("meal", "text")

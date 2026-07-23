@@ -242,10 +242,16 @@ def _check_food_forbidden(client_id: str, food_items: List[str]) -> Optional[Dic
     try:
         plan = get_active_nutrition_plan(client_id)
 
-        if not plan or not plan.get('restrictions'):
+        if not plan:
             return None
 
-        restrictions = plan['restrictions']
+        # Назначения нутрициолога лежат в plan_json (редактор пишет туда); фолбэк на
+        # верхний уровень — для старых записей/тестов (тот же паттерн, что в _plan_view).
+        plan_json = plan.get('plan_json') if isinstance(plan.get('plan_json'), dict) else {}
+        restrictions = plan_json.get('restrictions') or plan.get('restrictions')
+
+        if not restrictions:
+            return None
 
         # Проверяем каждый продукт
         forbidden_found = []

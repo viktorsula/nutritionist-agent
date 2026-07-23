@@ -602,7 +602,19 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
                 "total": inp.get("total") or {},
             },
         }
-        return _persist(record, "не понял, что именно из еды")
+        # Снимок счётчика ДО записи — чтобы отличить алерты именно этого приёма пищи
+        # от тех, что уже накопились в state["alerts"] за этот ход ранее.
+        alerts_before = len(state.get("alerts") or [])
+        result = _persist(record, "не понял, что именно из еды")
+        new_alerts = (state.get("alerts") or [])[alerts_before:]
+        serious = [a for a in new_alerts if (a.get("severity") or "").lower() in ("high", "critical")]
+        if serious and result.startswith("записано"):
+            warnings = "; ".join(str(a.get("message")) for a in serious if a.get("message"))
+            result += (
+                f" — нарушение плана обнаружено ({warnings}). ОБЯЗАТЕЛЬНО прямо в ответе клиенту "
+                "предупреди об этом тепло, но чётко (не молчи); нутрициолог уже уведомлён."
+            )
+        return result
 
     def log_water(inp: Dict[str, Any]) -> str:
         return _persist({"kind": "water", "source": source, "water_ml": inp.get("water_ml")},

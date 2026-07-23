@@ -57,6 +57,45 @@ def test_log_meal_builds_meal_record():
     assert out == "записано: meal"
 
 
+def test_log_meal_warns_model_on_serious_alert():
+    # P0-3: обнаруженное нарушение плана (high/critical) должно вернуться модели,
+    # чтобы она предупредила клиента прямо в ответе, а не молчала («Записал ✅»).
+    state = {"client_id": "cid"}
+
+    def fake_persist(state_arg, record):
+        state_arg["alerts"] = (state_arg.get("alerts") or []) + [
+            {"type": "food_forbidden", "severity": "high",
+             "message": "Козий сыр — молочный продукт, в ограничениях"},
+        ]
+        return "meal"
+
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record",
+               side_effect=fake_persist):
+        out = ao._build_handlers(state)["log_meal"]({"items": [{"name": "козий сыр"}]})
+    assert out.startswith("записано: meal")
+    assert "Козий сыр" in out
+    assert "предупреди" in out.lower()
+
+
+def test_log_meal_no_warning_when_no_serious_alert():
+    state = {"client_id": "cid"}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record",
+               return_value="meal"):
+        out = ao._build_handlers(state)["log_meal"]({"items": [{"name": "яблоко"}]})
+    assert out == "записано: meal"
+
+
+def test_log_meal_ignores_alerts_accumulated_before_this_call():
+    # Алерты, накопленные РАНЕЕ в этом же ходе (другим тулом), не должны триггерить
+    # повторное предупреждение при следующем log_meal без своих алертов.
+    state = {"client_id": "cid",
+             "alerts": [{"type": "old", "severity": "high", "message": "старый алерт"}]}
+    with patch("agents.client.agent_orchestrator.intake_store.persist_record",
+               return_value="meal"):
+        out = ao._build_handlers(state)["log_meal"]({"items": [{"name": "яблоко"}]})
+    assert out == "записано: meal"
+
+
 def test_log_water_weight_wellbeing_labs_records():
     state = {"client_id": "cid"}
     with patch("agents.client.agent_orchestrator.intake_store.persist_record") as pr:

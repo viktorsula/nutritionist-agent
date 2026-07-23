@@ -104,7 +104,7 @@ def _persist_meal(state: Dict[str, Any], record: Dict[str, Any], mode: str) -> O
                 "ingredients": names,
                 "items": items,
                 "total": meal.get("total"),
-                "deviations": [
+                "alerts": [
                     {"type": a.get("type"), "severity": a.get("severity"), "message": a.get("message")}
                     for a in alerts
                 ],

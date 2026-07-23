@@ -54,10 +54,17 @@ def format_alert(event: Dict[str, Any]) -> str:
     client_name = client.get("name") or "Клиент"
 
     payload = event.get("payload_json") or {}
+    # calories_logged: детали лежат не в message/reason/answer, а в массиве alerts
+    # (food_forbidden/несочетаемость/аллерген) — собираем текст оттуда.
+    alerts_detail = "; ".join(
+        str(a.get("message")) for a in (payload.get("alerts") or [])
+        if isinstance(a, dict) and a.get("message")
+    )
     detail = (
         payload.get("message")
         or payload.get("reason")
         or payload.get("answer")
+        or alerts_detail
         or ""
     ).strip()
 
