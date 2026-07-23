@@ -19,6 +19,7 @@ import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
 import { ReportsCard } from "./ReportsCard";
 import { StatusEditor } from "./StatusEditor";
+import { QuestionnaireView } from "./QuestionnaireView";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -282,6 +283,16 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               <Row label={t("card.restrictions")} value={list(p?.restrictions)} />
             </div>
           )}
+
+          {/* Полная анкета онбординга — read-only просмотр (P1-14) */}
+          <details className="mt-3 border-t pt-3">
+            <summary className="cursor-pointer text-xs font-medium text-gray-600">
+              {t("card.questionnaire")}
+            </summary>
+            <div className="mt-2">
+              <QuestionnaireView answers={p?.questionnaire_json as Record<string, unknown> | null} />
+            </div>
+          </details>
 
           {/* Статусы клиента — объединены с профилем */}
           <div className="mt-3 border-t pt-3">
