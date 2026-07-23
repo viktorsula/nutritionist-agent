@@ -25,6 +25,7 @@ export interface ClientProfile {
   restrictions: string[] | null;
   activity_level: string | null;
   tracked_lab_indicators: TrackedIndicator[] | null;
+  questionnaire_json: Record<string, unknown> | null;
 }
 
 export interface WellnessPlan {
@@ -70,7 +71,7 @@ export function useClientProfile(clientId: string) {
       const { data, error } = await supabase
         .from("client_profiles")
         .select(
-          "goals,weight,height,target_weight,birth_date,gender,allergies,chronic_conditions,restrictions,activity_level,tracked_lab_indicators",
+          "goals,weight,height,target_weight,birth_date,gender,allergies,chronic_conditions,restrictions,activity_level,tracked_lab_indicators,questionnaire_json",
         )
         .eq("client_id", clientId)
         .maybeSingle();
