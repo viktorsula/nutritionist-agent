@@ -52,11 +52,14 @@ export function QuestionnaireView({ answers }: { answers: Answers | null | undef
       {steps.map(({ step, rows }) => (
         <div key={step.id}>
           <div className="mb-1 text-xs font-semibold text-gray-600">{step.title[lang]}</div>
-          <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
             {rows.map(({ field, value }) => (
-              <div key={field.id} className="flex gap-1">
-                <dt className="shrink-0 text-gray-500">{field.label[lang]}:</dt>
-                <dd className="text-gray-800">{value}</dd>
+              // Подпись НАД значением (не в строку) — метки анкеты переиспользуют текст формы
+              // клиента и бывают длинными («Витамины/добавки (какие, дозировки…)»); в строчной
+              // раскладке label:value длинная подпись выдавливала значение почти в нулевую ширину.
+              <div key={field.id} className="min-w-0">
+                <dt className="text-gray-500">{field.label[lang]}</dt>
+                <dd className="break-words text-gray-800">{value}</dd>
               </div>
             ))}
           </dl>
