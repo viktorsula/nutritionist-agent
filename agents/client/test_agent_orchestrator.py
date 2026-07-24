@@ -278,6 +278,85 @@ def test_prescriptions_block_honest_when_plan_empty():
     assert "ещё не заполнен" in system or "не назначил" in system
 
 
+# ── Профиль клиента (P0-5/P1-2) ───────────────────────────────────────────────
+def test_client_profile_block_included_in_system_prompt():
+    state = {
+        "client_profile": {
+            "name": "Катя", "birth_date": "1990-01-01", "gender": "female",
+            "goals": "снижение веса", "weight": 70, "target_weight": 60,
+            "chronic_conditions": ["гипотиреоз"],
+        },
+        "active_plan": None,
+        "latest_measurement": None,
+        "wellness_plan": {"sleep_target": "22-8", "stress_management": "медитации"},
+    }
+    system = ao._system_prompt(state)
+    assert "Профиль клиента" in system
+    assert "снижение веса" in system
+    assert "70 кг → цель 60 кг" in system
+    assert "гипотиреоз" in system
+    assert "медитации" in system
+
+
+def test_client_profile_block_absent_when_no_data():
+    system = ao._system_prompt({"client_profile": {"name": "Катя"}, "active_plan": None})
+    assert "Профиль клиента" not in system
+
+
+def test_client_profile_prefers_latest_measurement_over_questionnaire_weight():
+    state = {
+        "client_profile": {"name": "Катя", "weight": 70, "target_weight": 60},
+        "active_plan": None,
+        "latest_measurement": {"weight": 65},
+    }
+    system = ao._system_prompt(state)
+    assert "65 кг → цель 60 кг" in system
+    assert "70 кг" not in system
+
+
+def test_client_profile_includes_questionnaire_extra():
+    state = {
+        "client_profile": {
+            "name": "Катя",
+            "questionnaire_json": {"medications": "витамин D", "stress": "высокий перед сном"},
+        },
+        "active_plan": None,
+    }
+    system = ao._system_prompt(state)
+    assert "Принимаемые препараты: витамин D" in system
+    assert "Стресс/настроение: высокий перед сном" in system
+
+
+def test_load_base_context_loads_wellness_plan():
+    with patch("database.queries.get_client_by_id", return_value={"name": "Катя"}), \
+         patch("database.queries.get_client_profile", return_value={}), \
+         patch("database.queries.get_active_nutrition_plan", return_value=None), \
+         patch("database.queries.get_conversations", return_value=[]), \
+         patch("database.queries.get_latest_measurement", return_value=None), \
+         patch("database.queries.get_controlled_metrics", return_value=[]), \
+         patch("database.queries.get_wellness_plan",
+               return_value={"sleep_target": "22-8"}) as wp:
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    wp.assert_called_once_with("cid")
+    assert state["wellness_plan"] == {"sleep_target": "22-8"}
+
+
+def test_load_base_context_wellness_plan_failure_is_best_effort():
+    # Сбой загрузки ЗОЖ не должен ронять весь базовый контекст (best-effort, как measurement).
+    with patch("database.queries.get_client_by_id", return_value={"name": "Катя"}), \
+         patch("database.queries.get_client_profile", return_value={}), \
+         patch("database.queries.get_active_nutrition_plan", return_value=None), \
+         patch("database.queries.get_conversations", return_value=[]), \
+         patch("database.queries.get_latest_measurement", return_value=None), \
+         patch("database.queries.get_controlled_metrics", return_value=[]), \
+         patch("database.queries.get_wellness_plan", side_effect=RuntimeError("db down")):
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    assert state["wellness_plan"] is None
+    assert state["client"] == {"name": "Катя"}  # остальной контекст загрузился
+
+
 def test_controlled_metrics_block_gives_exact_keys():
     state = {
         "client_profile": {"name": "Катя"}, "active_plan": None,

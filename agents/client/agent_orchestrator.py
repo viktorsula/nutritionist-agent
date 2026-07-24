@@ -33,6 +33,7 @@ from agents.core.agent_engine import run_agent
 from utils.format import tables_to_text
 from .state import create_initial_state, extract_response
 from .intake_present import format_list, format_allergies
+from .questionnaire_context import format_questionnaire_extra
 from . import intake_store
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,12 @@ def _load_base_context(state: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"orchestrator: controlled_metrics failed: {e}")
             state["controlled_metrics"] = []
+
+        try:
+            state["wellness_plan"] = queries.get_wellness_plan(client_id)
+        except Exception as e:
+            logger.warning(f"orchestrator: wellness_plan failed: {e}")
+            state["wellness_plan"] = None
     except Exception as e:
         logger.error(f"orchestrator: base context load failed: {e}", exc_info=True)
 
@@ -327,6 +334,12 @@ def _system_prompt(state: Dict[str, Any]) -> str:
             "используй инструменты для записи данных и ответов, не выдумывай факты."
         )
 
+    # Профиль клиента (P0-5/P1-2) — медицинские поля/цель/ЗОЖ/анкета. Тоже обязательная
+    # опора, а не «по требованию» — см. _format_client_profile.
+    profile_block = _format_client_profile(state)
+    if profile_block:
+        system += "\n\n" + profile_block
+
     # Назначения нутрициолога — ОБЯЗАТЕЛЬНАЯ опора любого ответа (норма воды, калории,
     # рекомендации и т.д. приходят отсюда). Кладём всегда, а не «инструментом по требованию».
     prescriptions = _format_prescriptions(state, view)
@@ -371,6 +384,78 @@ def _plan_view(plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "water_ml_target": pick("water_ml_target"),  # если появится структурное поле
         "supplements": items,
     }
+
+
+def _age_from_birth_date(birth_date: Optional[str]) -> Optional[int]:
+    if not birth_date:
+        return None
+    try:
+        d = datetime.fromisoformat(str(birth_date)[:10])
+        return (datetime.now() - d).days // 365
+    except Exception:
+        return None
+
+
+_GENDER_LABELS = {"male": "мужской", "female": "женский", "other": "другое"}
+_ACTIVITY_LABELS = {"low": "низкая", "medium": "средняя", "high": "высокая"}
+
+
+def _format_client_profile(state: Dict[str, Any]) -> str:
+    """
+    Полный профиль клиента (P0-5/P1-2): медицинские поля (хронические заболевания,
+    медикаменты/БАДы — того же уровня важности, что аллергии) + цель/вес/возраст +
+    ЗОЖ-план + остаток анкеты онбординга (P1-14 — раньше уходил в questionnaire_json
+    и никогда не читался). Обязательная опора, не второстепенный контекст по запросу:
+    клиент сообщает это не просто так, это формирует полную картину для ассистента.
+    """
+    profile = state.get("client_profile") or {}
+    lines: List[str] = []
+
+    age = _age_from_birth_date(profile.get("birth_date"))
+    if age is not None:
+        lines.append(f"- Возраст: {age} лет")
+    gender = _GENDER_LABELS.get(profile.get("gender"))
+    if gender:
+        lines.append(f"- Пол: {gender}")
+    if profile.get("goals"):
+        lines.append(f"- Цель клиента: {profile['goals']}")
+
+    latest = state.get("latest_measurement") or {}
+    weight = latest.get("weight") if latest.get("weight") is not None else profile.get("weight")
+    if weight and profile.get("target_weight"):
+        lines.append(f"- Вес: {weight} кг → цель {profile['target_weight']} кг")
+    elif weight:
+        lines.append(f"- Текущий вес: {weight} кг")
+
+    chronic = profile.get("chronic_conditions")
+    if chronic:
+        lines.append("- Хронические заболевания: " + format_list(chronic))
+    if profile.get("height"):
+        lines.append(f"- Рост: {profile['height']} см")
+    activity = _ACTIVITY_LABELS.get(profile.get("activity_level"))
+    if activity:
+        lines.append(f"- Уровень активности: {activity}")
+
+    wellness = state.get("wellness_plan") or {}
+    wellness_lines = []
+    if wellness.get("sleep_target"):
+        wellness_lines.append(f"сон — {wellness['sleep_target']}")
+    if wellness.get("activity_target"):
+        wellness_lines.append(f"активность — {wellness['activity_target']}")
+    if wellness.get("recovery"):
+        wellness_lines.append(f"восстановление — {wellness['recovery']}")
+    if wellness.get("stress_management"):
+        wellness_lines.append(f"контроль стресса — {wellness['stress_management']}")
+    if wellness_lines:
+        lines.append("- ЗОЖ-план (назначения нутрициолога): " + "; ".join(wellness_lines))
+
+    extra = format_questionnaire_extra(profile.get("questionnaire_json"))
+    if extra:
+        lines.append("- Из анкеты онбординга (для полноты картины о клиенте):\n" + extra)
+
+    if not lines:
+        return ""
+    return "## Профиль клиента (обязательная опора; медицинские поля учитывай при любом совете)\n" + "\n".join(lines)
 
 
 def _format_prescriptions(state: Dict[str, Any], view: Dict[str, Any]) -> str:

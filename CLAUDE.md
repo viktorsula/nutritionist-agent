@@ -159,69 +159,43 @@ nutritionist-agent/
 └── docs/
 ├── schema.sql            ← актуальная схема БД
 └── progress.md
-## Текущий статус (14 июня 2026)
-> Этап 6 Часть A (ветка клиента) — код готов на ветке `stage6-utils` (не влита в main).
-> Осталось: Telegram фото/голос (Шаг 3) + тесты (Шаг 4), затем Часть B (нутрициолог).
-- [x] Репозиторий и деплой на Render
-- [x] База данных Supabase v1.3 — ПОЛНОСТЬЮ ГОТОВА (14 таблиц + VIEW + триггеры)
-- [x] schema.sql актуализирован (v1.3)
-- [x] Блок 5: document_metadata + pgvector + knowledge_base + client_documents
-- [x] **database/client.py** — подключение к Supabase готово
-- [x] **database/models.py** — 14 моделей готовы
-- [x] **database/queries.py** — 43 функции реализованы (добавлена get_setting())
-- [x] **business_rules/** — ГОТОВО ✅
-  - [x] access_rules.py — проверка доступа (анкета, оплата, режимы)
-  - [x] medical_rules.py — 5 типов алертов + маршрутизация
-  - [x] notification_rules.py — проверка расписания (timezone-aware)
-- [x] **utils/** — ГОТОВО ✅
-  - [x] llm.py — мультипровайдерный LLM клиент (Groq, Claude, Gemini)
-  - [x] helpers.py — вспомогательные функции (структура готова)
-  - [x] knowledge.py — эмбеддинги ada-002 + pgvector-поиск (Этап 6)
-  - [x] vision.py — фото еды через Gemini Flash (Этап 6)
-  - [x] voice.py — Whisper (Этап 6)
-  - [x] web_access.py — Tavily + доверенные домены (Этап 6)
-- [x] **prompts/** — ГОТОВО ✅
-  - [x] Система управления промптами (БД приоритет → файлы fallback)
-  - [x] client/dialog_system.md — промпт для диалога
-  - [x] nutritionist/analytics_system.md — промпт для аналитики
-- [x] **agents/** — ГОТОВО (базовая инфраструктура) ✅
-  - [x] router.py — входной маршрутизатор (роль → ветка) + observer
-  - [x] client/orchestrator.py — LangGraph граф + роутинг (ingest→load_context→route→[vision|diary|nutrition|dialog]→format→save)
-  - [x] client/dialog_agent.py — работающий агент диалога
-  - [x] client/vision_agent.py — фото еды (Этап 6)
-  - [x] client/diary_agent.py — дневник текстом: еда/вес/самочувствие (Этап 6)
-  - [x] client/nutrition_agent.py — вопросы о рационе, Claude (Этап 6)
-  - [x] client/food_analysis.py — общий анализ состава против рациона (DRY)
-  - [x] nutritionist/orchestrator.py — заглушка (TODO аналитика)
-  - [ ] analytics_agent, management_agent ← Этап 6 Часть B
-- [x] **app.py** — ОБНОВЛЁН ✅
-  - [x] Интеграция с agents/router.py
-  - [x] Поддержка 3 ролей (client, nutritionist, observer)
-  - [x] Ветка клиента: чат через dialog_agent
-  - [x] Ветка нутрициолога: заглушка с табами
-- [x] **telegram/** — ГОТОВО (базовый функционал) ✅
-  - [x] bot.py — основной бот (python-telegram-bot)
-  - [x] commands.py — /start, /help, /status
-  - [x] handlers.py — текст (работает); фото/голос ← Шаг 3 (контракт metadata готов)
-  - [x] test_bot.py — тесты команд и обработчиков
-- [x] monitoring/langfuse.py — РЕАЛИЗОВАН (подключён через _trace() в utils/llm.py::call_llm; graceful no-op без ключей/пакета)
+## Текущий статус (23 июля 2026)
+> ⚠️ Этот раздел раньше был датирован 14 июня и сильно отставал от реальности (описывал
+> Streamlit/старый граф, которых давно нет). **Источник правды по прогрессу — `docs/progress.md`**
+> (журнал по сессиям, актуализируется каждой сессией), по диагностике —
+> `docs/docs/diagnostic_report.md` (мастер-список находок + план устранения, ветка
+> `claude/project-status-next-steps-zznj8o`). Здесь — только краткий снимок.
+
+Стек фактически: React SPA (Vite/TS) + FastAPI (`api/`) на Render, Telegram через webhook
+(`tg_bot/`), LLM-оркестратор (Claude tool-calling, `agents/*/agent_orchestrator.py` /
+`agent_adapter.py`) как основной путь для обеих ролей, граф LangGraph — fallback при сбое.
+БД Supabase — 20 таблиц (не 14 — `docs/schema.sql` устарел с миграции 003, не актуализировался),
+все 16 миграций (001–016) применены и проверены на живой БД.
+
+**22–23 июля 2026 — полная диагностика проекта.** Мастер-список: 6 юридических (ОАЭ, health
+data law) + 5 P0 (блокеры безопасности/данных) + 15 P1 (ценность продукта) + 21 P2 (тех-долг)
++ 1 новая фича (проактивный аудит клиента). Устранение начато по одному PR за раз:
+- **PR-A** (`fix/food-alerts-forbidden-and-deviations`) — алерты по еде: сломанный
+  `food_forbidden`, теряющийся текст алерта, молчание о нарушении. Запушено, не влито.
+- **PR-C** (`fix/client-context-grounding`) — LLM-оркестратор клиента теперь видит
+  хронические заболевания/цель/вес/ЗОЖ/полную анкету онбординга (раньше половина профиля не
+  доходила до модели); новый экран просмотра анкеты в кабинете нутрициолога. Запушено, не влито.
+- **PR-D** (спроектирован, не начат) — web_search для клиента, ограниченный объективными
+  фактами о еде (КБЖУ/рецепты), не персональными назначениями.
+
+Подробности, найденные причины и решения владельца — в `docs/docs/diagnostic_report.md`
+и последней сессии `docs/progress.md`.
 
 ## Следующий шаг
-**Этап 6 Часть A — Шаг 3:** telegram/handlers.py — подключить фото/голос к графу
-(metadata: image_bytes+mime_type / audio_bytes+audio_name). Затем Шаг 4 (тесты) → Часть B.
+Ревью владельцем PR-A и PR-C → реализация PR-D → сжатие анкеты в промпте (суммаризация один
+раз при заполнении, не построчный дамп на каждый ход) → продолжение устранения по мастер-списку
+(P1 → P2), тем же порядком: план → подтверждение владельца → реализация → тесты → отдельная
+ветка от main → пуш.
 
 ## Важно перед продолжением
-⚠️ **Установить зависимости:** `pip install -r requirements.txt` (новые: openai, tavily)
-⚠️ **Выполнить миграции в Supabase (SQL Editor):**
-- `docs/migrations/001_add_observer_role.sql` — роль observer — ⏳ ожидает
-- `docs/migrations/002_add_vector_search.sql` — RPC векторного поиска (Этап 6) — ⏳ ожидает
-⚠️ **Ключи окружения:** OPENAI_API_KEY, TAVILY_API_KEY, GOOGLE_API_KEY
-
-business_rules/ готов и протестирован:
-- `access_rules.py` — 2 режима работы (full_program, ai_support)
-- `medical_rules.py` — 5 типов алертов + determine_routing() для маршрутизации
-- `notification_rules.py` — timezone-aware проверки расписания
-- Все импорты работают ✅
+⚠️ Разделы ниже (зависимости/миграции) описывают историческое состояние Этапа 6 (июнь) —
+актуальный список зависимостей в `requirements.txt`, актуальный список env-ключей проверен
+диагностикой (`docs/docs/diagnostic_report.md`, находка «7 ключей не в `.env.example`»).
 
 ## Важные решения (зафиксированы)
 1. `wellness_plans` отдельно от `nutrition_plans` —
@@ -236,9 +210,14 @@ business_rules/ готов и протестирован:
    прошли Security Advisor Supabase без ошибок
 6. `bad_wellbeing` алерт включает обязательную причину в payload_json
 ## Документация
-- `docs/schema.sql` — актуальная схема БД
-- `docs/progress.md` — журнал прогресса  
-- `docs/technical_specification.docx` — полное ТЗ v1.2
+- `docs/schema.sql` — схема БД, ⚠️ устарела с миграции 003 (19 июня) — не отражает 6 таблиц
+  (measurements/lab_results/client_reports/reminders/reminder_occurrences/client_metrics)
+- `docs/progress.md` — журнал прогресса (источник правды по истории сессий)
+- `docs/docs/diagnostic_report.md` — полная диагностика проекта (код/БД/ТЗ/E2E/юридика),
+  мастер-список находок с приоритизацией + план устранения (ветка
+  `claude/project-status-next-steps-zznj8o`)
+- `docs/docs/technical_specification.docx` (v1.2) / `_V1.3.docx` / `_V1.4.docx` — эволюция ТЗ,
+  v1.4 актуальнее всех — отражает факт реализации (React+FastAPI, APScheduler, LLM-оркестратор)
 ## Правила работы с разработчиком
 
 ### Обязательно перед каждым действием:
