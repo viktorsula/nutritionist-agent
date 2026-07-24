@@ -18,7 +18,6 @@ LLM: Claude Sonnet (task_type='nutrition_analysis').
 
 import logging
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from utils.llm import call_llm, LLMUnavailableError
 from utils.knowledge import (
@@ -26,7 +25,7 @@ from utils.knowledge import (
     search_client_documents,
     build_context_from_chunks,
 )
-from utils.web_access import build_web_search_tool
+from utils.web_access import build_web_search_tool, get_trusted_domains
 from prompts import load_prompt
 from .state import ClientState
 
@@ -54,7 +53,7 @@ def nutrition_node(state: ClientState) -> ClientState:
         # доверенных доменов (нутрициолог ведёт список в system_settings).
         # Если доверенных доменов нет — инструмент не подключаем.
         call_kwargs: Dict[str, Any] = {}
-        domains = _get_trusted_domains()
+        domains = get_trusted_domains()
         if domains:
             call_kwargs['tools'] = [
                 build_web_search_tool(allowed_domains=domains, max_uses=3)
@@ -177,36 +176,6 @@ def _format_fridge_block(fridge: Dict[str, Any]) -> str:
         "в рамках плана питания, ограничений и аллергий. Не предлагай того, чего нет в списке. "
         "Если из имеющегося в рамках плана собрать сложно — честно скажи и подскажи, что докупить."
     )
-
-
-def _get_trusted_domains() -> List[str]:
-    """
-    Читает system_settings.trusted_sources и возвращает список доменов.
-
-    Значение настройки — список вида:
-    [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}, ...]
-    """
-    try:
-        from database import queries
-
-        sources = queries.get_setting('trusted_sources')
-        if not sources or not isinstance(sources, list):
-            return []
-
-        domains: List[str] = []
-        for src in sources:
-            url = src.get('url') if isinstance(src, dict) else src
-            if not url:
-                continue
-            domain = urlparse(url).netloc or str(url)
-            domain = domain.replace('www.', '').strip()
-            if domain:
-                domains.append(domain)
-        return domains
-
-    except Exception as e:
-        logger.warning(f"Не удалось прочитать trusted_sources: {e}")
-        return []
 
 
 # ==========================================

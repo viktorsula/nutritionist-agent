@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 from prompts import load_prompt
 from agents.core.agent_engine import run_agent
 from utils.format import tables_to_text
+from utils.web_access import build_web_search_tool, get_trusted_sources
 from .state import create_initial_state, extract_response
 from .intake_present import format_list, format_allergies
 from .questionnaire_context import format_questionnaire_extra
@@ -190,6 +191,12 @@ def _load_base_context(state: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"orchestrator: wellness_plan failed: {e}")
             state["wellness_plan"] = None
+
+        # Доверенные источники (P1-15/PR-D) — включают web_search как ИНСТРУМЕНТ (не
+        # allowed_domains-гейт, см. _format_web_search_block); список пуст → инструмент
+        # не подключаем вовсе (нутрициолог управляет доступностью веб-поиска через
+        # «Настройки → Доверенные источники»).
+        state["trusted_sources"] = get_trusted_sources()
     except Exception as e:
         logger.error(f"orchestrator: base context load failed: {e}", exc_info=True)
 
@@ -300,7 +307,7 @@ def _run_agent_loop(state: Dict[str, Any], images: Optional[List[Dict[str, Any]]
         system_prompt=_system_prompt(state),
         history=state.get("conversation_history"),
         user_message=state.get("message"),
-        tools=_tool_schemas(),
+        tools=_tool_schemas(state.get("trusted_sources") or []),
         tool_handlers=_build_handlers(state),
         task_type="orchestrator",
         images=images or None,
@@ -352,6 +359,12 @@ def _system_prompt(state: Dict[str, Any]) -> str:
     metrics_block = _format_controlled_metrics(state)
     if metrics_block:
         system += "\n\n" + metrics_block
+
+    # Веб-поиск (P1-15/PR-D) — только если нутрициолог настроил доверенные источники
+    # (это же условие включает сам инструмент, см. _tool_schemas).
+    web_block = _format_web_search_block(state.get("trusted_sources") or [])
+    if web_block:
+        system += "\n\n" + web_block
 
     summary = (state.get("conversation_summary") or "").strip()
     if summary:
@@ -524,11 +537,40 @@ def _format_controlled_metrics(state: Dict[str, Any]) -> str:
     )
 
 
+def _format_web_search_block(trusted_sources: List[Dict[str, str]]) -> str:
+    """
+    Инструкция для web_search (P1-15/PR-D). Решение владельца: НЕ жёсткий allowed_domains-
+    гейт (Anthropic фиксирует его на весь запрос — модель не может на лету переключаться
+    домены↔открытый интернет), а доверие оркестратору + список доверенных источников как
+    ПРЕДПОЧТЕНИЕ в промпте. Пусто, если нутрициолог не настроил ни одного источника — тогда
+    сам инструмент тоже не подключается (см. _tool_schemas), блок не нужен.
+    """
+    if not trusted_sources:
+        return ""
+    names = ", ".join(
+        f"{s.get('name') or s['url']} ({s['url']})" for s in trusted_sources
+    )
+    return (
+        "## Веб-поиск (инструмент web_search)\n"
+        "Используй ТОЛЬКО для объективных фактов о еде (КБЖУ продукта/блюда, рецепты, общая "
+        "информация о питании) — когда своих знаний и `search_knowledge` недостаточно. Порядок "
+        "источников: 1) база знаний нутрициолога (`search_knowledge`) → 2) доверенные источники "
+        f"ниже (предпочтительны, но не единственные) → 3) остальной интернет: {names}.\n"
+        "НИКОГДА не используй веб-поиск для персональных назначений клиенту (норма воды, "
+        "целевые калории, ограничения, аллергии, БАДы) — это только из блока «Назначения "
+        "нутрициолога», не из интернета.\n"
+        "Прежде чем предложить найденный в интернете факт клиенту, сверь его с уже известными "
+        "ограничениями/аллергиями/планом клиента. В ответе, где использована информация из "
+        "веб-поиска, обязательно уточни, что это справочная информация из интернета, а не "
+        "формальная рекомендация нутрициолога."
+    )
+
+
 # ==========================================
 # ИНСТРУМЕНТЫ: схемы (Anthropic) + обработчики
 # ==========================================
 
-def _tool_schemas() -> List[Dict[str, Any]]:
+def _tool_schemas(trusted_sources: Optional[List[Dict[str, str]]] = None) -> List[Dict[str, Any]]:
     kbju = {
         "type": "object",
         "properties": {
@@ -658,7 +700,20 @@ def _tool_schemas() -> List[Dict[str, Any]]:
             "description": "Найти релевантные знания (база нутрициолога + документы клиента) для совета.",
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         },
-    ]
+    ] + _web_search_tool_schema(trusted_sources)
+
+
+def _web_search_tool_schema(trusted_sources: Optional[List[Dict[str, str]]]) -> List[Dict[str, Any]]:
+    """
+    Серверный web_search (P1-15/PR-D) — только если нутрициолог настроил хотя бы один
+    доверенный источник (тот же переключатель, что и в старом графе `nutrition_agent.py`,
+    и неявный «выключатель» фичи: без источников инструмент вовсе не подключается). БЕЗ
+    allowed_domains — список источников подаётся как предпочтение в системном промпте
+    (см. _format_web_search_block), а не как жёсткий фильтр домена.
+    """
+    if not trusted_sources:
+        return []
+    return [build_web_search_tool(max_uses=3)]
 
 
 def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:

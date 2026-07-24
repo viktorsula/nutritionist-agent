@@ -407,6 +407,85 @@ def test_controlled_metrics_block_absent_when_empty():
     assert "Контролируемые показатели клиента" not in system
 
 
+# ── Веб-поиск (P1-15/PR-D) ───────────────────────────────────────────────────
+def test_tool_schemas_no_web_search_by_default():
+    names = {t["name"] for t in ao._tool_schemas()}
+    assert "web_search" not in names
+
+
+def test_tool_schemas_no_web_search_when_no_trusted_sources():
+    names = {t["name"] for t in ao._tool_schemas([])}
+    assert "web_search" not in names
+
+
+def test_tool_schemas_includes_web_search_when_trusted_sources_present():
+    trusted = [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}]
+    tools = ao._tool_schemas(trusted)
+    web_tool = next((t for t in tools if t.get("name") == "web_search"), None)
+    assert web_tool is not None
+    # Решение владельца: без allowed_domains-гейта — источники подаются как
+    # предпочтение в промпте, не как жёсткий фильтр API.
+    assert "allowed_domains" not in web_tool
+
+
+def test_load_base_context_loads_trusted_sources():
+    with patch("database.queries.get_client_by_id", return_value={"name": "Катя"}), \
+         patch("database.queries.get_client_profile", return_value={}), \
+         patch("database.queries.get_active_nutrition_plan", return_value=None), \
+         patch("database.queries.get_conversations", return_value=[]), \
+         patch("database.queries.get_latest_measurement", return_value=None), \
+         patch("database.queries.get_controlled_metrics", return_value=[]), \
+         patch("database.queries.get_wellness_plan", return_value=None), \
+         patch("agents.client.agent_orchestrator.get_trusted_sources",
+               return_value=[{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}]):
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    assert state["trusted_sources"] == [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}]
+
+
+def test_web_search_block_empty_when_no_trusted_sources():
+    assert ao._format_web_search_block([]) == ""
+
+
+def test_web_search_block_lists_trusted_sources_as_preference():
+    trusted = [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}]
+    block = ao._format_web_search_block(trusted)
+    assert "## Веб-поиск" in block
+    assert "PubMed" in block and "pubmed.ncbi.nlm.nih.gov" in block
+    assert "НИКОГДА" in block  # запрет на персональные назначения из интернета
+
+
+def test_system_prompt_includes_web_search_block_when_trusted_sources_present():
+    state = {
+        "client_profile": {"name": "Катя"}, "active_plan": None,
+        "trusted_sources": [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}],
+    }
+    system = ao._system_prompt(state)
+    assert "## Веб-поиск" in system and "PubMed" in system
+
+
+def test_system_prompt_no_web_search_block_when_no_trusted_sources():
+    system = ao._system_prompt({"client_profile": {"name": "Катя"}, "active_plan": None})
+    assert "## Веб-поиск" not in system
+
+
+def test_run_agent_loop_passes_web_search_tool_when_trusted_sources_present():
+    state = {
+        "client_id": "cid", "client_profile": {"name": "Катя"}, "conversation_history": [],
+        "trusted_sources": [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}],
+    }
+    captured = {}
+
+    def fake_call(**kw):
+        captured["tools"] = kw["tools"]
+        return {"content": "ок", "model": "m", "usage": {}}
+
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call):
+        ao._run_agent_loop(state)
+
+    assert any(t.get("name") == "web_search" for t in captured["tools"])
+
+
 # ── Цикл агента ──────────────────────────────────────────────────────────────
 def test_run_agent_loop_sets_state_and_returns_text():
     state = {"client_id": "cid", "client_profile": {"name": "Катя"}, "conversation_history": []}

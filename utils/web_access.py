@@ -21,6 +21,7 @@ Web Access — веб-поиск через серверный инструме�
 
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -66,3 +67,36 @@ def build_web_search_tool(
         tool["blocked_domains"] = blocked_domains
 
     return tool
+
+
+# ========================================
+# ДОВЕРЕННЫЕ ИСТОЧНИКИ (system_settings.trusted_sources)
+# ========================================
+
+def get_trusted_sources() -> List[Dict[str, str]]:
+    """
+    Читает system_settings.trusted_sources — список вида
+    [{"name": "PubMed", "url": "https://pubmed.ncbi.nlm.nih.gov"}, ...],
+    который ведёт нутрициолог. При отсутствии/ошибке — [].
+    """
+    try:
+        from database import queries
+
+        sources = queries.get_setting('trusted_sources')
+        if not sources or not isinstance(sources, list):
+            return []
+        return [s for s in sources if isinstance(s, dict) and s.get('url')]
+    except Exception as e:
+        logger.warning(f"Не удалось прочитать trusted_sources: {e}")
+        return []
+
+
+def get_trusted_domains() -> List[str]:
+    """Домены доверенных источников (для allowed_domains-гейта старого графа)."""
+    domains: List[str] = []
+    for src in get_trusted_sources():
+        domain = urlparse(src['url']).netloc or src['url']
+        domain = domain.replace('www.', '').strip()
+        if domain:
+            domains.append(domain)
+    return domains
