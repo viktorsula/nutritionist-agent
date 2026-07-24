@@ -126,6 +126,60 @@ DEFAULT_TASK_MODEL_MAPPING = {
 
 
 # ========================================
+# TOOL-CALLING: КАКИЕ ЗАДАЧИ ЕГО ТРЕБУЮТ, КАКИЕ ПРОВАЙДЕРЫ ЕГО УМЕЮТ (P0-4)
+# ========================================
+# orchestrator/nutritionist_orchestrator работают через tool-calling: модель вызывает
+# инструменты (log_meal, get_client_data, ...), код их выполняет и возвращает результат
+# обратно (цикл tool_use → выполнение → tool_result). Ниже — только провайдеры, чей
+# адаптер этот цикл реально умеет (сейчас только _call_claude); для остальных call_llm
+# молча вырезает tools/tool_handlers (не умеют — не поймут). Раньше это не было явно
+# сформулировано, поэтому если нутрициолог менял провайдера этих задач через кабинет —
+# оркестратор продолжал отвечать текстом, но переставал что-либо записывать, без единой
+# ошибки в логах (тихая потеря данных).
+#
+# Это НЕ жёсткая привязка к бренду Claude — это отражение того, для какого провайдера
+# цикл инструментов реально написан. Добавление нового провайдера сюда — однострочное
+# изменение ПОСЛЕ того, как для него появится такой же цикл в своём адаптере (см. P2-22
+# в diagnostic_report.md — работа под конкретного провайдера, отдельная задача).
+TOOL_CAPABLE_PROVIDERS = {'claude'}
+
+TOOL_REQUIRED_TASK_TYPES = {'orchestrator', 'nutritionist_orchestrator'}
+
+
+def validate_llm_config(value: Any) -> List[str]:
+    """
+    Валидация system_settings.llm_config перед сохранением (P0-4) — правило «только
+    провайдер с tool-calling» для TOOL_REQUIRED_TASK_TYPES, зеркало фронтового
+    validateLlmConfig (frontend/.../llmConfigValidation.ts), чтобы прямой вызов API
+    не мог обойти проверку. Пусто = ок; None (сброс на код-дефолты) — тоже ок.
+    """
+    errors: List[str] = []
+    if value is None:
+        return errors
+    if not isinstance(value, dict):
+        return ["root: ожидается объект { task_type: {...} }"]
+
+    for task in TOOL_REQUIRED_TASK_TYPES:
+        entry = value.get(task)
+        if not isinstance(entry, dict):
+            continue
+        provider = entry.get('provider')
+        if provider not in TOOL_CAPABLE_PROVIDERS:
+            errors.append(
+                f"{task}.provider: должен быть одним из {sorted(TOOL_CAPABLE_PROVIDERS)} "
+                f"(инструменты/tool-calling у этой задачи работают только там — другой "
+                f"провайдер молча теряет все инструменты записи данных клиента)"
+            )
+        for i, fb in enumerate(entry.get('fallbacks') or []):
+            if isinstance(fb, dict) and fb.get('provider') not in TOOL_CAPABLE_PROVIDERS:
+                errors.append(
+                    f"{task}.fallbacks[{i}].provider: должен быть одним из "
+                    f"{sorted(TOOL_CAPABLE_PROVIDERS)}"
+                )
+    return errors
+
+
+# ========================================
 # ВЗАИМОРЕЗЕРВИРОВАНИЕ МОДЕЛЕЙ (graceful degradation)
 # ========================================
 # При сбое основной модели (лимиты, падение провайдера, нет кредитов) call_llm
@@ -316,9 +370,10 @@ def call_llm(
     for idx, cand in enumerate(candidates):
         start_time = time.monotonic()
         # tools (серверный web_search / клиентские инструменты) + tool_handlers —
-        # только для Claude; иначе убираем (остальные провайдеры их не понимают).
+        # только для провайдеров с реализованным циклом (TOOL_CAPABLE_PROVIDERS);
+        # иначе убираем (эти провайдеры формат tool_use/tool_result не понимают).
         call_kwargs = dict(kwargs)
-        if cand['provider'] != 'claude':
+        if cand['provider'] not in TOOL_CAPABLE_PROVIDERS:
             call_kwargs.pop('tools', None)
             call_kwargs.pop('tool_handlers', None)
             call_kwargs.pop('max_tool_iterations', None)
@@ -425,14 +480,26 @@ def get_model_config(task_type: str) -> Dict[str, Any]:
         llm_config = queries.get_setting('llm_config')
 
         if llm_config and isinstance(llm_config, dict) and task_type in llm_config:
-            logger.info(
-                f"Loaded LLM config from system_settings for task_type='{task_type}'"
-            )
             # 'fallbacks' резолвится отдельно (resolve_fallback_chain) — в основной
             # конфиг модели его не пускаем, чтобы не путать вызов провайдера.
             cfg = dict(llm_config[task_type])
             cfg.pop('fallbacks', None)
-            return cfg
+
+            # P0-4: самолечение на случай, если в БД уже лежит непригодный провайдер
+            # для tool-calling задачи (напр. записано ДО этого фикса, или save_setting
+            # обойдён напрямую) — иначе оркестратор молча теряет все инструменты.
+            # validate_llm_config должен был отсечь это ещё при сохранении.
+            if task_type in TOOL_REQUIRED_TASK_TYPES and cfg.get('provider') not in TOOL_CAPABLE_PROVIDERS:
+                logger.warning(
+                    f"llm_config['{task_type}'].provider={cfg.get('provider')!r} не умеет "
+                    f"tool-calling — игнорирую DB-переопределение, использую код-дефолт "
+                    f"(должно быть отсечено validate_llm_config при сохранении)"
+                )
+            else:
+                logger.info(
+                    f"Loaded LLM config from system_settings for task_type='{task_type}'"
+                )
+                return cfg
 
     except ImportError:
         # database.queries ещё не готов или недоступен
@@ -477,10 +544,21 @@ def resolve_fallback_chain(task_type: str) -> List[Dict[str, str]]:
         if isinstance(llm_config, dict):
             task_cfg = llm_config.get(task_type)
             if isinstance(task_cfg, dict) and isinstance(task_cfg.get('fallbacks'), list):
+                tool_required = task_type in TOOL_REQUIRED_TASK_TYPES
                 chain: List[Dict[str, str]] = []
                 for fb in task_cfg['fallbacks']:
-                    if isinstance(fb, dict) and fb.get('provider') and fb.get('model'):
-                        chain.append({'provider': fb['provider'], 'model': fb['model']})
+                    if not (isinstance(fb, dict) and fb.get('provider') and fb.get('model')):
+                        continue
+                    # P0-4: самолечение — тот же принцип, что в get_model_config, чтобы
+                    # резервная модель не потеряла tools молча (validate_llm_config должен
+                    # был отсечь это при сохранении).
+                    if tool_required and fb['provider'] not in TOOL_CAPABLE_PROVIDERS:
+                        logger.warning(
+                            f"resolve_fallback_chain: '{task_type}'.fallbacks содержит "
+                            f"provider={fb['provider']!r} без tool-calling — пропускаю"
+                        )
+                        continue
+                    chain.append({'provider': fb['provider'], 'model': fb['model']})
                 return chain
     except Exception as e:
         logger.warning(

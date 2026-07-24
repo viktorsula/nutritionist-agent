@@ -94,3 +94,51 @@ describe("validateLlmConfig", () => {
     ]);
   });
 });
+
+describe("validateLlmConfig — P0-4: orchestrator/nutritionist_orchestrator требуют tool-capable провайдера", () => {
+  it("claude для orchestrator — допустимо", () => {
+    const cfg = { orchestrator: { provider: "claude", model: "claude-sonnet-4-6" } };
+    expect(validateLlmConfig(cfg)).toEqual([]);
+  });
+
+  it("не-claude провайдер для orchestrator → ошибка", () => {
+    const cfg = { orchestrator: { provider: "groq", model: "llama-3.3-70b-versatile" } };
+    expect(validateLlmConfig(cfg)).toEqual([
+      "orchestrator.provider: должен быть одним из claude (инструменты работают только " +
+        "там — другой провайдер молча теряет все инструменты записи данных клиента)",
+    ]);
+  });
+
+  it("не-claude провайдер для nutritionist_orchestrator → ошибка", () => {
+    const cfg = { nutritionist_orchestrator: { provider: "gemini", model: "gemini-2.5-flash" } };
+    expect(validateLlmConfig(cfg).length).toBe(1);
+  });
+
+  it("не-claude в fallbacks orchestrator → адресная ошибка", () => {
+    const cfg = {
+      orchestrator: {
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        fallbacks: [{ provider: "groq", model: "llama-3.3-70b-versatile" }],
+      },
+    };
+    const errs = validateLlmConfig(cfg);
+    expect(errs.some((e) => e.startsWith("orchestrator.fallbacks[0].provider:"))).toBe(true);
+  });
+
+  it("claude в fallbacks orchestrator — допустимо", () => {
+    const cfg = {
+      orchestrator: {
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        fallbacks: [{ provider: "claude", model: "claude-haiku-4-5" }],
+      },
+    };
+    expect(validateLlmConfig(cfg)).toEqual([]);
+  });
+
+  it("не-tool-задачи (dialog/analytics/...) — любой известный провайдер допустим", () => {
+    const cfg = { dialog: { provider: "groq", model: "llama-3.3-70b-versatile" } };
+    expect(validateLlmConfig(cfg)).toEqual([]);
+  });
+});

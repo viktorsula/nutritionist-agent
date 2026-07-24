@@ -2,6 +2,18 @@
 export const KNOWN_PROVIDERS = ["groq", "claude", "gemini"];
 
 /**
+ * Провайдеры с реализованным циклом tool-calling (см. utils/llm.py::TOOL_CAPABLE_PROVIDERS
+ * — то же множество, зеркалим на фронте для мгновенной обратной связи в редакторе).
+ * Не бренд-привязка: это ровно те провайдеры, чей адаптер умеет цикл tool_use →
+ * выполнение → tool_result. Расширяется, когда появится такой же цикл для другого
+ * провайдера (P2-22 в diagnostic_report.md).
+ */
+export const TOOL_CAPABLE_PROVIDERS = ["claude"];
+
+/** Задачи с tool-calling — их провайдер обязан быть из TOOL_CAPABLE_PROVIDERS. */
+export const TOOL_REQUIRED_TASKS = ["orchestrator", "nutritionist_orchestrator"];
+
+/**
  * Структурная валидация llm_config (поверх JSON.parse). Возвращает список ошибок
  * (пустой = ок). Пустое значение (null) допустимо — откат на код-дефолты.
  *
@@ -60,6 +72,18 @@ export function validateLlmConfig(parsed: unknown): string[] {
     checkProvider(task, entry.provider);
     checkModel(task, entry.model);
 
+    const toolRequired = TOOL_REQUIRED_TASKS.includes(task);
+    const checkToolCapable = (where: string, p: unknown) => {
+      if (toolRequired && typeof p === "string" && !TOOL_CAPABLE_PROVIDERS.includes(p)) {
+        errors.push(
+          `${where}.provider: должен быть одним из ${TOOL_CAPABLE_PROVIDERS.join(", ")} ` +
+            `(инструменты работают только там — другой провайдер молча теряет все ` +
+            `инструменты записи данных клиента)`,
+        );
+      }
+    };
+    checkToolCapable(task, entry.provider);
+
     if (entry.fallbacks !== undefined) {
       if (!Array.isArray(entry.fallbacks)) {
         errors.push(`${task}.fallbacks: массив`);
@@ -72,6 +96,7 @@ export function validateLlmConfig(parsed: unknown): string[] {
           const f = fb as Record<string, unknown>;
           checkProvider(`${task}.fallbacks[${i}]`, f.provider);
           checkModel(`${task}.fallbacks[${i}]`, f.model);
+          checkToolCapable(`${task}.fallbacks[${i}]`, f.provider);
         });
       }
     }
