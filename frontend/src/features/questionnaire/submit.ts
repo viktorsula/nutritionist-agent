@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 import { safeStorageName } from "../client/documents";
 import { IMPROVE } from "./schema";
 
@@ -98,6 +99,14 @@ export async function submitQuestionnaire(
     .upsert(profile, { onConflict: "client_id" });
   if (pErr) throw new Error(pErr.message);
 
+  // 1b. История изменений анкеты (миграция 017) — снимок ПОЛНЫХ ответов при каждой
+  // отправке (первичной и повторных), append-only. client_profiles.questionnaire_json
+  // выше — только текущий снимок; здесь — вся история, ничего не перезаписывается.
+  const { error: hErr } = await supabase
+    .from("client_questionnaire_history")
+    .insert({ client_id: clientId, questionnaire_json: answers });
+  if (hErr) console.warn("questionnaire history insert failed:", hErr.message);
+
   // 2. Стартовая запись замеров (если есть хоть один показатель)
   const weight = num(answers.weight);
   const neck = num(answers.neck);
@@ -118,5 +127,14 @@ export async function submitQuestionnaire(
   // 3. PDF анализов (необязательно, требует настроенного бакета)
   if (files.length > 0) {
     await uploadLabFiles(clientId, files);
+  }
+
+  // 4. Пересобрать саммари анкеты (LLM) + гарантированно уведомить нутрициолога об
+  // изменении (миграция 017). Best-effort: анкета уже сохранена выше независимо от
+  // результата этого вызова (сбой LLM не должен блокировать завершение онбординга).
+  try {
+    await api.questionnaireSummary();
+  } catch (e) {
+    console.warn("questionnaire summary regeneration failed:", e);
   }
 }

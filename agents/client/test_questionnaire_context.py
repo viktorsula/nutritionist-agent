@@ -5,7 +5,7 @@
 
 import unittest
 
-from agents.client.questionnaire_context import format_questionnaire_extra
+from agents.client.questionnaire_context import format_questionnaire_extra, build_summary_input
 
 
 class TestFormatQuestionnaireExtra(unittest.TestCase):
@@ -59,6 +59,35 @@ class TestFormatQuestionnaireExtra(unittest.TestCase):
         lines = out.split("\n")
         self.assertEqual(len(lines), 4)
         self.assertIn("Поддержка семьи в ЗОЖ: Поддерживают", out)
+
+
+class TestBuildSummaryInput(unittest.TestCase):
+    def test_none_profile_returns_empty(self):
+        self.assertEqual(build_summary_input(None), "")
+
+    def test_structured_fields_included(self):
+        profile = {
+            "birth_date": "1990-01-01",
+            "gender": "female",
+            "goals": "снижение веса",
+            "weight": 70,
+            "target_weight": 60,
+            "chronic_conditions": ["гипотиреоз"],
+            "allergies": ["орехи"],
+        }
+        out = build_summary_input(profile)
+        self.assertIn("снижение веса", out)
+        self.assertIn("70 кг → цель 60 кг", out)
+        self.assertIn("гипотиреоз", out)
+        self.assertIn("орехи", out)
+
+    def test_includes_questionnaire_extra(self):
+        profile = {"questionnaire_json": {"medications": "витамин D"}}
+        out = build_summary_input(profile)
+        self.assertIn("Принимаемые препараты: витамин D", out)
+
+    def test_empty_profile_returns_empty(self):
+        self.assertEqual(build_summary_input({}), "")
 
 
 if __name__ == "__main__":

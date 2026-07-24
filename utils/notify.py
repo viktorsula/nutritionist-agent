@@ -28,6 +28,7 @@ _EVENT_LABEL = {
     "food_forbidden": "Запрещённый продукт",
     "food_incompatible": "Несочетаемые продукты",
     "no_response": "Нет ответа клиента",
+    "questionnaire_updated": "Анкета обновлена",
 }
 
 

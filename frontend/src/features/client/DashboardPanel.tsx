@@ -1,8 +1,12 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../auth/AuthProvider";
 import { Card } from "../../components/ui/Card";
+import { Button } from "../../components/ui/Button";
 import { useClientProfile, useWellnessPlan, useActivePlan } from "./queries";
 import { DocumentsCard } from "./DocumentsCard";
+import { Questionnaire } from "../questionnaire/Questionnaire";
 
 function age(birth?: string | null): number | null {
   if (!birth) return null;
@@ -15,9 +19,11 @@ function age(birth?: string | null): number | null {
 export function DashboardPanel({ clientId }: { clientId: string }) {
   const { t } = useTranslation();
   const { appUser } = useAuth();
+  const queryClient = useQueryClient();
   const profile = useClientProfile(clientId);
   const wellness = useWellnessPlan(clientId);
   const plan = useActivePlan(clientId);
+  const [editing, setEditing] = useState(false);
 
   const p = profile.data;
   const w = wellness.data;
@@ -45,7 +51,26 @@ export function DashboardPanel({ clientId }: { clientId: string }) {
         {row(t("client.current_weight"), p?.weight ? `${p.weight} кг` : dash)}
         {row(t("client.target_weight"), p?.target_weight ? `${p.target_weight} кг` : dash)}
         {row(t("client.goal"), p?.goals)}
+        <div className="mt-2">
+          <Button variant="outline" onClick={() => setEditing(true)}>
+            {t("client.edit_questionnaire")}
+          </Button>
+        </div>
       </Card>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-50">
+          <Questionnaire
+            clientId={clientId}
+            initialAnswers={(p?.questionnaire_json as Record<string, unknown>) ?? {}}
+            onCancel={() => setEditing(false)}
+            onDone={() => {
+              setEditing(false);
+              queryClient.invalidateQueries({ queryKey: ["client_profile", clientId] });
+            }}
+          />
+        </div>
+      )}
 
       <Card title={t("client.recommendations")}>
         {plan.data?.title ? (

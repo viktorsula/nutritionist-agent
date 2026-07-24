@@ -75,6 +75,64 @@ class TestApi(unittest.TestCase):
         r = self.client.post("/chat", json={"message": ""})
         self.assertEqual(r.status_code, 422)
 
+    # --- /questionnaire-summary (роль client, миграция 017) ---
+    def test_questionnaire_summary_rejects_nutritionist(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.post("/questionnaire-summary")
+        self.assertEqual(r.status_code, 403)
+
+    def test_questionnaire_summary_missing_client_id(self):
+        app.dependency_overrides[get_current_user] = lambda: {
+            "role": "client", "user_id": "u", "client_id": None
+        }
+        r = self.client.post("/questionnaire-summary")
+        self.assertEqual(r.status_code, 400)
+
+    def test_questionnaire_summary_ok_saves_and_notifies(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_client_profile", return_value={"goals": "снижение веса"}), \
+             patch("agents.client.questionnaire_summary.build_questionnaire_summary",
+                   return_value="Катя хочет снизить вес.") as build_mock, \
+             patch("database.queries.set_questionnaire_summary") as set_mock, \
+             patch("utils.notify.nutritionist_chat_id", return_value="12345"), \
+             patch("database.queries.log_client_event") as log_mock:
+            r = self.client.post("/questionnaire-summary")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["summary"], "Катя хочет снизить вес.")
+        build_mock.assert_called_once_with({"goals": "снижение веса"})
+        set_mock.assert_called_once_with("c-1", "Катя хочет снизить вес.")
+        log_mock.assert_called_once()
+        self.assertEqual(log_mock.call_args.kwargs["event_type"], "questionnaire_updated")
+        self.assertEqual(log_mock.call_args.kwargs["severity"], "medium")
+
+    def test_questionnaire_summary_no_nutritionist_telegram_skips_event(self):
+        # Нутрициолог не привязал Telegram — некому слать, событие не создаём.
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_client_profile", return_value={}), \
+             patch("agents.client.questionnaire_summary.build_questionnaire_summary",
+                   return_value=None), \
+             patch("utils.notify.nutritionist_chat_id", return_value=None), \
+             patch("database.queries.log_client_event") as log_mock:
+            r = self.client.post("/questionnaire-summary")
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["summary"])
+        log_mock.assert_not_called()
+
+    def test_questionnaire_summary_llm_failure_still_notifies(self):
+        # Саммари не собралось (сбой LLM) — уведомление всё равно уходит, без текста сводки.
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_client_profile", return_value={}), \
+             patch("agents.client.questionnaire_summary.build_questionnaire_summary",
+                   return_value=None), \
+             patch("database.queries.set_questionnaire_summary") as set_mock, \
+             patch("utils.notify.nutritionist_chat_id", return_value="12345"), \
+             patch("database.queries.log_client_event") as log_mock:
+            r = self.client.post("/questionnaire-summary")
+        self.assertEqual(r.status_code, 200)
+        set_mock.assert_not_called()
+        log_mock.assert_called_once()
+        self.assertIn("обновил анкету", log_mock.call_args.kwargs["payload"]["message"])
+
     # --- /nutritionist/query (роль nutritionist) ---
     def test_nutritionist_query_rejects_client(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

@@ -135,6 +135,13 @@ PROMPTS: List[Dict[str, str]] = [
         "llm": "Groq",
     },
     {
+        "key": "system/questionnaire_summary",
+        "label_ru": "Саммари анкеты онбординга",
+        "label_en": "Onboarding questionnaire summary",
+        "section": SECTION_SYSTEM,
+        "llm": "Groq",
+    },
+    {
         "key": "system/client_summary",
         "label_ru": "Сводка диалога (память)",
         "label_en": "Conversation summary",

@@ -13,7 +13,7 @@ import {
   useLabResults,
   useNutritionDaily,
 } from "../client/queries";
-import { useClientEventsRecent, useClientRow } from "./queries";
+import { useClientEventsRecent, useClientRow, useQuestionnaireHistory } from "./queries";
 import { NotificationSettings } from "./NotificationSettings";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
@@ -84,12 +84,22 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
   const labs = useLabResults(clientId);
   const nutrition = useNutritionDaily(clientId);
   const events = useClientEventsRecent(clientId);
+  const questionnaireHistory = useQuestionnaireHistory(clientId);
+  const [questionnaireVersionId, setQuestionnaireVersionId] = useState("");
 
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesOk, setNotesOk] = useState(false);
   const [alertsOnly, setAlertsOnly] = useState(false);
   useEffect(() => setNotes(client?.nutritionist_notes ?? ""), [clientId, client?.nutritionist_notes]);
+
+  // Анкета: по умолчанию выбрана последняя версия истории (свежая сверху).
+  useEffect(() => {
+    const list = questionnaireHistory.data ?? [];
+    if (!list.some((h) => h.id === questionnaireVersionId)) {
+      setQuestionnaireVersionId(list[0]?.id ?? "");
+    }
+  }, [questionnaireHistory.data, questionnaireVersionId]);
 
   // Привязка Telegram: создать одноразовую ссылку / отвязать.
   const [tgLink, setTgLink] = useState("");
@@ -284,13 +294,33 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
             </div>
           )}
 
-          {/* Полная анкета онбординга — read-only просмотр (P1-14) */}
+          {/* Полная анкета онбординга — read-only просмотр + история версий (P1-14, миграция 017) */}
           <details className="mt-3 border-t pt-3">
             <summary className="cursor-pointer text-xs font-medium text-gray-600">
               {t("card.questionnaire")}
             </summary>
             <div className="mt-2">
-              <QuestionnaireView answers={p?.questionnaire_json as Record<string, unknown> | null} />
+              {(questionnaireHistory.data?.length ?? 0) > 1 && (
+                <select
+                  className="mb-2 w-full rounded-md border px-2 py-1 text-xs"
+                  value={questionnaireVersionId}
+                  onChange={(e) => setQuestionnaireVersionId(e.target.value)}
+                >
+                  {questionnaireHistory.data!.map((h, i) => (
+                    <option key={h.id} value={h.id}>
+                      {new Date(h.submitted_at).toLocaleString()}
+                      {i === 0 ? ` (${t("card.questionnaire_current")})` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <QuestionnaireView
+                answers={
+                  (questionnaireHistory.data?.find((h) => h.id === questionnaireVersionId)
+                    ?.questionnaire_json as Record<string, unknown> | undefined) ??
+                  (p?.questionnaire_json as Record<string, unknown> | null)
+                }
+              />
             </div>
           </details>
 
