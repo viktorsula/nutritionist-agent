@@ -3,9 +3,12 @@
 
 Гранулярные пункты (требование информированного согласия — не одна общая галочка):
 - health_data — обработка данных о здоровье (вес/рост/заболевания/аллергии/анализы/дневник);
-- telegram_channel — использование Telegram как канала связи;
-- cross_border_transfer — трансграничная передача/хранение (актуально, пока LEGAL-2
-  (локализация в ОАЭ) отложена решением владельца на этап пилота — см. diagnostic_report.md).
+- telegram_channel — использование Telegram как канала связи.
+
+Пункт про трансграничную передачу данных сознательно НЕ включён (решение владельца,
+24.07.2026): не снимает юридический риск LEGAL-2 (локализация в ОАЭ, отложена на этап
+пилота) — тот остаётся как есть, отдельное согласие на передачу его не покрывает и по
+факту порождало вопросы клиентов без практической пользы.
 
 Текст редактируется нутрициологом как обычная настройка (POST /nutritionist/setting,
 ключ 'consent_text' — тот же механизм, что trusted_sources/llm_config), с дефолтом здесь на
@@ -28,10 +31,6 @@ DEFAULT_CONSENT_TEXT: Dict[str, Any] = {
             "Я согласен(на) на использование Telegram в качестве канала связи для получения "
             "напоминаний и общения с ассистентом."
         ),
-        "cross_border_transfer": (
-            "Я согласен(на) на трансграничную передачу и хранение моих данных на серверах "
-            "за пределами ОАЭ (используемых сервис-провайдерами платформы)."
-        ),
     },
     "en": {
         "health_data": (
@@ -42,10 +41,6 @@ DEFAULT_CONSENT_TEXT: Dict[str, Any] = {
         "telegram_channel": (
             "I agree to use Telegram as a communication channel for reminders and "
             "conversations with the assistant."
-        ),
-        "cross_border_transfer": (
-            "I agree to the cross-border transfer and storage of my data on servers located "
-            "outside the UAE (used by the platform's service providers)."
         ),
     },
 }

@@ -27,9 +27,9 @@ class TestGetConsentText(unittest.TestCase):
         with patch("database.queries.get_setting", side_effect=RuntimeError("db down")):
             self.assertEqual(get_consent_text(), DEFAULT_CONSENT_TEXT)
 
-    def test_default_has_all_three_granular_points_ru_and_en(self):
+    def test_default_has_both_granular_points_ru_and_en(self):
         for lang in ("ru", "en"):
-            for key in ("health_data", "telegram_channel", "cross_border_transfer"):
+            for key in ("health_data", "telegram_channel"):
                 self.assertTrue(DEFAULT_CONSENT_TEXT[lang][key])
 
 

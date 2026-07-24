@@ -12,7 +12,7 @@ interface Props {
 /**
  * Блокирующий шаг согласия на обработку персональных данных (LEGAL-1, миграция 018) —
  * показывается ДО анкеты онбординга (Federal Law №2/2019 требует согласие ДО сбора данных
- * о здоровье). Три гранулярных пункта, «Продолжить» неактивна, пока не отмечены все три.
+ * о здоровье). Два гранулярных пункта, «Продолжить» неактивна, пока не отмечены оба.
  * Гейт в ClientArea.tsx: показывается заново, если версия текста изменилась с последнего
  * согласия клиента.
  */
@@ -27,11 +27,10 @@ export function ConsentGate({ onDone }: Props) {
 
   const [healthData, setHealthData] = useState(false);
   const [telegramChannel, setTelegramChannel] = useState(false);
-  const [crossBorder, setCrossBorder] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const allChecked = healthData && telegramChannel && crossBorder;
+  const allChecked = healthData && telegramChannel;
 
   async function submit() {
     if (!allChecked) {
@@ -44,7 +43,6 @@ export function ConsentGate({ onDone }: Props) {
       await api.acceptConsent({
         health_data: healthData,
         telegram_channel: telegramChannel,
-        cross_border_transfer: crossBorder,
       });
       onDone();
     } catch (e) {
@@ -91,15 +89,6 @@ export function ConsentGate({ onDone }: Props) {
                 onChange={(e) => setTelegramChannel(e.target.checked)}
               />
               <span>{texts.telegram_channel}</span>
-            </label>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={crossBorder}
-                onChange={(e) => setCrossBorder(e.target.checked)}
-              />
-              <span>{texts.cross_border_transfer}</span>
             </label>
           </div>
 

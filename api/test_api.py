@@ -148,12 +148,10 @@ class TestApi(unittest.TestCase):
         self.assertEqual(body["version"], "1.0")
         self.assertIn("health_data", body["ru"])
         self.assertIn("telegram_channel", body["ru"])
-        self.assertIn("cross_border_transfer", body["ru"])
 
     def test_consent_text_returns_db_override(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
-        override = {"version": "2.0", "ru": {"health_data": "x", "telegram_channel": "y",
-                                              "cross_border_transfer": "z"}, "en": {}}
+        override = {"version": "2.0", "ru": {"health_data": "x", "telegram_channel": "y"}, "en": {}}
         with patch("database.queries.get_setting", return_value=override):
             r = self.client.get("/consent-text")
         self.assertEqual(r.status_code, 200)
@@ -163,7 +161,7 @@ class TestApi(unittest.TestCase):
     def test_consent_rejects_nutritionist(self):
         app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
         r = self.client.post("/consent", json={
-            "health_data": True, "telegram_channel": True, "cross_border_transfer": True,
+            "health_data": True, "telegram_channel": True,
         })
         self.assertEqual(r.status_code, 403)
 
@@ -172,7 +170,7 @@ class TestApi(unittest.TestCase):
             "role": "client", "user_id": "u", "client_id": None
         }
         r = self.client.post("/consent", json={
-            "health_data": True, "telegram_channel": True, "cross_border_transfer": True,
+            "health_data": True, "telegram_channel": True,
         })
         self.assertEqual(r.status_code, 400)
 
@@ -180,7 +178,7 @@ class TestApi(unittest.TestCase):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
         with patch("database.queries.insert_client_consent") as insert_mock:
             r = self.client.post("/consent", json={
-                "health_data": True, "telegram_channel": False, "cross_border_transfer": True,
+                "health_data": True, "telegram_channel": False,
             })
         self.assertEqual(r.status_code, 400)
         insert_mock.assert_not_called()
@@ -191,13 +189,13 @@ class TestApi(unittest.TestCase):
              patch("database.queries.insert_client_consent") as insert_mock, \
              patch("database.queries.write_audit_log") as audit_mock:
             r = self.client.post("/consent", json={
-                "health_data": True, "telegram_channel": True, "cross_border_transfer": True,
+                "health_data": True, "telegram_channel": True,
             })
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.json()["ok"])
         insert_mock.assert_called_once_with(
             client_id="c-1", consent_version="1.0",
-            health_data=True, telegram_channel=True, cross_border_transfer=True,
+            health_data=True, telegram_channel=True,
             channel="web",
         )
         audit_mock.assert_called_once()

@@ -103,7 +103,6 @@ class SaveSettingIn(BaseModel):
 class ConsentIn(BaseModel):
     health_data: bool = Field(...)
     telegram_channel: bool = Field(...)
-    cross_border_transfer: bool = Field(...)
 
 
 class GenerateReportIn(BaseModel):
@@ -274,7 +273,7 @@ def accept_consent(
 ) -> Dict[str, bool]:
     """
     Фиксирует согласие клиента на обработку данных (LEGAL-1/LEGAL-5) — блокирующий шаг
-    перед анкетой онбординга (см. ClientArea.tsx). Все три пункта обязательны: гранулярное
+    перед анкетой онбординга (см. ClientArea.tsx). Оба пункта обязательны: гранулярное
     согласие ≠ частичное — сервер отклоняет запрос, если хоть один флаг false, НЕ полагаясь
     только на клиентский чекбокс-гейт (та же защита продублирована CHECK-констрейнтом в БД).
     Версию текста сервер берёт сам (не из тела) — чтобы клиент не мог подделать, какую
@@ -286,7 +285,7 @@ def accept_consent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Client profile not found for this user",
         )
-    if not (body.health_data and body.telegram_channel and body.cross_border_transfer):
+    if not (body.health_data and body.telegram_channel):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Для продолжения нужно принять все пункты согласия",
@@ -301,7 +300,6 @@ def accept_consent(
         consent_version=version,
         health_data=body.health_data,
         telegram_channel=body.telegram_channel,
-        cross_border_transfer=body.cross_border_transfer,
         channel="web",
     )
     queries.write_audit_log(

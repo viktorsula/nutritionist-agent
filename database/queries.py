@@ -691,7 +691,6 @@ def insert_client_consent(
     consent_version: str,
     health_data: bool,
     telegram_channel: bool,
-    cross_border_transfer: bool,
     channel: str = "web",
 ) -> Optional[Dict[str, Any]]:
     """Запись факта согласия клиента (LEGAL-1/LEGAL-5, миграция 018) — append-only."""
@@ -702,7 +701,6 @@ def insert_client_consent(
             "consent_version": consent_version,
             "health_data": health_data,
             "telegram_channel": telegram_channel,
-            "cross_border_transfer": cross_border_transfer,
             "channel": channel,
         })
     )
