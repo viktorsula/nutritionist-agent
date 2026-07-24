@@ -43,6 +43,14 @@ export function SettingsPanel() {
         <TrustedSources />
       </Section>
 
+      <Section title={t("settings.consent.title")}>
+        <p className="mb-2 text-xs text-gray-500">{t("settings.consent.hint")}</p>
+        <JsonSetting
+          settingKey="consent_text"
+          hint='{"version": "1.1", "ru": {"health_data": "...", "telegram_channel": "..."}, "en": {...}}'
+        />
+      </Section>
+
       <Section title={t("settings.knowledge.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.knowledge.hint")}</p>
         <KnowledgeBase />

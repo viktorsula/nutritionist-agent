@@ -100,6 +100,11 @@ class SaveSettingIn(BaseModel):
     value: Any = None  # произвольный JSON (список/объект/число/строка)
 
 
+class ConsentIn(BaseModel):
+    health_data: bool = Field(...)
+    telegram_channel: bool = Field(...)
+
+
 class GenerateReportIn(BaseModel):
     client_id: str = Field(..., min_length=1)
     report_type: str = Field("recommendations")
@@ -246,6 +251,66 @@ def questionnaire_summary(user: Dict[str, Any] = Depends(require_role("client"))
         )
 
     return {"summary": summary}
+
+
+@app.get("/consent-text")
+def consent_text_route(user: Dict[str, Any] = Depends(require_role("client"))) -> Dict[str, Any]:
+    """
+    Текущий текст согласия (LEGAL-1) для гейта в ClientArea.tsx: {version, ru:{...}, en:{...}}.
+    Клиент не может читать system_settings напрямую (RLS — только нутрициолог), поэтому
+    отдаём через бэкенд. Текст правит нутрициолог через POST /nutritionist/setting
+    (ключ 'consent_text'); дефолт — utils/consent.py.
+    """
+    from utils.consent import get_consent_text
+
+    return get_consent_text()
+
+
+@app.post("/consent")
+def accept_consent(
+    body: ConsentIn,
+    user: Dict[str, Any] = Depends(require_role("client")),
+) -> Dict[str, bool]:
+    """
+    Фиксирует согласие клиента на обработку данных (LEGAL-1/LEGAL-5) — блокирующий шаг
+    перед анкетой онбординга (см. ClientArea.tsx). Оба пункта обязательны: гранулярное
+    согласие ≠ частичное — сервер отклоняет запрос, если хоть один флаг false, НЕ полагаясь
+    только на клиентский чекбокс-гейт (та же защита продублирована CHECK-констрейнтом в БД).
+    Версию текста сервер берёт сам (не из тела) — чтобы клиент не мог подделать, какую
+    версию он якобы принял.
+    """
+    client_id = user.get("client_id")
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client profile not found for this user",
+        )
+    if not (body.health_data and body.telegram_channel):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для продолжения нужно принять все пункты согласия",
+        )
+
+    from database import queries
+    from utils.consent import get_consent_text
+
+    version = get_consent_text()["version"]
+    queries.insert_client_consent(
+        client_id=client_id,
+        consent_version=version,
+        health_data=body.health_data,
+        telegram_channel=body.telegram_channel,
+        channel="web",
+    )
+    queries.write_audit_log(
+        actor_type="client",
+        actor_id=client_id,
+        action="accept_consent",
+        entity_type="consent",
+        entity_id=client_id,
+        new_value={"version": version},
+    )
+    return {"ok": True}
 
 
 @app.post("/nutritionist/query")

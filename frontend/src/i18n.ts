@@ -166,6 +166,11 @@ const resources = {
           url_required: "Укажите URL",
           error: "Не удалось сохранить источники",
         },
+        consent: {
+          title: "Текст согласия клиента",
+          hint: "Текст блокирующего шага согласия перед анкетой онбординга (consent_text). " +
+                "Меняете version — клиенты с более старым согласием увидят экран согласия заново.",
+        },
         llm: {
           title: "LLM-модели",
           hint: "JSON-конфигурация моделей по task_type (llm_config).",
@@ -580,6 +585,16 @@ const resources = {
       questionnaire_view: {
         empty: "Анкета ещё не заполнена клиентом.",
       },
+      consent: {
+        title: "Согласие на обработку данных",
+        intro:
+          "Прежде чем перейти к анкете, отметьте согласие по каждому пункту ниже — без этого " +
+          "продолжить нельзя.",
+        continue: "Продолжить",
+        submitting: "Сохранение…",
+        required_error: "Отметьте все пункты, чтобы продолжить.",
+        submit_error: "Не удалось сохранить согласие. Попробуйте ещё раз.",
+      },
       loading: "Загрузка…",
     },
   },
@@ -746,6 +761,11 @@ const resources = {
           remove: "Remove",
           url_required: "Enter a URL",
           error: "Failed to save sources",
+        },
+        consent: {
+          title: "Client consent text",
+          hint: "Text for the blocking consent step before the onboarding questionnaire " +
+                "(consent_text). Bump the version — clients with an older consent will see it again.",
         },
         llm: {
           title: "LLM models",
@@ -1160,6 +1180,16 @@ const resources = {
       },
       questionnaire_view: {
         empty: "The questionnaire has not been filled in yet.",
+      },
+      consent: {
+        title: "Data processing consent",
+        intro:
+          "Before continuing to the questionnaire, please check your consent for each item " +
+          "below — you can't continue without it.",
+        continue: "Continue",
+        submitting: "Saving…",
+        required_error: "Please check all items to continue.",
+        submit_error: "Could not save your consent. Please try again.",
       },
       loading: "Loading…",
     },

@@ -133,6 +133,76 @@ class TestApi(unittest.TestCase):
         log_mock.assert_called_once()
         self.assertIn("обновил анкету", log_mock.call_args.kwargs["payload"]["message"])
 
+    # --- /consent-text (роль client, LEGAL-1, миграция 018) ---
+    def test_consent_text_rejects_nutritionist(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.get("/consent-text")
+        self.assertEqual(r.status_code, 403)
+
+    def test_consent_text_returns_default_when_no_override(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_setting", return_value=None):
+            r = self.client.get("/consent-text")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["version"], "1.0")
+        self.assertIn("health_data", body["ru"])
+        self.assertIn("telegram_channel", body["ru"])
+
+    def test_consent_text_returns_db_override(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        override = {"version": "2.0", "ru": {"health_data": "x", "telegram_channel": "y"}, "en": {}}
+        with patch("database.queries.get_setting", return_value=override):
+            r = self.client.get("/consent-text")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["version"], "2.0")
+
+    # --- /consent (роль client, LEGAL-1/LEGAL-5, миграция 018) ---
+    def test_consent_rejects_nutritionist(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        r = self.client.post("/consent", json={
+            "health_data": True, "telegram_channel": True,
+        })
+        self.assertEqual(r.status_code, 403)
+
+    def test_consent_missing_client_id(self):
+        app.dependency_overrides[get_current_user] = lambda: {
+            "role": "client", "user_id": "u", "client_id": None
+        }
+        r = self.client.post("/consent", json={
+            "health_data": True, "telegram_channel": True,
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_consent_rejects_partial_consent(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.insert_client_consent") as insert_mock:
+            r = self.client.post("/consent", json={
+                "health_data": True, "telegram_channel": False,
+            })
+        self.assertEqual(r.status_code, 400)
+        insert_mock.assert_not_called()
+
+    def test_consent_ok_records_and_audits(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        with patch("database.queries.get_setting", return_value=None), \
+             patch("database.queries.insert_client_consent") as insert_mock, \
+             patch("database.queries.write_audit_log") as audit_mock:
+            r = self.client.post("/consent", json={
+                "health_data": True, "telegram_channel": True,
+            })
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+        insert_mock.assert_called_once_with(
+            client_id="c-1", consent_version="1.0",
+            health_data=True, telegram_channel=True,
+            channel="web",
+        )
+        audit_mock.assert_called_once()
+        self.assertEqual(audit_mock.call_args.kwargs["actor_type"], "client")
+        self.assertEqual(audit_mock.call_args.kwargs["action"], "accept_consent")
+        self.assertEqual(audit_mock.call_args.kwargs["entity_type"], "consent")
+
     # --- /nutritionist/query (роль nutritionist) ---
     def test_nutritionist_query_rejects_client(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
