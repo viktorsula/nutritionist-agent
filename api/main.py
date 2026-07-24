@@ -340,8 +340,23 @@ def save_setting(
 
     Раньше фронт писал настройки напрямую в Supabase (мимо аудита, разрыв №6).
     Теперь запись идёт здесь: фиксируем кто/что менял (old/new) под ролью нутрициолога.
+
+    key='llm_config' — дополнительно валидируется (P0-4): нельзя сохранить не-Claude
+    провайдера для orchestrator/nutritionist_orchestrator — тот молча теряет tool-calling
+    (см. utils/llm.py::validate_llm_config). Проверка на бэке обязательна: фронтовая
+    (llmConfigValidation.ts) не защищает от прямого вызова API.
     """
     from database import queries
+
+    if body.key == "llm_config":
+        from utils.llm import validate_llm_config
+
+        problems = validate_llm_config(body.value)
+        if problems:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="; ".join(problems),
+            )
 
     try:
         old_value = queries.get_setting(body.key)

@@ -220,6 +220,53 @@ class TestApi(unittest.TestCase):
         self.assertEqual(r.json()["message"], "отчёт")
         self.assertEqual(m.call_args.kwargs["nutritionist_id"], "u-2")
 
+    # --- /nutritionist/setting (P0-4: валидация llm_config при сохранении) ---
+    def test_save_setting_rejects_client(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.post("/nutritionist/setting", json={"key": "llm_config", "value": None})
+        self.assertEqual(r.status_code, 403)
+
+    def test_save_setting_non_llm_config_key_not_validated(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_setting", return_value=None), \
+             patch("database.queries.upsert_system_setting") as upsert_mock, \
+             patch("database.queries.write_audit_log"):
+            r = self.client.post("/nutritionist/setting", json={"key": "trusted_sources", "value": []})
+        self.assertEqual(r.status_code, 200)
+        upsert_mock.assert_called_once()
+
+    def test_save_setting_rejects_non_claude_orchestrator_provider(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.upsert_system_setting") as upsert_mock:
+            r = self.client.post("/nutritionist/setting", json={
+                "key": "llm_config",
+                "value": {"orchestrator": {"provider": "groq", "model": "llama-3.3-70b-versatile"}},
+            })
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("orchestrator.provider", r.json()["detail"])
+        upsert_mock.assert_not_called()
+
+    def test_save_setting_accepts_claude_orchestrator_provider(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_setting", return_value=None), \
+             patch("database.queries.upsert_system_setting") as upsert_mock, \
+             patch("database.queries.write_audit_log"):
+            r = self.client.post("/nutritionist/setting", json={
+                "key": "llm_config",
+                "value": {"orchestrator": {"provider": "claude", "model": "claude-sonnet-4-6"}},
+            })
+        self.assertEqual(r.status_code, 200)
+        upsert_mock.assert_called_once()
+
+    def test_save_setting_accepts_null_llm_config(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_setting", return_value=None), \
+             patch("database.queries.upsert_system_setting") as upsert_mock, \
+             patch("database.queries.write_audit_log"):
+            r = self.client.post("/nutritionist/setting", json={"key": "llm_config", "value": None})
+        self.assertEqual(r.status_code, 200)
+        upsert_mock.assert_called_once()
+
     # --- /nutritionist/coverage (наблюдаемость покрытия, Ф3) ---
     def test_coverage_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
