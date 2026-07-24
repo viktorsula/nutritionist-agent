@@ -104,6 +104,13 @@ export interface ReminderInput {
   max_followups?: number | null;
 }
 
+/** Текст согласия на обработку данных (LEGAL-1, миграция 018) — гранулярные пункты. */
+export interface ConsentText {
+  version: string;
+  ru: { health_data: string; telegram_channel: string; cross_border_transfer: string };
+  en: { health_data: string; telegram_channel: string; cross_border_transfer: string };
+}
+
 /** Контролируемый показатель клиента (каталог). */
 export interface ControlledMetric {
   key: string;
@@ -178,6 +185,20 @@ export const api = {
    */
   questionnaireSummary: () =>
     request<{ summary: string | null }>("/questionnaire-summary", { method: "POST" }),
+
+  /** Текущий текст согласия на обработку данных (LEGAL-1, миграция 018). */
+  consentText: () => request<ConsentText>("/consent-text"),
+
+  /** Зафиксировать согласие клиента (LEGAL-1/LEGAL-5) — все три пункта обязательны. */
+  acceptConsent: (payload: {
+    health_data: boolean;
+    telegram_channel: boolean;
+    cross_border_transfer: boolean;
+  }) =>
+    request<{ ok: boolean }>("/consent", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   /** Запрос нутрициолога к агенту. */
   nutritionistQuery: (message: string) =>

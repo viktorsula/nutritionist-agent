@@ -686,6 +686,42 @@ def get_questionnaire_history(client_id: str, limit: int = 20) -> List[Dict[str,
     ) or []
 
 
+def insert_client_consent(
+    client_id: str,
+    consent_version: str,
+    health_data: bool,
+    telegram_channel: bool,
+    cross_border_transfer: bool,
+    channel: str = "web",
+) -> Optional[Dict[str, Any]]:
+    """Запись факта согласия клиента (LEGAL-1/LEGAL-5, миграция 018) — append-only."""
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_consents").insert({
+            "client_id": client_id,
+            "consent_version": consent_version,
+            "health_data": health_data,
+            "telegram_channel": telegram_channel,
+            "cross_border_transfer": cross_border_transfer,
+            "channel": channel,
+        })
+    )
+
+
+def get_latest_client_consent(client_id: str) -> Optional[Dict[str, Any]]:
+    """Последнее согласие клиента (для сверки версии на бэкенде при необходимости)."""
+    supabase = _service_client()
+    rows = _extract_data(
+        supabase.table("client_consents")
+        .select("consent_version,accepted_at")
+        .eq("client_id", client_id)
+        .order("accepted_at", desc=True)
+        .limit(1)
+        .execute()
+    ) or []
+    return rows[0] if rows else None
+
+
 def update_client(client_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Обновить профиль клиента (payment_status, access_status, client_status и др.)."""
     supabase = _service_client()
