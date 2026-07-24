@@ -327,6 +327,36 @@ def test_client_profile_includes_questionnaire_extra():
     assert "Стресс/настроение: высокий перед сном" in system
 
 
+def test_client_profile_prefers_summary_over_raw_questionnaire():
+    # Миграция 017: если questionnaire_summary есть — используем его, построчный
+    # формат questionnaire_json в промпт не идёт (экономия контекста на каждый ход).
+    state = {
+        "client_profile": {
+            "name": "Катя",
+            "questionnaire_summary": "Катя, 34 года, ведёт активный образ жизни.",
+            "questionnaire_json": {"medications": "витамин D"},
+        },
+        "active_plan": None,
+    }
+    system = ao._system_prompt(state)
+    assert "Катя, 34 года, ведёт активный образ жизни." in system
+    assert "Принимаемые препараты" not in system
+
+
+def test_client_profile_falls_back_to_raw_when_no_summary():
+    # Старый клиент до миграции 017 (или разовый сбой генерации) — построчный откат.
+    state = {
+        "client_profile": {
+            "name": "Катя",
+            "questionnaire_summary": None,
+            "questionnaire_json": {"medications": "витамин D"},
+        },
+        "active_plan": None,
+    }
+    system = ao._system_prompt(state)
+    assert "Принимаемые препараты: витамин D" in system
+
+
 def test_load_base_context_loads_wellness_plan():
     with patch("database.queries.get_client_by_id", return_value={"name": "Катя"}), \
          patch("database.queries.get_client_profile", return_value={}), \

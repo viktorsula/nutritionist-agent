@@ -655,6 +655,37 @@ def get_client_profile(client_id: str) -> Optional[Dict[str, Any]]:
     )
 
 
+def set_questionnaire_summary(client_id: str, summary: str) -> Optional[Dict[str, Any]]:
+    """Сохранить компактное LLM-саммари анкеты (миграция 017)."""
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_profiles").update({"questionnaire_summary": summary}).eq("client_id", client_id)
+    )
+
+
+def insert_questionnaire_history(client_id: str, questionnaire_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Снимок ответов анкеты при отправке (первичной/повторной) — append-only (миграция 017)."""
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_questionnaire_history").insert(
+            {"client_id": client_id, "questionnaire_json": questionnaire_json}
+        )
+    )
+
+
+def get_questionnaire_history(client_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """История версий анкеты клиента, свежие сверху (для просмотра нутрициологом)."""
+    supabase = _service_client()
+    return _extract_data(
+        supabase.table("client_questionnaire_history")
+        .select("id,questionnaire_json,submitted_at")
+        .eq("client_id", client_id)
+        .order("submitted_at", desc=True)
+        .limit(limit)
+        .execute()
+    ) or []
+
+
 def update_client(client_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Обновить профиль клиента (payment_status, access_status, client_status и др.)."""
     supabase = _service_client()
@@ -712,7 +743,10 @@ def get_recent_alert_events(minutes: int = 5) -> List[Dict[str, Any]]:
     """
     Свежие события-алерты за последние N минут — для пуша нутрициологу в Telegram.
 
-    Берём severity high/critical ИЛИ event_type='bad_wellbeing' (medium, но важно для врача).
+    Берём severity high/critical ИЛИ event_type IN (bad_wellbeing, meal_not_reported,
+    questionnaire_updated) — эти типы важны для нутрициолога независимо от severity
+    (questionnaire_updated — гарантированное уведомление об изменении анкеты, решение
+    владельца: "нутрициолог обязательно узнает об изменении").
     Джойним имя клиента. Дедупликация по event.id — на стороне планировщика.
     """
     from datetime import datetime, timedelta
@@ -723,7 +757,7 @@ def get_recent_alert_events(minutes: int = 5) -> List[Dict[str, Any]]:
         supabase.table("client_events")
         .select("id, client_id, event_type, severity, event_date, payload_json, clients(name)")
         .gte("event_date", since)
-        .or_("severity.in.(high,critical),event_type.in.(bad_wellbeing,meal_not_reported)")
+        .or_("severity.in.(high,critical),event_type.in.(bad_wellbeing,meal_not_reported,questionnaire_updated)")
         .order("event_date", desc=True)
         .execute()
     ) or []

@@ -10,14 +10,18 @@ type Lang = "ru" | "en";
 interface Props {
   clientId: string;
   onDone: () => void;
+  /** Предзаполнение существующими ответами — режим редактирования (не первичный онбординг). */
+  initialAnswers?: Answers;
+  /** Есть только в режиме редактирования: первичный онбординг отменить нельзя. */
+  onCancel?: () => void;
 }
 
-export function Questionnaire({ clientId, onDone }: Props) {
+export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Props) {
   const { t, i18n } = useTranslation();
   const lang: Lang = i18n.resolvedLanguage === "en" ? "en" : "ru";
 
   const [stepIndex, setStepIndex] = useState(0);
-  const [answers, setAnswers] = useState<Answers>({});
+  const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,9 +103,16 @@ export function Questionnaire({ clientId, onDone }: Props) {
           {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
 
           <div className="mt-6 flex justify-between">
-            <Button variant="outline" onClick={back} disabled={stepIndex === 0 || busy}>
-              {t("questionnaire.back")}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={back} disabled={stepIndex === 0 || busy}>
+                {t("questionnaire.back")}
+              </Button>
+              {onCancel && (
+                <Button variant="outline" onClick={onCancel} disabled={busy}>
+                  {t("questionnaire.cancel")}
+                </Button>
+              )}
+            </div>
             <Button onClick={next} disabled={busy}>
               {busy
                 ? t("questionnaire.submitting")

@@ -209,6 +209,45 @@ def chat(body: ChatIn, user: Dict[str, Any] = Depends(require_role("client"))) -
     )
 
 
+@app.post("/questionnaire-summary")
+def questionnaire_summary(user: Dict[str, Any] = Depends(require_role("client"))) -> Dict[str, Any]:
+    """
+    Пересобрать компактное саммари анкеты клиента (миграция 017) + уведомить нутрициолога
+    об изменении. Вызывается фронтом после каждой отправки анкеты (первичной и повторных,
+    submitQuestionnaire уже сделал upsert client_profiles + insert в историю до этого вызова).
+    client_id — из токена, не из тела (см. /chat).
+    """
+    client_id = user.get("client_id")
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client profile not found for this user",
+        )
+
+    from database import queries
+    from agents.client.questionnaire_summary import build_questionnaire_summary
+    from utils.notify import nutritionist_chat_id
+
+    profile = queries.get_client_profile(client_id) or {}
+    summary = build_questionnaire_summary(profile)
+    if summary:
+        queries.set_questionnaire_summary(client_id, summary)
+
+    # Нутрициолог ОБЯЗАТЕЛЬНО узнаёт об изменении анкеты (решение владельца) — событие
+    # с гарантированной доставкой в Telegram независимо от severity (см.
+    # get_recent_alert_events: event_type в whitelist). Если саммари не собралось (сбой
+    # LLM) — всё равно уведомляем, просто без текста сводки.
+    if nutritionist_chat_id():
+        queries.log_client_event(
+            client_id=client_id,
+            event_type="questionnaire_updated",
+            severity="medium",
+            payload={"message": summary or "Клиент обновил анкету онбординга."},
+        )
+
+    return {"summary": summary}
+
+
 @app.post("/nutritionist/query")
 def nutritionist_query(
     body: NutritionistQueryIn,

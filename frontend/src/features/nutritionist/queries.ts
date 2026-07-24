@@ -164,6 +164,29 @@ export function useClientPlans(clientId: string) {
   });
 }
 
+export interface QuestionnaireHistoryRow {
+  id: string;
+  questionnaire_json: Record<string, unknown>;
+  submitted_at: string;
+}
+
+/** История версий анкеты клиента (миграция 017) — свежие сверху. */
+export function useQuestionnaireHistory(clientId: string) {
+  return useQuery({
+    queryKey: ["questionnaire_history", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<QuestionnaireHistoryRow[]> => {
+      const { data, error } = await supabase
+        .from("client_questionnaire_history")
+        .select("id,questionnaire_json,submitted_at")
+        .eq("client_id", clientId)
+        .order("submitted_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+}
+
 /** Недавние события клиента (журнал + алерты). */
 export function useClientEventsRecent(clientId: string) {
   return useQuery({

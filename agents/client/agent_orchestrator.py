@@ -449,9 +449,16 @@ def _format_client_profile(state: Dict[str, Any]) -> str:
     if wellness_lines:
         lines.append("- ЗОЖ-план (назначения нутрициолога): " + "; ".join(wellness_lines))
 
-    extra = format_questionnaire_extra(profile.get("questionnaire_json"))
-    if extra:
-        lines.append("- Из анкеты онбординга (для полноты картины о клиенте):\n" + extra)
+    # Саммари анкеты (миграция 017) — компактное, генерируется один раз при отправке
+    # анкеты, не на каждый ход. Откат на построчный формат, если саммари ещё нет
+    # (старый клиент до этой фичи, либо разовый сбой генерации LLM).
+    summary = profile.get("questionnaire_summary")
+    if summary:
+        lines.append("- Из анкеты онбординга (саммари): " + summary)
+    else:
+        extra = format_questionnaire_extra(profile.get("questionnaire_json"))
+        if extra:
+            lines.append("- Из анкеты онбординга (для полноты картины о клиенте):\n" + extra)
 
     if not lines:
         return ""

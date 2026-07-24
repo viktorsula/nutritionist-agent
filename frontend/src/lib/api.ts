@@ -172,6 +172,13 @@ export const api = {
       body: JSON.stringify({ message, message_type: messageType }),
     }),
 
+  /**
+   * Пересобрать саммари анкеты + уведомить нутрициолога (миграция 017). Вызывается после
+   * отправки анкеты (первичной/повторной) — client_id из токена.
+   */
+  questionnaireSummary: () =>
+    request<{ summary: string | null }>("/questionnaire-summary", { method: "POST" }),
+
   /** Запрос нутрициолога к агенту. */
   nutritionistQuery: (message: string) =>
     request<Record<string, unknown>>("/nutritionist/query", {

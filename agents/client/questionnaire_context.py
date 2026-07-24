@@ -108,3 +108,39 @@ def format_questionnaire_extra(questionnaire_json: Optional[Dict[str, Any]]) -> 
             lines.append(f"- {label}: {value}")
 
     return "\n".join(lines)
+
+
+def build_summary_input(profile: Optional[Dict[str, Any]]) -> str:
+    """
+    Полный текст анкеты (структурные поля client_profiles + остаток из questionnaire_json)
+    для LLM-саммаризации (agents/client/questionnaire_summary.py). В отличие от промпта
+    оркестратора, тут не нужны красивые ru-метки полей типа "пол"/"возраст" — только полнота
+    исходных фактов для сжатия моделью.
+    """
+    profile = profile or {}
+    lines: List[str] = []
+
+    if profile.get("birth_date"):
+        lines.append(f"Дата рождения: {profile['birth_date']}")
+    if profile.get("gender"):
+        lines.append(f"Пол: {profile['gender']}")
+    if profile.get("goals"):
+        lines.append(f"Цель: {profile['goals']}")
+    weight = profile.get("weight")
+    if weight:
+        target = profile.get("target_weight")
+        lines.append(f"Вес: {weight} кг" + (f" → цель {target} кг" if target else ""))
+    if profile.get("height"):
+        lines.append(f"Рост: {profile['height']} см")
+    if profile.get("activity_level"):
+        lines.append(f"Уровень активности: {profile['activity_level']}")
+    if profile.get("chronic_conditions"):
+        lines.append("Хронические заболевания: " + ", ".join(profile["chronic_conditions"]))
+    if profile.get("allergies"):
+        lines.append("Аллергии: " + ", ".join(profile["allergies"]))
+
+    extra = format_questionnaire_extra(profile.get("questionnaire_json"))
+    if extra:
+        lines.append(extra)
+
+    return "\n".join(lines)

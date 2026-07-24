@@ -144,8 +144,10 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 014_controlled_metrics.sql | 3 июля 2026 | ✅ | Контролируемые показатели |
 | 015_reminder_response_control.sql | 3 июля 2026 | ✅ | Контроль ответа на напоминания |
 | 016_reminder_deadlines_meals.sql | **7 июля 2026** | ✅ | Дедлайны еды + per-item кадэнс + measurements.chest (см. инцидент выше) |
+| 017_questionnaire_summary_and_history.sql | — | ⏳ | `client_profiles.questionnaire_summary` + таблица `client_questionnaire_history` (RLS) — саммари анкеты для LLM-контекста + история изменений при редактировании анкеты клиентом |
 
-Все миграции 001–016 подтверждены применёнными на проде (verify-SQL прогнан 7 июля 2026).
+Миграции 001–016 подтверждены применёнными на проде (verify-SQL прогнан 7 июля 2026).
+017 создана 24 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату.
 При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
 
 ---
@@ -186,6 +188,10 @@ UNION ALL SELECT '016 reminders.followup_after_hours',
        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminders' AND column_name='followup_after_hours')
 UNION ALL SELECT '016 measurements.chest',
        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='measurements' AND column_name='chest')
+UNION ALL SELECT '017 client_profiles.questionnaire_summary',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='client_profiles' AND column_name='questionnaire_summary')
+UNION ALL SELECT '017 client_questionnaire_history table',
+       to_regclass('public.client_questionnaire_history') IS NOT NULL
 ORDER BY migration;
 ```
 

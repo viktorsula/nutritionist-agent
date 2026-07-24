@@ -51,6 +51,19 @@ class TestFormatAlertFoodAlerts(unittest.TestCase):
         self.assertIn("Вес вырос на 1.2 кг", text)
         self.assertNotIn("не должно читаться", text)
 
+    def test_questionnaire_updated_has_readable_label(self):
+        # Регрессия P1-9: новый event_type не должен светить сырым именем в Telegram.
+        event = {
+            "event_type": "questionnaire_updated",
+            "severity": "medium",
+            "clients": {"name": "Екатерина"},
+            "payload_json": {"message": "Обновлена информация о медикаментах"},
+        }
+        text = format_alert(event)
+        self.assertNotIn("questionnaire_updated", text)
+        self.assertIn("Анкета обновлена", text)
+        self.assertIn("Обновлена информация о медикаментах", text)
+
     def test_no_detail_no_alerts_line_omitted(self):
         event = {
             "event_type": "calories_logged",
