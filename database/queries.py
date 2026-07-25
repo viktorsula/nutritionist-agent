@@ -800,9 +800,10 @@ def get_recent_alert_events(minutes: int = 5) -> List[Dict[str, Any]]:
 def get_client_events(
     client_id: str,
     severity: Optional[str] = None,
+    event_type: Optional[str] = None,
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
-    """Получить события клиента, опционально фильтр по severity."""
+    """Получить события клиента, опционально фильтр по severity и/или event_type."""
     supabase = _service_client()
     query = (
         supabase.table("client_events")
@@ -814,9 +815,34 @@ def get_client_events(
 
     if severity:
         query = query.eq("severity", severity)
+    if event_type:
+        query = query.eq("event_type", event_type)
 
     response = query.execute()
     return _extract_data(response) or []
+
+
+def has_event_today(client_id: str, event_type: str, day: str) -> bool:
+    """
+    Есть ли у клиента событие данного типа за указанный день ('YYYY-MM-DD', UTC).
+
+    Персистентная (в БД, не в памяти процесса) защита от повторных алертов одного дня —
+    раньше дедуп no_response держался только в in-memory set (api/scheduler.py), который
+    обнулялся при каждом рестарте бэкенда (деплой), из-за чего клиент получал по несколько
+    алертов «нет ответа» за один день вместо одного.
+    """
+    supabase = _service_client()
+    response = (
+        supabase.table("client_events")
+        .select("id")
+        .eq("client_id", client_id)
+        .eq("event_type", event_type)
+        .gte("event_date", f"{day}T00:00:00")
+        .lt("event_date", f"{day}T23:59:59.999999")
+        .limit(1)
+        .execute()
+    )
+    return bool(_extract_data(response))
 
 
 def get_nutrition_daily(client_id: str, days: int = 14) -> List[Dict[str, Any]]:

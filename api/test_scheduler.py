@@ -399,28 +399,60 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
 
 class TestNoResponseCheck(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        S._no_response_guard.clear()
         S._last_no_response_at = None
 
-    async def test_emits_no_response_event_once_per_day(self):
+    async def test_emits_no_response_event_when_not_already_logged_today(self):
         alert = {"severity": "high", "details": {"hours_since_last_message": 60}}
         with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("database.queries.has_event_today", return_value=False), \
              patch("business_rules.medical_rules._check_no_response", return_value=alert), \
              patch("database.queries.log_client_event") as logged:
             await S.run_no_response_check()
-            self.assertEqual(logged.call_args.kwargs["event_type"], "no_response")
-            self.assertEqual(logged.call_args.kwargs["severity"], "high")
-            # второй проход в тот же день (сбрасываем тротлинг) — дедуп, событие не дублируется
-            S._last_no_response_at = None
+        self.assertEqual(logged.call_args.kwargs["event_type"], "no_response")
+        self.assertEqual(logged.call_args.kwargs["severity"], "high")
+
+    async def test_skips_when_already_logged_today(self):
+        # Дедуп — через БД (has_event_today), не in-memory: переживает рестарт бэкенда.
+        with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("database.queries.has_event_today", return_value=True), \
+             patch("business_rules.medical_rules._check_no_response") as check_mock, \
+             patch("database.queries.log_client_event") as logged:
             await S.run_no_response_check()
-            self.assertEqual(logged.call_count, 1)
+        check_mock.assert_not_called()
+        logged.assert_not_called()
+
+    async def test_dedup_survives_in_memory_state_reset(self):
+        # Симулируем рестарт бэкенда: троттлинг (_last_no_response_at) сброшен, но
+        # has_event_today (БД) уже видит сегодняшнее событие — повтор не создаётся.
+        alert = {"severity": "high", "details": {}}
+        with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("business_rules.medical_rules._check_no_response", return_value=alert), \
+             patch("database.queries.log_client_event") as logged:
+            with patch("database.queries.has_event_today", return_value=False):
+                await S.run_no_response_check()
+            S._last_no_response_at = None
+            with patch("database.queries.has_event_today", return_value=True):
+                await S.run_no_response_check()
+        self.assertEqual(logged.call_count, 1)
 
     async def test_no_alert_when_client_active(self):
         with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("database.queries.has_event_today", return_value=False), \
              patch("business_rules.medical_rules._check_no_response", return_value=None), \
              patch("database.queries.log_client_event") as logged:
             await S.run_no_response_check()
-            logged.assert_not_called()
+        logged.assert_not_called()
+
+    async def test_dedup_check_failure_skips_client_safely(self):
+        # has_event_today упал — пропускаем клиента в этом тике, не создаём алерт вслепую
+        # (лучше пропустить один тик проверки, чем рискнуть задублировать алерт).
+        with patch("database.queries.get_all_clients", return_value=[{"id": "c1"}]), \
+             patch("database.queries.has_event_today", side_effect=RuntimeError("db down")), \
+             patch("business_rules.medical_rules._check_no_response") as check_mock, \
+             patch("database.queries.log_client_event") as logged:
+            await S.run_no_response_check()
+        check_mock.assert_not_called()
+        logged.assert_not_called()
 
 
 class TestWeeklyReportDue(unittest.TestCase):

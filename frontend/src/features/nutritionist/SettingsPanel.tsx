@@ -35,7 +35,7 @@ export function SettingsPanel() {
 
       <Section title={t("settings.thresholds.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.thresholds.hint")}</p>
-        <JsonSetting settingKey="alert_thresholds" hint='{"glucose_critical": 15, "glucose_high": 10}' />
+        <JsonSetting settingKey="alert_thresholds" hint='{"weight_increase_kg": 1, "no_response_hours": 48}' />
       </Section>
 
       <Section title={t("settings.sources.title")}>

@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 _sent_guard: set = set()  # ключи "client_id:type:YYYY-MM-DD HH:MM" — анти-дубль
 _alert_guard: set = set()  # id уже отправленных нутрициологу событий — анти-дубль
-_no_response_guard: set = set()  # "client_id:YYYY-MM-DD" — один алерт молчания в день
+# Дедуп «один no_response-алерт в день» — через queries.has_event_today (БД), НЕ
+# in-memory set: тот обнулялся при каждом рестарте бэкенда (деплой), из-за чего клиент
+# мог получить несколько алертов «нет ответа» за один день вместо одного.
 _last_no_response_at: Optional[datetime] = None
 NO_RESPONSE_CHECK_EVERY_MIN = 30
 
@@ -602,10 +604,14 @@ async def run_reminder_followups() -> None:
 async def run_no_response_check() -> None:
     """
     Периодически: активные клиенты, молчащие дольше порога → событие `no_response`
-    (severity из medical_rules; high пушится нутрициологу). Дедуп — один алерт в день на клиента.
+    (severity из medical_rules; high пушится нутрициологу). Дедуп — один алерт в день на
+    клиента, проверяется через queries.has_event_today (БД) — переживает рестарт бэкенда.
 
     Оживляет алерт молчания: медицинское правило существовало, но джоб не был на расписании.
-    Порог — `system_settings.no_response_threshold_hours`. Тротлинг — раз в NO_RESPONSE_CHECK_EVERY_MIN.
+    Порог — `system_settings.alert_thresholds.no_response_hours`. Тротлинг — раз в
+    NO_RESPONSE_CHECK_EVERY_MIN (это только «не гонять проверку слишком часто», не дедуп —
+    рестарт бэкенда сбросит этот троттлинг, и это нормально: has_event_today всё равно
+    не даст создать второй алерт за тот же день).
     """
     global _last_no_response_at
     now = datetime.utcnow()
@@ -627,8 +633,11 @@ async def run_no_response_check() -> None:
         cid = c.get("id")
         if not cid:
             continue
-        key = f"{cid}:{today}"
-        if key in _no_response_guard:
+        try:
+            if queries.has_event_today(cid, "no_response", today):
+                continue
+        except Exception as e:
+            logger.warning(f"scheduler: no_response — дедуп-проверка не удалась client={cid}: {e}")
             continue
         try:
             alert = medical_rules._check_no_response(cid)
@@ -641,9 +650,6 @@ async def run_no_response_check() -> None:
                 client_id=cid, event_type="no_response",
                 severity=alert.get("severity") or "medium", payload=alert.get("details"),
             )
-            _no_response_guard.add(key)
-            if len(_no_response_guard) > 5000:
-                _no_response_guard.clear()
             logger.info(f"scheduler: no_response алерт создан client={cid}")
         except Exception as e:
             logger.warning(f"scheduler: no_response событие не записано client={cid}: {e}")
