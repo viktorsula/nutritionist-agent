@@ -3,12 +3,18 @@ Medical Rules — Медицинские проверки и алерты
 
 Проверяет:
 1. Аллергии (критично)
-2. 5 типов медицинских алертов:
+2. 4 типа медицинских алертов:
    - weight_increase (вес выше порога)
    - food_forbidden (запрещённый продукт)
    - food_incompatible (несочетаемые продукты через pgvector)
    - no_response (долгое отсутствие ответа)
-   - bad_wellbeing (плохое самочувствие на чек-ине)
+
+   bad_wellbeing — НЕ здесь: детектируется напрямую в
+   agents/client/intake_store.py::_persist_wellbeing в момент фиксации самочувствия
+   (там же есть реальный payload {status, reason}). Раньше в этом модуле было
+   параллельное, всегда падающее (TypeError, гасился общим except) determination
+   через несуществующий event_type='wellbeing_checkin' — удалено как мёртвый код
+   вместо починки: у него не было ни одного потребителя результата (P1-5).
 
 3. Определяет маршрутизацию (к нутрициологу или только LLM)
 """
@@ -23,10 +29,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database.queries import (
     get_client_profile,
     get_active_nutrition_plan,
-    get_client_events,
     get_recent_measurements,
     get_conversations,
-    get_system_setting
+    get_setting,
 )
 
 
@@ -155,11 +160,6 @@ def check_medical_alerts(
         if no_response_alert:
             alerts.append(no_response_alert)
 
-        # [5] АЛЕРТ: bad_wellbeing
-        wellbeing_alert = _check_bad_wellbeing(client_id)
-        if wellbeing_alert:
-            alerts.append(wellbeing_alert)
-
     except Exception as e:
         # Логируем ошибку, но не блокируем работу
         alerts.append({
@@ -184,6 +184,21 @@ def _within_days(earlier: Any, later: Any, max_days: int) -> bool:
         return True
 
 
+def _get_alert_thresholds() -> Dict[str, Any]:
+    """
+    Глобальные пороги алертов (P1-4): system_settings.alert_thresholds — единый JSON
+    (ключи weight_increase_kg/no_response_hours, см. docs/schema.sql сидинг). Раньше код
+    читал get_system_setting('weight_increase_threshold_kg') — отдельную строку с
+    неверным именем ключа, которой никогда не существовало, поэтому порог всегда падал
+    на хардкод. Пустой словарь при ошибке/отсутствии — вызывающий код сам подставляет дефолт.
+    """
+    try:
+        thresholds = get_setting('alert_thresholds')
+        return thresholds if isinstance(thresholds, dict) else {}
+    except Exception:
+        return {}
+
+
 def _check_weight_increase(client_id: str) -> Optional[Dict[str, Any]]:
     """Проверка резкого увеличения веса"""
     try:
@@ -191,11 +206,10 @@ def _check_weight_increase(client_id: str) -> Optional[Dict[str, Any]]:
         profile = get_client_profile(client_id)
         custom_thresholds = profile.get('custom_alert_thresholds', {}) if profile else {}
 
-        # Порог по умолчанию (из system_settings или hardcode)
+        # Порог по умолчанию (из system_settings.alert_thresholds или hardcode).
         threshold_kg = custom_thresholds.get('weight_increase_threshold')
         if threshold_kg is None:
-            system_threshold = get_system_setting('weight_increase_threshold_kg')
-            threshold_kg = float(system_threshold['value']) if system_threshold else 1.0
+            threshold_kg = _get_alert_thresholds().get('weight_increase_kg', 1.0)
 
         # Вес теперь живёт в measurements (временной ряд). Сравниваем два
         # последних замера: текущий (свежий) против предыдущего.
@@ -280,24 +294,65 @@ def _check_food_forbidden(client_id: str, food_items: List[str]) -> Optional[Dic
         return None
 
 
+# Похожесть чанка базы знаний на запрос про сочетание продуктов, ниже которой не считаем
+# находку значимой (P1-3). Выше дефолтного порога RAG (0.0, см. P2-2) — здесь важна
+# точность (алерт нутрициологу), а не полнота выдачи.
+_FOOD_INCOMPATIBLE_SIMILARITY_THRESHOLD = 0.75
+
+
 def _check_food_incompatible(client_id: str, food_items: List[str]) -> Optional[Dict[str, Any]]:
     """
-    Проверка несочетаемых продуктов через pgvector
+    Проверка несочетаемых продуктов через pgvector-поиск по базе знаний нутрициолога
+    (P1-3). Несовместимость — свойство КОМБИНАЦИИ продуктов, поэтому при одном
+    продукте в приёме проверка не имеет смысла.
 
-    TODO: Реализовать векторный поиск в knowledge_base
-    Пока заглушка — будет реализовано при интеграции векторной БД
+    Находка — семантическое совпадение с материалом о несочетаемости в базе знаний,
+    не подтверждённый факт: это сигнал нутрициологу на просмотр, а не автономный
+    диагноз. Качество зависит от наполнения базы знаний — при пустой/бедной базе
+    просто ничего не находится (return None), это ожидаемо, не ошибка.
     """
-    # Заглушка для будущей реализации
-    # В будущем: эмбеддинг food_items → cosine similarity в knowledge_base
-    return None
+    if not food_items or len(food_items) < 2:
+        return None
+
+    try:
+        from utils.knowledge import search_knowledge_base
+
+        query = "сочетание продуктов: " + ", ".join(food_items)
+        chunks = search_knowledge_base(
+            query, match_count=1, similarity_threshold=_FOOD_INCOMPATIBLE_SIMILARITY_THRESHOLD,
+        )
+        if not chunks:
+            return None
+
+        chunk = chunks[0]
+        excerpt = (chunk.get("chunk_text") or "").strip()
+        if not excerpt:
+            return None
+
+        return {
+            "type": "food_incompatible",
+            "severity": "medium",
+            "details": {
+                "food_items": food_items,
+                "similarity": chunk.get("similarity"),
+                "source": chunk.get("source"),
+            },
+            "message": (
+                f"Возможное несочетание продуктов ({', '.join(food_items)}) — "
+                f"похожий материал в базе знаний: {excerpt[:280]}"
+            ),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception:
+        return None
 
 
 def _check_no_response(client_id: str) -> Optional[Dict[str, Any]]:
     """Проверка долгого отсутствия ответа от клиента"""
     try:
-        # Порог отсутствия ответа (часов)
-        system_threshold = get_system_setting('no_response_threshold_hours')
-        threshold_hours = int(system_threshold['value']) if system_threshold else 48
+        # Порог отсутствия ответа (часов) — из system_settings.alert_thresholds (P1-4).
+        threshold_hours = _get_alert_thresholds().get('no_response_hours', 48)
 
         # Получить последнее сообщение клиента
         conversations = get_conversations(client_id=client_id, limit=10)
@@ -335,43 +390,6 @@ def _check_no_response(client_id: str) -> Optional[Dict[str, Any]]:
                     "last_message_time": last_timestamp
                 },
                 "message": f"Клиент не отвечает уже {round(hours_since, 1)} часов (порог: {threshold_hours}ч)",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-
-        return None
-
-    except Exception:
-        return None
-
-
-def _check_bad_wellbeing(client_id: str) -> Optional[Dict[str, Any]]:
-    """Проверка плохого самочувствия на чек-ине"""
-    try:
-        # Получить последние события wellbeing
-        recent_events = get_client_events(
-            client_id=client_id,
-            event_type='wellbeing_checkin',
-            limit=5
-        )
-
-        if not recent_events:
-            return None
-
-        # Проверяем последний чек-ин
-        last_checkin = recent_events[0]
-        payload = last_checkin.get('payload_json', {})
-
-        # Если есть флаг "плохо" и указана причина
-        if payload.get('feeling') in ['bad', 'poor', 'terrible'] and payload.get('reason'):
-            return {
-                "type": "bad_wellbeing",
-                "severity": "critical" if payload.get('feeling') == 'terrible' else "high",
-                "details": {
-                    "feeling": payload.get('feeling'),
-                    "reason": payload.get('reason'),
-                    "timestamp": last_checkin.get('created_at')
-                },
-                "message": f"⚠️ Плохое самочувствие: {payload.get('reason')}",
                 "timestamp": datetime.utcnow().isoformat()
             }
 

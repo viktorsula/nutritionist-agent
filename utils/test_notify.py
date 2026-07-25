@@ -74,6 +74,32 @@ class TestFormatAlertFoodAlerts(unittest.TestCase):
         text = format_alert(event)
         self.assertNotIn("Детали:", text)
 
+    def test_meal_not_reported_has_readable_label_and_detail(self):
+        # P1-9: раньше "Алерт: meal_not_reported" без единого понятного слова.
+        event = {
+            "event_type": "meal_not_reported",
+            "severity": "medium",
+            "clients": {"name": "Екатерина"},
+            "payload_json": {"title": "Обед", "expected": "lunch"},
+        }
+        text = format_alert(event)
+        self.assertNotIn("meal_not_reported", text)
+        self.assertIn("Приём пищи не отмечен", text)
+        self.assertIn("Обед", text)
+        self.assertIn("lunch", text)
+
+    def test_reminder_unanswered_has_readable_label_and_detail(self):
+        event = {
+            "event_type": "reminder_unanswered",
+            "severity": "low",
+            "clients": {"name": "Екатерина"},
+            "payload_json": {"title": "Контроль сна"},
+        }
+        text = format_alert(event)
+        self.assertNotIn("reminder_unanswered", text)
+        self.assertIn("Напоминание без ответа", text)
+        self.assertIn("Контроль сна", text)
+
 
 if __name__ == "__main__":
     unittest.main()

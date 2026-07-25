@@ -105,6 +105,14 @@ export function AlertsPanel() {
       const arr = (p.alerts as Array<{ message?: string }> | undefined) ?? [];
       return arr.map((x) => x.message).filter(Boolean).join("; ");
     }
+    if (a.event_type === "meal_not_reported" || a.event_type === "reminder_unanswered") {
+      const title = (p.title as string) || "";
+      const expected = (p.expected as string) || "";
+      // Часто совпадают текстово (напоминание «Обед» → expected='lunch' по смыслу то же) —
+      // не дублируем, если expected не добавляет новой информации к заголовку.
+      const showExpected = expected && expected.toLowerCase() !== title.toLowerCase();
+      return [title, showExpected ? expected : ""].filter(Boolean).join(" — ");
+    }
     return (p.message as string) || "";
   }
 

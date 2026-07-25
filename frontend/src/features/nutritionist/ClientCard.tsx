@@ -63,6 +63,23 @@ function eventLine(e: { event_type: string; payload_json: Record<string, unknown
       return `Самочувствие: ${(p.reason as string) || "плохое"}`;
     case "wellbeing_logged":
       return `Самочувствие: ${(p.status as string) || "—"}`;
+    case "weight_increase":
+      return (p.message as string) || `Вес: ${num(p.weight) ?? "?"} кг (рост выше порога)`;
+    case "no_response":
+      return (p.message as string) || "Клиент не отвечает дольше порога";
+    case "meal_not_reported":
+    case "reminder_unanswered": {
+      const title = (p.title as string) || "";
+      const expected = p.expected as string | undefined;
+      const expectedLabel = expected ? MEAL_RU[expected] ?? expected : "";
+      // title и expectedLabel часто совпадают текстово (напоминание «Обед» → expected
+      // meal_type тоже переводится в «Обед») — не дублируем одно и то же слово дважды.
+      const showExpected = expectedLabel && expectedLabel.toLowerCase() !== title.toLowerCase();
+      const what = e.event_type === "meal_not_reported" ? "Приём пищи не отмечен" : "Напоминание без ответа";
+      return [what, title, showExpected ? expectedLabel : ""].filter(Boolean).join(": ");
+    }
+    case "questionnaire_updated":
+      return (p.message as string) || "Клиент обновил анкету онбординга";
     default:
       return e.event_type;
   }

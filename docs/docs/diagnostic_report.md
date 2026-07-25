@@ -315,6 +315,32 @@
 | P1-14 | **Анкета онбординга: ~24 из 33 полей уходят только в `questionnaire_json` и никогда не читаются** — ни в LLM, ни в кабинете нутрициолога. В структурные колонки `client_profiles` попадают лишь 9 (birth_date/gender/weight/height/target_weight/activity_level/allergies/chronic_conditions/goals). Пропадают медицински значимые `medications`/`supplements`/`doctor_recommendations`, а также диета/алкоголь/курение/стресс/распорядок/симптомы/окружение | `questionnaire/submit.ts` пишет `questionnaire_json`; grep по проекту — 0 мест чтения | найдено при подготовке P0-5/P1-2 |
 | P1-15 | **Внешний веб-поиск (`web_search`) не подключён к основному LLM-оркестратору** — ни у клиента, ни у нутрициолога. Работает только в старом графе (`nutrition_agent.py`, fallback-путь). На стороне аналитики нутрициолога явно помечен в коде как «отложено» | `agents/client/agent_orchestrator.py` — 0 упоминаний web_search; `analytics_agent.py:9` «WEB — отложено» | найдено при подготовке P0-5/P1-2 |
 
+**Реализация P1-3/P1-4/P1-5/P1-9 (25.07.2026):** `_get_alert_thresholds()` в `medical_rules.py`
+теперь читает реальный ключ `system_settings.alert_thresholds` (`weight_increase_kg`/
+`no_response_hours`) вместо несуществующих отдельных строк `*_threshold_*` — пороги из
+«Настроек» больше не игнорируются (P1-4). `_check_food_incompatible` реализован через
+pgvector-поиск по `knowledge_base` (`utils/knowledge.search_knowledge_base`, явный порог
+похожести 0.75, чтобы не поймать P2-2) — 5-й алерт больше не заглушка (P1-3). `_check_bad_wellbeing`
+удалён целиком, а не починен: падал с TypeError на каждом вызове (несуществующий kwarg
+`event_type=` у `get_client_events`, несуществующий `event_type='wellbeing_checkin'`), и даже
+рабочий результат никуда не читался — оба вызывающих `check_medical_alerts()` фильтруют только
+свои типы алертов. Реальный детект bad_wellbeing уже работает независимо через
+`intake_store.py::_persist_wellbeing` (P1-5). Нечитаемые алерты нутрициологу (P1-9) исправлены
+в трёх местах: `utils/notify.py::_EVENT_LABEL` (+`meal_not_reported`/`reminder_unanswered`),
+`AlertsPanel.tsx::typeLabel`/`message()` (i18n `alerts.type.*`) и `ClientCard.tsx::eventLine()`
+(до этого — единственная нелокализованная «Последние события», выводившая сырые `event_type`
+строки как на скриншоте владельца). Заодно (не было в исходном списке, найдено по скриншоту
+владельца с повторными «Нет ответа» за один день) устранена причина спама no_response-алертов:
+дедуп жил в `_no_response_guard` — Python `set` в памяти процесса, обнуляющийся при каждом
+деплое/рестарте бэкенда. Заменён на персистентную проверку в БД — `database/queries.py::
+has_event_today(client_id, event_type, day)` — используемую в `api/scheduler.py::
+run_no_response_check()`. Тесты: `business_rules/test_medical_rules.py` (20 тестов),
+`api/test_scheduler.py::TestNoResponseCheck` (5 тестов), `database/test_client_events.py`
+(новый файл, 5 тестов), `utils/test_notify.py` (+2 теста); полный набор — 564 passed / 8
+предсуществующих несвязанных фейлов; фронт — `tsc` чисто, vitest 36/36; живая проверка в
+браузере (Playwright) карточки клиента на всех 5 новых типах событий. PR
+`fix/alert-thresholds-and-readable-events`.
+
 **Решение владельца по P1-15 (23.07.2026) — выделено в отдельный PR-D:**
 Проверено: у клиента 9 инструментов, все замкнуты на внутренние источники (своя запись/своя БД/
 курируемая `knowledge_base`); `search_knowledge` не покрывает КБЖУ-справочник и рецепты (это не тот
