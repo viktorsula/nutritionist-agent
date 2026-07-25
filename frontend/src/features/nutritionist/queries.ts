@@ -187,6 +187,15 @@ export function useQuestionnaireHistory(clientId: string) {
   });
 }
 
+/** Открытые находки проактивного аудита клиента (NEW-1) — через бэкенд (RLS: только нутрициолог). */
+export function useAuditFindings(clientId: string) {
+  return useQuery({
+    queryKey: ["audit_findings", clientId],
+    enabled: !!clientId,
+    queryFn: () => api.listAuditFindings(clientId).then((r) => r.findings),
+  });
+}
+
 /** Недавние события клиента (журнал + алерты). */
 export function useClientEventsRecent(clientId: string) {
   return useQuery({

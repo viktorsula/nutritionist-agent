@@ -51,6 +51,14 @@ export function SettingsPanel() {
         />
       </Section>
 
+      <Section title={t("settings.audit.title")}>
+        <p className="mb-2 text-xs text-gray-500">{t("settings.audit.hint")}</p>
+        <JsonSetting
+          settingKey="client_audit"
+          hint='{"enabled": true, "weekdays": [0, 3], "hour": 10, "minute": 0, "timezone": "Asia/Dubai"}'
+        />
+      </Section>
+
       <Section title={t("settings.knowledge.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.knowledge.hint")}</p>
         <KnowledgeBase />

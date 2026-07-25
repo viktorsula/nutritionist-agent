@@ -120,6 +120,19 @@ export interface ControlledMetric {
   category?: "physical" | "sleep" | "custom";
 }
 
+/** Находка проактивного аудита клиента (NEW-1). */
+export interface AuditFinding {
+  id: string;
+  client_id: string;
+  title: string;
+  description: string;
+  severity: "low" | "medium";
+  status: "open" | "dismissed";
+  created_at: string;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
+}
+
 export const api = {
   /** Текущий пользователь (роль, client_id, статусы) — авторитетно из БД. */
   me: () => request<AppUser>("/me"),
@@ -160,6 +173,19 @@ export const api = {
     request<{ metrics: ControlledMetric[] }>(
       `/clients/${encodeURIComponent(clientId)}/controlled-metrics`,
       { method: "PUT", body: JSON.stringify({ metrics }) },
+    ),
+
+  /** Открытые находки проактивного аудита клиента (NEW-1). */
+  listAuditFindings: (clientId: string) =>
+    request<{ findings: AuditFinding[] }>(
+      `/clients/${encodeURIComponent(clientId)}/audit-findings`,
+    ),
+
+  /** Отметить находку аудита как рассмотренную. */
+  dismissAuditFinding: (clientId: string, findingId: string) =>
+    request<{ ok: boolean }>(
+      `/clients/${encodeURIComponent(clientId)}/audit-findings/${encodeURIComponent(findingId)}/dismiss`,
+      { method: "POST" },
     ),
 
   /**

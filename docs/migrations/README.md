@@ -145,11 +145,12 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 015_reminder_response_control.sql | 3 июля 2026 | ✅ | Контроль ответа на напоминания |
 | 016_reminder_deadlines_meals.sql | **7 июля 2026** | ✅ | Дедлайны еды + per-item кадэнс + measurements.chest (см. инцидент выше) |
 | 017_questionnaire_summary_and_history.sql | 24 июля 2026 | ✅ | `client_profiles.questionnaire_summary` + таблица `client_questionnaire_history` (RLS) — саммари анкеты для LLM-контекста + история изменений при редактировании анкеты клиентом (владелец подтвердил накатку) |
-| 018_client_consents.sql | — | ⏳ | Таблица `client_consents` (LEGAL-1/LEGAL-5) — гранулярное согласие на обработку данных (здоровье/Telegram), блокирующий шаг перед анкетой онбординга; `consent` добавлен в `audit_logs_entity_type_check` |
-| 019_client_delete_restrict.sql | — | ⏳ | LEGAL-3 — все FK `client_id → clients(id) ON DELETE CASCADE` переведены в `ON DELETE RESTRICT` (динамически, через `pg_constraint`); физическое удаление клиента с данными теперь невозможно на уровне БД, «удаление» в интерфейсе остаётся архивированием (`client_status='archived'`) |
+| 018_client_consents.sql | 24 июля 2026 | ✅ | Таблица `client_consents` (LEGAL-1/LEGAL-5) — гранулярное согласие на обработку данных (здоровье/Telegram), блокирующий шаг перед анкетой онбординга; `consent` добавлен в `audit_logs_entity_type_check` (владелец подтвердил накатку — устранён прод-инцидент PGRST205) |
+| 019_client_delete_restrict.sql | 24 июля 2026 | ✅ | LEGAL-3 — все FK `client_id → clients(id) ON DELETE CASCADE` переведены в `ON DELETE RESTRICT` (динамически, через `pg_constraint`); физическое удаление клиента с данными теперь невозможно на уровне БД, «удаление» в интерфейсе остаётся архивированием (`client_status='archived'`) (владелец подтвердил накатку) |
+| 020_client_audit_findings.sql | — | ⏳ | NEW-1 — таблица `client_audit_findings` (RLS: только нутрициолог) для находок проактивного аудита клиента (2×/нед, только при находке, severity ≤ medium, не в Telegram) |
 
-Миграции 001–017 подтверждены применёнными на проде (017 — владелец подтвердил накатку 24 июля 2026).
-018–019 созданы 24 июля 2026, ⏳ ожидают накатки владельцем — после накатки отметить ✅ и дописать дату.
+Миграции 001–019 подтверждены применёнными на проде (владелец подтвердил накатку каждой).
+020 создана 25 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату.
 При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
 
 ---
@@ -204,6 +205,8 @@ UNION ALL SELECT '019 no CASCADE left on clients(id) FKs',
            SELECT 1 FROM pg_constraint
            WHERE confrelid = 'clients'::regclass AND contype = 'f' AND confdeltype = 'c'
        )
+UNION ALL SELECT '020 client_audit_findings table',
+       to_regclass('public.client_audit_findings') IS NOT NULL
 ORDER BY migration;
 ```
 

@@ -78,6 +78,13 @@ PROMPTS: List[Dict[str, str]] = [
         "llm": "Claude",
     },
     {
+        "key": "nutritionist/audit_system",
+        "label_ru": "Проактивный аудит клиента",
+        "label_en": "Proactive client audit",
+        "section": SECTION_COMMUNICATION,
+        "llm": "Claude",
+    },
+    {
         "key": "nutritionist/reports/recommendations_for_clients",
         "label_ru": "Шаблон отчёта по клиенту",
         "label_en": "Client report template",

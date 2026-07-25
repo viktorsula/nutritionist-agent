@@ -121,6 +121,13 @@ DEFAULT_TASK_MODEL_MAPPING = {
         'temperature': 0.7,
         'max_tokens': 500,
         'description': 'Тёплый текст пакета напоминаний клиенту'
+    },
+    'client_audit': {
+        'provider': 'claude',
+        'model': 'claude-sonnet-4-6',
+        'temperature': 0.3,
+        'max_tokens': 1500,
+        'description': 'Проактивный аудит клиента (NEW-1) — фоновая сверка 2×/нед'
     }
 }
 

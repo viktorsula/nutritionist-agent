@@ -171,6 +171,12 @@ const resources = {
           hint: "Текст блокирующего шага согласия перед анкетой онбординга (consent_text). " +
                 "Меняете version — клиенты с более старым согласием увидят экран согласия заново.",
         },
+        audit: {
+          title: "Проактивный аудит клиента",
+          hint: "Расписание фоновой сверки заметок/плана/динамики (client_audit). weekdays — " +
+                "дни недели (0=Пн…6=Вс), по умолчанию Пн+Чт. Находки — в карточке клиента, " +
+                "только при находке.",
+        },
         llm: {
           title: "LLM-модели",
           hint: "JSON-конфигурация моделей по task_type (llm_config).",
@@ -368,6 +374,8 @@ const resources = {
         status_payment: "Оплата",
         status_paid_until: "Оплачено до",
         status_save: "Сохранить статусы",
+        audit_findings: "Находки ассистента",
+        audit_dismiss: "Скрыть",
         events: "Последние события",
         no_data: "Нет данных",
         alerts_only: "Только алерты",
@@ -767,6 +775,12 @@ const resources = {
           hint: "Text for the blocking consent step before the onboarding questionnaire " +
                 "(consent_text). Bump the version — clients with an older consent will see it again.",
         },
+        audit: {
+          title: "Proactive client audit",
+          hint: "Schedule for the background notes/plan/dynamics review (client_audit). " +
+                "weekdays — day-of-week list (0=Mon…6=Sun), default Mon+Thu. Findings show up " +
+                "on the client card, only when something is actually found.",
+        },
         llm: {
           title: "LLM models",
           hint: "JSON model config by task_type (llm_config).",
@@ -964,6 +978,8 @@ const resources = {
         status_payment: "Payment",
         status_paid_until: "Paid until",
         status_save: "Save statuses",
+        audit_findings: "Assistant findings",
+        audit_dismiss: "Dismiss",
         events: "Recent events",
         no_data: "No data",
         alerts_only: "Alerts only",

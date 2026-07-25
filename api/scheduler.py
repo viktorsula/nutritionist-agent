@@ -36,6 +36,7 @@ _last_no_response_at: Optional[datetime] = None
 NO_RESPONSE_CHECK_EVERY_MIN = 30
 
 _weekly_report_guard: set = set()  # ISO-недели ('GGGG-Www'), за которые отчёт уже отправлен
+_client_audit_guard: set = set()  # 'GGGG-Www-weekday', за которые аудит уже прогнан
 
 # Еженедельный автоотчёт нутрициологу (ТЗ 6.2.1). Настраивается system_settings.weekly_report;
 # дефолт — понедельник 09:00 в часовом поясе владельца (Дубай).
@@ -47,6 +48,22 @@ DEFAULT_WEEKLY_REPORT = {
     "timezone": "Asia/Dubai",
     "period_days": 7,
 }
+
+# Проактивный аудит клиента (NEW-1). Настраивается system_settings.client_audit;
+# дефолт — Пн(0)/Чт(3) в 10:00 в часовом поясе владельца (Дубай).
+DEFAULT_CLIENT_AUDIT = {
+    "enabled": True,
+    "weekdays": [0, 3],
+    "hour": 10,
+    "minute": 0,
+    "timezone": "Asia/Dubai",
+}
+
+# Список client_status, попадающих под аудит. Не хардкод в единственном сравнении —
+# расширяемый список (тот же принцип, что TOOL_CAPABLE_PROVIDERS в P0-4): когда
+# появится статус «поддержка» (клиент продолжает пользоваться ассистентом после
+# лечения, но без алертов нутрициологу), его добавление сюда — однострочное изменение.
+AUDIT_ELIGIBLE_STATUSES = ["active"]
 
 CHECK_INTERVAL_SECONDS = 60
 # Окно выборки свежих алертов (минут). Чуть больше интервала прохода — на случай джиттера.
@@ -751,6 +768,90 @@ async def run_weekly_report() -> None:
         logger.warning(f"scheduler: weekly_report отправка не удалась: {e}")
 
 
+def _client_audit_config() -> dict:
+    """Конфиг аудита: system_settings.client_audit поверх дефолта (Пн/Чт 10:00 Asia/Dubai)."""
+    cfg = dict(DEFAULT_CLIENT_AUDIT)
+    try:
+        from database import queries
+
+        override = queries.get_setting("client_audit")
+        if isinstance(override, dict):
+            cfg.update({k: override[k] for k in override if k in DEFAULT_CLIENT_AUDIT})
+    except Exception as e:
+        logger.warning(f"scheduler: client_audit конфиг не прочитан, дефолт: {e}")
+    return cfg
+
+
+def _client_audit_due(cfg: dict, now_utc: Optional[datetime] = None) -> Tuple[bool, str]:
+    """
+    Наступило ли время прогона аудита (один из дней в cfg['weekdays']) в часовом поясе
+    владельца. Returns: (due, run_key) — run_key 'GGGG-Www-weekday' для анти-дубля
+    (не просто неделя, как у weekly_report — здесь 2 прогона в неделю, на разные дни).
+    """
+    try:
+        tz = pytz.timezone(cfg.get("timezone") or "Asia/Dubai")
+    except Exception:
+        tz = pytz.UTC
+
+    base = now_utc or datetime.utcnow().replace(tzinfo=pytz.UTC)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=pytz.UTC)
+    now_local = base.astimezone(tz)
+
+    weekday = now_local.weekday()
+    run_key = f"{now_local.strftime('%G-W%V')}-{weekday}"
+    due = (
+        weekday in (cfg.get("weekdays") or [])
+        and now_local.hour == int(cfg.get("hour", 10))
+        and now_local.minute == int(cfg.get("minute", 0))
+    )
+    return due, run_key
+
+
+async def run_client_audit() -> None:
+    """
+    Проактивный аудит клиента (NEW-1): по расписанию (по умолч. Пн/Чт 10:00) сверяет
+    заметки/план/динамику/базу знаний по каждому подходящему клиенту (AUDIT_ELIGIBLE_STATUSES).
+    Находки пишутся в client_audit_findings ТОЛЬКО при находке — нутрициолог видит их в
+    карточке клиента, не в Telegram (см. audit_agent.py). Best-effort по каждому клиенту:
+    сбой на одном не должен останавливать прогон по остальным.
+    """
+    cfg = _client_audit_config()
+    if not cfg.get("enabled", True):
+        return
+
+    due, run_key = _client_audit_due(cfg)
+    if not due or run_key in _client_audit_guard:
+        return
+
+    from database import queries
+    from agents.nutritionist.audit_agent import run_audit_for_client
+
+    try:
+        clients = queries.get_clients_for_audit(AUDIT_ELIGIBLE_STATUSES)
+    except Exception as e:
+        logger.warning(f"scheduler: client_audit — список клиентов не получен: {e}")
+        return
+
+    total_findings = 0
+    for c in clients or []:
+        cid = c.get("id")
+        if not cid:
+            continue
+        try:
+            total_findings += run_audit_for_client(cid)
+        except Exception as e:
+            logger.warning(f"scheduler: client_audit клиента {cid} не выполнен: {e}")
+
+    _client_audit_guard.add(run_key)
+    if len(_client_audit_guard) > 500:
+        _client_audit_guard.clear()
+    logger.info(
+        f"scheduler: аудит клиентов завершён run_key={run_key} "
+        f"клиентов={len(clients or [])} находок={total_findings}"
+    )
+
+
 async def run_scheduler_pass() -> None:
     """Один тик планировщика: напоминания клиентам + алерты нутрициологу (оба best-effort)."""
     await run_due_notifications()
@@ -759,6 +860,7 @@ async def run_scheduler_pass() -> None:
     await run_no_response_check()
     await run_nutritionist_alerts()
     await run_weekly_report()
+    await run_client_audit()
 
 
 def start_scheduler() -> None:
