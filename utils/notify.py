@@ -31,6 +31,7 @@ _EVENT_LABEL = {
     "questionnaire_updated": "Анкета обновлена",
     "meal_not_reported": "Приём пищи не отмечен",
     "reminder_unanswered": "Напоминание без ответа",
+    "plan_exception_claimed": "Клиент заявил об исключении из плана",
 }
 
 
@@ -70,12 +71,19 @@ def format_alert(event: Dict[str, Any]) -> str:
         reminder_detail = " — ".join(
             str(payload[k]) for k in ("title", "expected") if payload.get(k)
         )
+    # plan_exception_claimed (P1-10): свой payload item/client_claim, не message/reason.
+    exception_detail = ""
+    if event_type == "plan_exception_claimed":
+        exception_detail = " — ".join(
+            str(payload[k]) for k in ("item", "client_claim") if payload.get(k)
+        )
     detail = (
         payload.get("message")
         or payload.get("reason")
         or payload.get("answer")
         or alerts_detail
         or reminder_detail
+        or exception_detail
         or ""
     ).strip()
 

@@ -80,6 +80,11 @@ function eventLine(e: { event_type: string; payload_json: Record<string, unknown
     }
     case "questionnaire_updated":
       return (p.message as string) || "Клиент обновил анкету онбординга";
+    case "plan_exception_claimed": {
+      const item = (p.item as string) || "";
+      const claim = (p.client_claim as string) || "";
+      return ["Клиент заявил об исключении из плана", item, claim].filter(Boolean).join(": ");
+    }
     default:
       return e.event_type;
   }

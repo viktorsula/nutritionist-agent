@@ -90,6 +90,51 @@ def _lock_for(client_id: str) -> threading.Lock:
 
 
 # ==========================================
+# SAFETY-СКАН (P1-11) — независимый от решения модели
+# ==========================================
+# Раньше safety-алерт (bad_wellbeing) срабатывал ТОЛЬКО если модель сама решила вызвать
+# log_wellbeing(status='bad') — промпт инструктирует её так делать, но это решение модели,
+# не гарантия. Скан ниже — детерминированная подстраховка по ключевым словам на сыром
+# сообщении клиента, независимая от того, вызвала ли модель инструмент в этом ходе.
+_SAFETY_CONCERN_KEYWORDS = (
+    "плохо себя чувствую", "мне плохо", "болит голова", "кружится голова", "тошнит",
+    "рвота", "температура", "сильная боль", "боль в груди", "давит в груди",
+    "трудно дышать", "не могу дышать", "потерял сознание", "потеряла сознание",
+    "обморок", "скорую", "скорая помощь",
+)
+
+
+def _scan_safety_concern(text: str) -> Optional[str]:
+    """Первое совпавшее ключевое слово тревожного симптома в тексте, либо None."""
+    lowered = (text or "").lower()
+    for kw in _SAFETY_CONCERN_KEYWORDS:
+        if kw in lowered:
+            return kw
+    return None
+
+
+def _force_safety_alert(state: Dict[str, Any], concern: str) -> None:
+    """
+    Независимый safety-net (P1-11): модель за этот ход НЕ зафиксировала жалобу сама
+    (иначе state["bad_wellbeing_logged"] был бы True) — фиксируем детерминированно,
+    тем же событием, что и обычный путь (_persist_wellbeing), чтобы нутрициолог получил
+    тот же алерт (панель + Telegram) независимо от решения модели.
+    """
+    from database import queries
+
+    try:
+        queries.log_client_event(
+            client_id=state["client_id"],
+            event_type="bad_wellbeing",
+            severity="medium",
+            payload={"status": "bad", "reason": concern, "channel": state.get("channel"),
+                     "source": "auto_scan"},
+        )
+    except Exception as e:
+        logger.error(f"_force_safety_alert: запись не удалась: {e}")
+
+
+# ==========================================
 # ГЛАВНЫЙ ВХОД
 # ==========================================
 
@@ -123,6 +168,21 @@ def process(
         ingest_node(state)
         _load_base_context(state)
 
+        # P1-12: сбой загрузки профиля/плана раньше означал ход «вслепую» — модель видела
+        # пустой профиль как «аллергий/ограничений нет» (false negative, риск здоровью).
+        # Явно обрываем ход безопасным ответом вместо угадывания на пустых данных.
+        if state.get("context_load_failed"):
+            reply = (
+                "Секунду — не получается сейчас получить твои данные (профиль, план). "
+                "Пожалуйста, напиши ещё раз через минуту, не хочу отвечать вслепую."
+            )
+            state["agent_response"] = reply
+            _finalize(state, reply)
+            save_to_db_node(state)
+            state["processing_time_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+            logger.error(f"Orchestrator aborted turn for client {client_id}: base context load failed")
+            return extract_response(state)
+
         # Ф1.5: расшифровка фото. direct → image-блоки в Claude; gemini_tool → Gemini
         # расшифровывает и кладёт распознанное в контекст хода (оркестратор решает).
         images = _prepare_vision(state)
@@ -133,6 +193,14 @@ def process(
         reply = tables_to_text(reply)
         state["agent_response"] = reply
         _finalize(state, reply)
+
+        # P1-11: независимый safety-скан — если модель за этот ход НЕ зафиксировала жалобу
+        # сама (log_wellbeing status='bad'), но сообщение клиента содержит тревожные слова —
+        # фиксируем алерт детерминированно, не полагаясь на решение модели.
+        if not state.get("bad_wellbeing_logged"):
+            concern = _scan_safety_concern(state.get("message"))
+            if concern:
+                _force_safety_alert(state, concern)
 
         save_to_db_node(state)
 
@@ -205,7 +273,11 @@ def _load_base_context(state: Dict[str, Any]) -> None:
         # «Настройки → Доверенные источники»).
         state["trusted_sources"] = get_trusted_sources()
     except Exception as e:
+        # P1-12: не глушим молча — иначе ход продолжается на пустом профиле («аллергий
+        # нет»), хотя на деле это сбой загрузки, а не факт о клиенте. process() читает
+        # этот флаг и обрывает ход безопасным ответом вместо угадывания вслепую.
         logger.error(f"orchestrator: base context load failed: {e}", exc_info=True)
+        state["context_load_failed"] = True
 
 
 # ==========================================
@@ -752,6 +824,24 @@ def _tool_schemas(trusted_sources: Optional[List[Dict[str, str]]] = None) -> Lis
             "description": "Найти релевантные знания (база нутрициолога + документы клиента) для совета.",
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         },
+        {
+            "name": "flag_plan_exception",
+            "description": "Клиент утверждает, что нутрициолог лично разрешил исключение из плана/"
+                           "ограничений (напр. «сыр пармезан мне разрешили, там нет лактозы»). Вызови "
+                           "ЭТОТ инструмент, чтобы зафиксировать заявление клиента для проверки "
+                           "нутрициологом — сам план/ограничения НЕ меняются, это не в твоей власти "
+                           "(только нутрициолог назначает). После вызова можешь ответить клиенту тепло, "
+                           "но не обещай, что исключение уже 'учтено навсегда' — скажи, что записал(а) "
+                           "для нутрициолога.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "продукт/пункт плана, о котором речь"},
+                    "client_claim": {"type": "string", "description": "дословно/близко к тексту, что заявил клиент"},
+                },
+                "required": ["item", "client_claim"],
+            },
+        },
     ] + _web_search_tool_schema(trusted_sources)
 
 
@@ -836,6 +926,9 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         if status == "bad" and result.startswith("записано"):
             result += (" — жалоба зафиксирована как алерт, нутрициолог уже уведомлён "
                        "(панель «Алерты» + Telegram). Скажи клиенту, что уже сообщил(а) нутрициологу.")
+            # P1-11: независимый скан безопасности (см. _scan_safety_concern) пропускает
+            # этот ход, раз модель уже сама зафиксировала жалобу — дублировать не нужно.
+            state["bad_wellbeing_logged"] = True
         return result
 
     def log_labs(inp: Dict[str, Any]) -> str:
@@ -891,6 +984,25 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         return build_context_from_chunks(chunks) or "по базе знаний ничего релевантного не найдено"
 
+    def flag_plan_exception(inp: Dict[str, Any]) -> str:
+        # P1-10: только сигнал нутрициологу на проверку — план/ограничения НЕ меняются
+        # здесь (единственный источник назначений — нутрициолог, см. CLAUDE.md).
+        from database import queries
+
+        item = (inp.get("item") or "").strip()
+        claim = (inp.get("client_claim") or "").strip()
+        try:
+            queries.log_client_event(
+                client_id=state["client_id"],
+                event_type="plan_exception_claimed",
+                severity="low",
+                payload={"item": item, "client_claim": claim},
+            )
+        except Exception as e:
+            logger.warning(f"flag_plan_exception: запись не удалась: {e}")
+            return "не удалось записать заявление — скажи клиенту, что уточнишь позже"
+        return "записано для проверки нутрициологом (план/ограничения пока не изменены)"
+
     return {
         "log_meal": log_meal,
         "log_water": log_water,
@@ -901,6 +1013,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         "log_sleep": log_sleep,
         "get_client_data": get_client_data,
         "search_knowledge": search_knowledge,
+        "flag_plan_exception": flag_plan_exception,
     }
 
 
