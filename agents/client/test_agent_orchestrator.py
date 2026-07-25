@@ -387,6 +387,43 @@ def test_load_base_context_wellness_plan_failure_is_best_effort():
     assert state["client"] == {"name": "Катя"}  # остальной контекст загрузился
 
 
+def test_system_prompt_includes_current_datetime_block():
+    # P1-8: без явной даты/времени модель угадывает «сегодня»/«вчера» по порядку истории.
+    state = {"client_profile": {"name": "Катя"}, "active_plan": None,
+             "client": {"timezone": "Asia/Dubai"}}
+    system = ao._system_prompt(state)
+    assert "## Текущий момент" in system
+    assert "Asia/Dubai" in system
+
+
+def test_format_history_ts_converts_to_client_timezone():
+    # UTC 09:00 → Asia/Dubai (+4) должно стать 13:00.
+    label = ao._format_history_ts("2026-07-25T09:00:00", "Asia/Dubai")
+    assert label == "25.07 13:00"
+
+
+def test_format_history_ts_none_when_missing_or_invalid():
+    assert ao._format_history_ts(None, "Asia/Dubai") is None
+    assert ao._format_history_ts("не дата", "Asia/Dubai") is None
+
+
+def test_load_base_context_timestamps_history_entries():
+    # P1-8: каждая реплика истории получает таймштамп в таймзоне клиента, а не голый текст.
+    with patch("database.queries.get_client_by_id",
+               return_value={"name": "Катя", "timezone": "Asia/Dubai"}), \
+         patch("database.queries.get_client_profile", return_value={}), \
+         patch("database.queries.get_active_nutrition_plan", return_value=None), \
+         patch("database.queries.get_conversations", return_value=[
+             {"role": "client", "message_text": "Привет", "message_timestamp": "2026-07-25T09:00:00"},
+         ]), \
+         patch("database.queries.get_latest_measurement", return_value=None), \
+         patch("database.queries.get_controlled_metrics", return_value=[]), \
+         patch("database.queries.get_wellness_plan", return_value=None):
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    assert state["conversation_history"] == [{"role": "user", "content": "[25.07 13:00] Привет"}]
+
+
 def test_controlled_metrics_block_gives_exact_keys():
     state = {
         "client_profile": {"name": "Катя"}, "active_plan": None,
