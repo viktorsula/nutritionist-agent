@@ -113,6 +113,9 @@ export function AlertsPanel() {
       const showExpected = expected && expected.toLowerCase() !== title.toLowerCase();
       return [title, showExpected ? expected : ""].filter(Boolean).join(" — ");
     }
+    if (a.event_type === "plan_exception_claimed") {
+      return [p.item as string, p.client_claim as string].filter(Boolean).join(" — ");
+    }
     return (p.message as string) || "";
   }
 

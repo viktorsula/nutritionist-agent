@@ -100,6 +100,20 @@ class TestFormatAlertFoodAlerts(unittest.TestCase):
         self.assertIn("Напоминание без ответа", text)
         self.assertIn("Контроль сна", text)
 
+    def test_plan_exception_claimed_has_readable_label_and_detail(self):
+        # P1-10: сигнал нутрициологу о заявлении клиента — тоже должен быть читаемым.
+        event = {
+            "event_type": "plan_exception_claimed",
+            "severity": "low",
+            "clients": {"name": "Екатерина"},
+            "payload_json": {"item": "пармезан", "client_claim": "нутрициолог разрешила"},
+        }
+        text = format_alert(event)
+        self.assertNotIn("plan_exception_claimed", text)
+        self.assertIn("Клиент заявил об исключении из плана", text)
+        self.assertIn("пармезан", text)
+        self.assertIn("нутрициолог разрешила", text)
+
 
 if __name__ == "__main__":
     unittest.main()

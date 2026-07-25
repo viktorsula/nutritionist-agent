@@ -315,6 +315,27 @@
 | P1-14 | **Анкета онбординга: ~24 из 33 полей уходят только в `questionnaire_json` и никогда не читаются** — ни в LLM, ни в кабинете нутрициолога. В структурные колонки `client_profiles` попадают лишь 9 (birth_date/gender/weight/height/target_weight/activity_level/allergies/chronic_conditions/goals). Пропадают медицински значимые `medications`/`supplements`/`doctor_recommendations`, а также диета/алкоголь/курение/стресс/распорядок/симптомы/окружение | `questionnaire/submit.ts` пишет `questionnaire_json`; grep по проекту — 0 мест чтения | найдено при подготовке P0-5/P1-2 |
 | P1-15 | **Внешний веб-поиск (`web_search`) не подключён к основному LLM-оркестратору** — ни у клиента, ни у нутрициолога. Работает только в старом графе (`nutrition_agent.py`, fallback-путь). На стороне аналитики нутрициолога явно помечен в коде как «отложено» | `agents/client/agent_orchestrator.py` — 0 упоминаний web_search; `analytics_agent.py:9` «WEB — отложено» | найдено при подготовке P0-5/P1-2 |
 
+**Реализация P1-10/P1-11/P1-12 (25.07.2026):** Инструмент `flag_plan_exception(item,
+client_claim)` (`agent_orchestrator.py::_tool_schemas`/`_build_handlers`) + инструкция в
+`prompts/client/orchestrator_system.md` — при заявлении клиента «нутрициолог разрешил
+исключение» модель фиксирует заявление событием `client_events` (`plan_exception_claimed`,
+severity `low`) для проверки нутрициологом; план/ограничения НЕ меняются автоматически
+(единственный источник назначений — нутрициолог). Читаемая метка добавлена сразу в трёх
+местах (`utils/notify.py`, `AlertsPanel.tsx`, `ClientCard.tsx`) — не повторяем историю P1-9
+(P1-10). Независимый детерминированный safety-скан (`_scan_safety_concern` по ключевым
+словам тревожных симптомов на сыром сообщении клиента) — если модель за ход НЕ вызвала
+`log_wellbeing(status='bad')` сама (флаг `state["bad_wellbeing_logged"]`), система создаёт
+`bad_wellbeing`-алерт детерминированно (`_force_safety_alert`), независимо от решения модели
+(P1-11). `_load_base_context` при сбое загрузки ядра контекста (клиент/профиль/план/история)
+теперь не глушит ошибку молча — выставляет `state["context_load_failed"]`, и `process()`
+обрывает ход безопасным ответом («не получается сейчас получить твои данные»), не позволяя
+модели рассуждать на пустом профиле, где отсутствие данных выглядело бы как «аллергий нет»
+(P1-12). Тесты: `agents/client/test_agent_orchestrator.py` (+12: flag_plan_exception ×3,
+safety-скан ×5, context-failsafe ×3), `utils/test_notify.py` (+1) — 592 passed / 8
+предсуществующих несвязанных фейлов; `tsc` чисто; живая проверка в браузере (Playwright) —
+карточка клиента корректно отображает новый тип события без сырого `event_type`. PR
+`fix/plan-exception-safety-scan-context-failsafe`.
+
 **Реализация P1-6/P1-7/P1-8 (25.07.2026):** `prompts/client/reminder_message.md` переписан —
 убран буквальный пример-фраза «если будет минутка, поделитесь, пожалуйста» (модель копировала
 его дословно раз за разом), добавлен явный запрет на не-русские слова/фрагменты (источник

@@ -130,6 +130,39 @@ def test_log_measurement_and_sleep_records():
         assert pr.call_args.args[1]["sleep"] == {"bedtime": "23:30", "wake": "07:00"}
 
 
+def test_flag_plan_exception_logs_event_without_changing_plan():
+    # P1-10: инструмент только фиксирует заявление клиента для проверки нутрициологом —
+    # НЕ трогает план/ограничения (единственный источник назначений — нутрициолог).
+    state = {"client_id": "cid"}
+    with patch("database.queries.log_client_event") as log_event:
+        handlers = ao._build_handlers(state)
+        result = handlers["flag_plan_exception"](
+            {"item": "пармезан", "client_claim": "нутрициолог разрешила, там нет лактозы"}
+        )
+    log_event.assert_called_once_with(
+        client_id="cid",
+        event_type="plan_exception_claimed",
+        severity="low",
+        payload={"item": "пармезан", "client_claim": "нутрициолог разрешила, там нет лактозы"},
+    )
+    assert "нутрициолог" in result.lower()
+
+
+def test_flag_plan_exception_registered_as_tool():
+    names = {t["name"] for t in ao._tool_schemas()}
+    assert "flag_plan_exception" in names
+    handlers = ao._build_handlers({"client_id": "cid"})
+    assert "flag_plan_exception" in handlers
+
+
+def test_flag_plan_exception_failure_is_best_effort():
+    state = {"client_id": "cid"}
+    with patch("database.queries.log_client_event", side_effect=RuntimeError("db down")):
+        handlers = ao._build_handlers(state)
+        result = handlers["flag_plan_exception"]({"item": "пармезан", "client_claim": "разрешили"})
+    assert "не удалось" in result.lower()
+
+
 def test_measurement_sleep_tools_registered():
     names = {t["name"] for t in ao._tool_schemas()}
     assert {"log_measurement", "log_sleep"} <= names
@@ -387,6 +420,46 @@ def test_load_base_context_wellness_plan_failure_is_best_effort():
     assert state["client"] == {"name": "Катя"}  # остальной контекст загрузился
 
 
+def test_load_base_context_sets_failure_flag_on_client_load_error():
+    # P1-12: сбой ЯДРА контекста (клиент/профиль/план/история) — не глушим молча,
+    # раньше это выглядело как «у клиента нет данных», а не как сбой БД.
+    with patch("database.queries.get_client_by_id", side_effect=RuntimeError("db down")):
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    assert state["context_load_failed"] is True
+
+
+def test_load_base_context_no_failure_flag_on_success():
+    with patch("database.queries.get_client_by_id", return_value={"name": "Катя"}), \
+         patch("database.queries.get_client_profile", return_value={}), \
+         patch("database.queries.get_active_nutrition_plan", return_value=None), \
+         patch("database.queries.get_conversations", return_value=[]), \
+         patch("database.queries.get_latest_measurement", return_value=None), \
+         patch("database.queries.get_controlled_metrics", return_value=[]), \
+         patch("database.queries.get_wellness_plan", return_value=None):
+        state = {"client_id": "cid"}
+        ao._load_base_context(state)
+    assert "context_load_failed" not in state
+
+
+def test_process_aborts_safely_when_context_load_fails():
+    # P1-12: ход не должен продолжиться на пустом профиле — модель вообще не вызывается.
+    def fake_call(**kw):
+        raise AssertionError("call_llm не должен вызываться при сбое загрузки контекста")
+
+    def failing_context(state):
+        state["context_load_failed"] = True
+
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call), \
+         patch("agents.client.agent_orchestrator._load_base_context", side_effect=failing_context), \
+         patch("agents.client.orchestrator.ingest_node", side_effect=lambda s: s), \
+         patch("agents.client.orchestrator.save_to_db_node", side_effect=lambda s: s) as save_db:
+        out = ao.process("cid", "мой вес 70", "telegram", "text", {}, {"mode": "full_program"})
+
+    save_db.assert_called_once()  # сообщение клиента всё равно сохраняется
+    assert "не получается" in out["message"].lower()
+
+
 def test_system_prompt_includes_current_datetime_block():
     # P1-8: без явной даты/времени модель угадывает «сегодня»/«вчера» по порядку истории.
     state = {"client_profile": {"name": "Катя"}, "active_plan": None,
@@ -552,6 +625,63 @@ def test_run_agent_loop_empty_content_has_fallback():
 
 
 # ── Полный проход + откат на граф ────────────────────────────────────────────
+def test_scan_safety_concern_matches_keyword():
+    assert ao._scan_safety_concern("что-то мне плохо сегодня") == "мне плохо"
+    assert ao._scan_safety_concern("сильно кружится голова, помогите") == "кружится голова"
+
+
+def test_scan_safety_concern_none_when_clean():
+    assert ao._scan_safety_concern("привет, как дела?") is None
+    assert ao._scan_safety_concern("") is None
+    assert ao._scan_safety_concern(None) is None
+
+
+def test_force_safety_alert_logs_bad_wellbeing():
+    state = {"client_id": "cid", "channel": "telegram"}
+    with patch("database.queries.log_client_event") as log_event:
+        ao._force_safety_alert(state, "мне плохо")
+    log_event.assert_called_once_with(
+        client_id="cid", event_type="bad_wellbeing", severity="medium",
+        payload={"status": "bad", "reason": "мне плохо", "channel": "telegram", "source": "auto_scan"},
+    )
+
+
+def test_process_forces_safety_alert_when_model_does_not_log_wellbeing():
+    # P1-11: клиент явно жалуется, но модель (в этом фейке) не вызывает log_wellbeing —
+    # независимый скан должен зафиксировать алерт сам.
+    def fake_call(**kw):
+        return {"content": "Понимаю, отдохни немного.", "model": "claude-sonnet-4-6", "usage": {}}
+
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call), \
+         patch("agents.client.agent_orchestrator._load_base_context"), \
+         patch("agents.client.orchestrator.ingest_node", side_effect=lambda s: s), \
+         patch("agents.client.orchestrator.save_to_db_node", side_effect=lambda s: s), \
+         patch("database.queries.log_client_event") as log_event:
+        ao.process("cid", "у меня сильно кружится голова", "telegram", "text", {}, {"mode": "full_program"})
+
+    log_event.assert_called_once_with(
+        client_id="cid", event_type="bad_wellbeing", severity="medium",
+        payload={"status": "bad", "reason": "кружится голова", "channel": "telegram", "source": "auto_scan"},
+    )
+
+
+def test_process_skips_safety_scan_when_model_already_logged_wellbeing():
+    # Модель САМА зафиксировала жалобу через log_wellbeing(bad) — скан не должен дублировать.
+    def fake_call(**kw):
+        kw["tool_handlers"]["log_wellbeing"]({"status": "bad", "reason": "кружится голова"})
+        return {"content": "Записала, нутрициолог уже знает.", "model": "claude-sonnet-4-6", "usage": {}}
+
+    with patch("agents.core.agent_engine.call_llm", side_effect=fake_call), \
+         patch("agents.client.agent_orchestrator._load_base_context"), \
+         patch("agents.client.agent_orchestrator.intake_store.persist_record", return_value="wellbeing"), \
+         patch("agents.client.orchestrator.ingest_node", side_effect=lambda s: s), \
+         patch("agents.client.orchestrator.save_to_db_node", side_effect=lambda s: s), \
+         patch("database.queries.log_client_event") as log_event:
+        ao.process("cid", "у меня сильно кружится голова", "telegram", "text", {}, {"mode": "full_program"})
+
+    log_event.assert_not_called()  # bad_wellbeing уже создан через persist_record, не через сканер
+
+
 def test_process_runs_loop_persists_and_finalizes():
     def fake_call(**kw):
         kw["tool_handlers"]["log_weight"]({"weight_kg": 70})
