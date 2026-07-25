@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../components/ui/Button";
 import { Header } from "../../components/Header";
+import { api, type ConsentText } from "../../lib/api";
 import { QUESTIONNAIRE, type Field } from "./schema";
 import { submitQuestionnaire, type Answers } from "./submit";
 
@@ -14,20 +15,42 @@ interface Props {
   initialAnswers?: Answers;
   /** Есть только в режиме редактирования: первичный онбординг отменить нельзя. */
   onCancel?: () => void;
+  /**
+   * Первичный онбординг требует согласия (LEGAL-1) — тогда последним шагом визарда
+   * добавляется экран согласия (по требованию владельца: обработка данных начинается
+   * при сохранении анкеты, а не при вводе в поля, поэтому согласие как последний шаг
+   * того же визарда юридически корректно). Уже онбордившиеся клиенты с устаревшей версией
+   * согласия видят отдельный экран (ConsentGate) ДО того, как попасть сюда — здесь этот
+   * случай не обрабатывается.
+   */
+  needsConsent?: boolean;
+  consentText?: ConsentText | null;
 }
 
-export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Props) {
+export function Questionnaire({
+  clientId,
+  onDone,
+  initialAnswers,
+  onCancel,
+  needsConsent,
+  consentText,
+}: Props) {
   const { t, i18n } = useTranslation();
   const lang: Lang = i18n.resolvedLanguage === "en" ? "en" : "ru";
 
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [files, setFiles] = useState<File[]>([]);
+  const [consentHealthData, setConsentHealthData] = useState(false);
+  const [consentTelegram, setConsentTelegram] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const step = QUESTIONNAIRE[stepIndex];
-  const isLast = stepIndex === QUESTIONNAIRE.length - 1;
+  const hasConsentStep = !!(needsConsent && consentText);
+  const totalSteps = QUESTIONNAIRE.length + (hasConsentStep ? 1 : 0);
+  const isConsentStep = hasConsentStep && stepIndex === QUESTIONNAIRE.length;
+  const step = isConsentStep ? null : QUESTIONNAIRE[stepIndex];
+  const isLast = stepIndex === totalSteps - 1;
 
   const setVal = (id: string, value: unknown) =>
     setAnswers((prev) => ({ ...prev, [id]: value }));
@@ -40,7 +63,7 @@ export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Pr
   }
 
   function validateStep(): boolean {
-    const missing = step.fields.filter((f) => f.required && !isFilled(f));
+    const missing = step!.fields.filter((f) => f.required && !isFilled(f));
     if (missing.length > 0) {
       setError(t("questionnaire.required_error"));
       return false;
@@ -50,13 +73,27 @@ export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Pr
   }
 
   async function next() {
-    if (!validateStep()) return;
+    if (isConsentStep) {
+      if (!(consentHealthData && consentTelegram)) {
+        setError(t("consent.required_error"));
+        return;
+      }
+      setError("");
+    } else if (!validateStep()) {
+      return;
+    }
     if (!isLast) {
       setStepIndex((i) => i + 1);
       return;
     }
     setBusy(true);
     try {
+      if (hasConsentStep) {
+        await api.acceptConsent({
+          health_data: consentHealthData,
+          telegram_channel: consentTelegram,
+        });
+      }
       await submitQuestionnaire(clientId, answers, files, lang);
       onDone();
     } catch (e) {
@@ -79,26 +116,55 @@ export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Pr
           <div className="mb-1 text-xs text-gray-400">
             {t("questionnaire.step", {
               current: stepIndex + 1,
-              total: QUESTIONNAIRE.length,
+              total: totalSteps,
             })}
           </div>
-          <h1 className="mb-4 text-lg font-semibold text-brand-dark">
-            {step.title[lang]}
-          </h1>
 
-          <div className="space-y-4">
-            {step.fields.map((field) => (
-              <FieldInput
-                key={field.id}
-                field={field}
-                lang={lang}
-                value={answers[field.id]}
-                onChange={(v) => setVal(field.id, v)}
-                onFiles={setFiles}
-                files={files}
-              />
-            ))}
-          </div>
+          {isConsentStep ? (
+            <>
+              <h1 className="mb-4 text-lg font-semibold text-brand-dark">{t("consent.title")}</h1>
+              <p className="mb-4 text-sm text-gray-600">{t("consent.intro")}</p>
+              <div className="space-y-3">
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={consentHealthData}
+                    onChange={(e) => setConsentHealthData(e.target.checked)}
+                  />
+                  <span>{consentText![lang].health_data}</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={consentTelegram}
+                    onChange={(e) => setConsentTelegram(e.target.checked)}
+                  />
+                  <span>{consentText![lang].telegram_channel}</span>
+                </label>
+              </div>
+            </>
+          ) : (
+            <>
+              <h1 className="mb-4 text-lg font-semibold text-brand-dark">
+                {step!.title[lang]}
+              </h1>
+              <div className="space-y-4">
+                {step!.fields.map((field) => (
+                  <FieldInput
+                    key={field.id}
+                    field={field}
+                    lang={lang}
+                    value={answers[field.id]}
+                    onChange={(v) => setVal(field.id, v)}
+                    onFiles={setFiles}
+                    files={files}
+                  />
+                ))}
+              </div>
+            </>
+          )}
 
           {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
 
@@ -113,7 +179,10 @@ export function Questionnaire({ clientId, onDone, initialAnswers, onCancel }: Pr
                 </Button>
               )}
             </div>
-            <Button onClick={next} disabled={busy}>
+            <Button
+              onClick={next}
+              disabled={busy || (isConsentStep && !(consentHealthData && consentTelegram))}
+            >
               {busy
                 ? t("questionnaire.submitting")
                 : isLast
