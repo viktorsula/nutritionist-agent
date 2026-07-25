@@ -192,7 +192,8 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
         r.update(extra)
         return r
 
-    async def _run(self, reminders, *, exists=False, utc=(4, 0), configured=True, outstanding=None):
+    async def _run(self, reminders, *, exists=False, utc=(4, 0), configured=True, outstanding=None,
+                    topic_dup=False):
         bot = AsyncMock()
         recorded = []
         outstanding = outstanding or []
@@ -206,6 +207,7 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
              patch("database.queries.record_occurrence", side_effect=lambda *a, **k: recorded.append(a)), \
              patch("database.queries.get_active_nutrition_plan", return_value=None), \
              patch("database.queries.get_outstanding_occurrences", return_value=outstanding), \
+             patch("database.queries.has_topic_message_today", return_value=topic_dup), \
              patch("api.scheduler.compose_reminder_message",
                    side_effect=lambda b: " | ".join(b.get("requests", [])
                                                     + [f"OUT:{t}" for t in b.get("outstanding", [])])):
@@ -248,6 +250,42 @@ class TestRunReminders(unittest.IsolatedAsyncioTestCase):
         text = bot.send_message.call_args.kwargs["text"]
         self.assertIn("Прислать вес", text)
         self.assertIn("OUT:Вода", text)  # вплетено «со вчера»
+
+    async def test_topic_already_notified_today_drops_item_from_packet(self):
+        # P1-7: тема (expected_response) уже прозвучала сегодня через другое напоминание
+        # (напр. повтор из run_reminder_followups) — этот пункт не попадёт в пакет.
+        r = self._reminder("r1", "Выпить воды", expected_response="water")
+        bot, recorded = await self._run([r], topic_dup=True)
+        bot.send_message.assert_not_called()
+        self.assertEqual(recorded, [])  # подавленный пункт не фиксируется occurrence'ом
+
+    async def test_topic_dedup_only_drops_matching_item_others_still_sent(self):
+        # "water" уже прозвучала сегодня (напр. повтором), "weight" — нет: в пакет
+        # должен попасть только пункт про вес.
+        r1 = self._reminder("r1", "Выпить воды", expected_response="water")
+        r2 = self._reminder("r2", "Прислать вес", expected_response="weight")
+        bot = AsyncMock()
+        recorded = []
+        fake_now = datetime(2026, 6, 24, 4, 0)
+        with patch("api.scheduler.datetime") as mock_dt, \
+             patch("api.telegram_webhook.is_configured", return_value=True), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_active_reminders", return_value=[r1, r2]), \
+             patch("database.queries.occurrence_exists", return_value=False), \
+             patch("database.queries.record_occurrence", side_effect=lambda *a, **k: recorded.append(a)), \
+             patch("database.queries.get_active_nutrition_plan", return_value=None), \
+             patch("database.queries.get_outstanding_occurrences", return_value=[]), \
+             patch("database.queries.has_topic_message_today",
+                   side_effect=lambda cid, topic, day: topic == "water"), \
+             patch("api.scheduler.compose_reminder_message",
+                   side_effect=lambda b: " | ".join(b.get("requests", []))):
+            mock_dt.utcnow.return_value = fake_now
+            mock_dt.side_effect = datetime
+            await S.run_reminders()
+        text = bot.send_message.call_args.kwargs["text"]
+        self.assertIn("Прислать вес", text)
+        self.assertNotIn("Выпить воды", text)
+        self.assertEqual(len(recorded), 1)  # только допущенный пункт зафиксирован
 
 
 class TestCadence(unittest.TestCase):
@@ -317,7 +355,7 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
             "clients": {"telegram_id": 777, "timezone": "Asia/Dubai"},
         }
 
-    async def _run(self, occ, *, detected=False, utc=(4, 0)):
+    async def _run(self, occ, *, detected=False, utc=(4, 0), topic_dup=False):
         bot = AsyncMock()
         fake_now = datetime(2026, 6, 24, utc[0], utc[1])
         with patch("api.scheduler.datetime") as mock_dt, \
@@ -329,6 +367,7 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
              patch("database.queries.mark_occurrence_answered") as answered, \
              patch("database.queries.mark_occurrence_expired") as expired, \
              patch("database.queries.bump_occurrence_followup") as bumped, \
+             patch("database.queries.has_topic_message_today", return_value=topic_dup), \
              patch("database.queries.log_client_event") as logged:
             mock_dt.utcnow.return_value = fake_now
             mock_dt.fromisoformat = datetime.fromisoformat
@@ -358,6 +397,43 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_called_once()
         bumped.assert_called_once()
         expired.assert_not_called()
+
+    async def test_followup_skipped_when_topic_already_notified_today(self):
+        # P1-7: другое напоминание с тем же expected_response уже отправило сообщение
+        # сегодня (напр. второе напоминание про воду) — этот повтор пропускается.
+        occ = self._occ(nfu="2026-06-24T07:00:00")
+        bot, _, expired, bumped, _ = await self._run(occ, utc=(8, 0), topic_dup=True)
+        bot.send_message.assert_not_called()
+        bumped.assert_not_called()
+        expired.assert_not_called()
+
+    async def test_followup_bump_passes_notified_date(self):
+        # bump_occurrence_followup должен получить notified_date (P1-7) — иначе
+        # last_notified_date не обновится и дедуп не сработает для других reminder'ов.
+        occ = self._occ(nfu="2026-06-24T07:00:00")
+        _, _, _, bumped, _ = await self._run(occ, utc=(8, 0), topic_dup=False)
+        bumped.assert_called_once()
+        self.assertEqual(bumped.call_args.kwargs.get("notified_date"), "2026-06-24")
+
+    async def test_topic_dedup_checks_exclude_own_occurrence(self):
+        # Проверка дедупа должна исключать САМО срабатывание (иначе оно всегда
+        # блокировало бы собственный законный повтор — его last_notified_date уже сегодня).
+        occ = self._occ(nfu="2026-06-24T07:00:00")
+        bot = AsyncMock()
+        fake_now = datetime(2026, 6, 24, 8, 0)
+        with patch("api.scheduler.datetime") as mock_dt, \
+             patch("api.telegram_webhook.is_configured", return_value=True), \
+             patch("api.telegram_webhook.get_bot", return_value=bot), \
+             patch("database.queries.get_open_occurrences", return_value=[occ]), \
+             patch("api.scheduler._detect_response", return_value=False), \
+             patch("api.scheduler.compose_reminder_message", side_effect=lambda b: " | ".join(b.get("requests", []))), \
+             patch("database.queries.bump_occurrence_followup"), \
+             patch("database.queries.has_topic_message_today", return_value=False) as topic_check:
+            mock_dt.utcnow.return_value = fake_now
+            mock_dt.fromisoformat = datetime.fromisoformat
+            mock_dt.side_effect = datetime
+            await S.run_reminder_followups()
+        topic_check.assert_called_once_with("c1", "weight", "2026-06-24", exclude_occurrence_id="occ1")
 
     async def test_no_followup_before_time(self):
         occ = self._occ(nfu="2026-06-24T07:00:00")

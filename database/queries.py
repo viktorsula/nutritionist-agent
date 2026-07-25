@@ -1306,10 +1306,52 @@ def record_occurrence(
     next_followup_at задаётся для ждущих ответа напоминаний (когда слать первый повтор).
     """
     supabase = _service_client()
-    data: Dict[str, Any] = {"reminder_id": reminder_id, "client_id": client_id, "due_date": due_date}
+    data: Dict[str, Any] = {
+        "reminder_id": reminder_id, "client_id": client_id, "due_date": due_date,
+        "last_notified_date": due_date,  # P1-7: точка отсчёта дедупа по теме на сегодня
+    }
     if next_followup_at is not None:
         data["next_followup_at"] = next_followup_at
     return _execute_one(supabase.table("reminder_occurrences").insert(data))
+
+
+def has_topic_message_today(
+    client_id: str, topic: Optional[str], day: str, exclude_occurrence_id: Optional[str] = None
+) -> bool:
+    """
+    Кросс-джобовый дедуп напоминаний по теме (P1-7): было ли клиенту сегодня УЖЕ отправлено
+    сообщение по теме `topic` (reminders.expected_response) — неважно, через утренний пакет
+    (record_occurrence) или повтор (bump_occurrence_followup), и неважно от какого именно
+    reminder. Раньше повторы считались только per-occurrence — если у клиента больше одного
+    активного напоминания с одной темой (напр. два про воду), каждое слало независимо.
+
+    Без темы (None/'text'/'none') дедуп не применяется — это не измеримый показатель,
+    несколько разных текстовых напоминаний в день не считаются «одним и тем же вопросом».
+
+    `exclude_occurrence_id` — исключить конкретное срабатывание из проверки (используется
+    при рассмотрении его же собственного повтора: его last_notified_date уже сегодня по
+    определению, иначе он бы всегда блокировал сам себя).
+    """
+    if not topic or topic in ("text", "none"):
+        return False
+    supabase = _service_client()
+    reminders_resp = (
+        supabase.table("reminders").select("id")
+        .eq("client_id", client_id).eq("expected_response", topic)
+        .execute()
+    )
+    reminder_ids = [r["id"] for r in (_extract_data(reminders_resp) or []) if r.get("id")]
+    if not reminder_ids:
+        return False
+    query = (
+        supabase.table("reminder_occurrences").select("id")
+        .in_("reminder_id", reminder_ids)
+        .eq("last_notified_date", day)
+    )
+    if exclude_occurrence_id:
+        query = query.neq("id", exclude_occurrence_id)
+    occ_resp = query.limit(1).execute()
+    return bool(_extract_data(occ_resp))
 
 
 # ── Контроль ответа (Слайс 2B) ────────────────────────────────────────────────
@@ -1388,17 +1430,24 @@ def mark_occurrence_expired(occurrence_id: str) -> Optional[Dict[str, Any]]:
     )
 
 
-def bump_occurrence_followup(occurrence_id: str, next_followup_at: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Инкремент счётчика повторов + новое время следующего повтора."""
+def bump_occurrence_followup(
+    occurrence_id: str, next_followup_at: Optional[str], notified_date: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Инкремент счётчика повторов + новое время следующего повтора. `notified_date` (P1-7) —
+    локальная дата клиента, когда повтор реально ушёл; обновляет last_notified_date, чтобы
+    другие напоминания с той же темой (expected_response) не спрашивали о том же сегодня же.
+    """
     supabase = _service_client()
     row = _execute_single(
         supabase.table("reminder_occurrences").select("followups_sent").eq("id", occurrence_id).single()
     )
     sent = (row or {}).get("followups_sent") or 0
+    payload: Dict[str, Any] = {"followups_sent": sent + 1, "next_followup_at": next_followup_at}
+    if notified_date is not None:
+        payload["last_notified_date"] = notified_date
     return _execute_one(
-        supabase.table("reminder_occurrences")
-        .update({"followups_sent": sent + 1, "next_followup_at": next_followup_at})
-        .eq("id", occurrence_id)
+        supabase.table("reminder_occurrences").update(payload).eq("id", occurrence_id)
     )
 
 

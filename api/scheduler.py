@@ -279,7 +279,10 @@ async def run_reminders() -> None:
     Один проход: разослать наступившие напоминания клиентам. Все напоминания клиента
     на одно и то же локальное время идут ОДНИМ сообщением (пакет). Best-effort.
 
-    Дедуп — durable через reminder_occurrences (UNIQUE reminder_id+due_date).
+    Дедуп — durable через reminder_occurrences (UNIQUE reminder_id+due_date), плюс
+    кросс-джобовый дедуп по теме (P1-7, has_topic_message_today): пункт пакета не
+    попадёт в сообщение, если сегодня уже спросили о той же теме через другое
+    напоминание (в т.ч. повтором из run_reminder_followups).
     """
     from collections import defaultdict
     from api.telegram_webhook import is_configured, get_bot
@@ -334,7 +337,24 @@ async def run_reminders() -> None:
         buckets[(r["client_id"], telegram_id, due_date)].append(r)
 
     for (client_id, telegram_id, due_date), items in buckets.items():
-        titles = [r.get("title", "").strip() for r in items if r.get("title")]
+        # P1-7: кросс-джобовый дедуп по теме — не спрашиваем про то, о чём клиенту уже
+        # писали сегодня повтором (run_reminder_followups) от другого напоминания с тем
+        # же expected_response (напр. два разных напоминания про воду).
+        allowed_items: list = []
+        for r in items:
+            topic = r.get("expected_response")
+            try:
+                if topic and queries.has_topic_message_today(client_id, topic, due_date):
+                    logger.info(
+                        f"scheduler: пункт пакета пропущен (тема уже отправлена сегодня) "
+                        f"reminder={r.get('id')} expected={topic}"
+                    )
+                    continue
+            except Exception as e:
+                logger.warning(f"scheduler: проверка дедупа темы (пакет) не удалась reminder={r.get('id')}: {e}")
+            allowed_items.append(r)
+
+        titles = [r.get("title", "").strip() for r in allowed_items if r.get("title")]
         if not titles:
             continue
 
@@ -366,8 +386,10 @@ async def run_reminders() -> None:
             continue
         # Фиксируем срабатывания только после успешной отправки (UNIQUE защитит от дублей).
         # Для ждущих ответа сразу проставляем время первого повтора (контур ответа, Слайс 2B).
+        # Только для allowed_items — подавленные темой-дублем сегодня НЕ фиксируем: без
+        # occurrence они просто заново оценятся в свой обычный срок (обычно завтра).
         now_utc = datetime.utcnow()
-        for r in items:
+        for r in allowed_items:
             try:
                 queries.record_occurrence(
                     r["id"], client_id, due_date, next_followup_at=_initial_followup_at(r, now_utc)
@@ -588,6 +610,26 @@ async def run_reminder_followups() -> None:
         telegram_id = (occ.get("clients") or {}).get("telegram_id")
         nfu = _parse_ts(occ.get("next_followup_at"))
         if telegram_id and nfu and now >= nfu and (occ.get("followups_sent") or 0) < profile["max_followups"]:
+            try:
+                tz = pytz.timezone(tz_str) if tz_str else pytz.UTC
+            except Exception:
+                tz = pytz.UTC
+            today_local = now.replace(tzinfo=pytz.UTC).astimezone(tz).strftime("%Y-%m-%d")
+
+            # P1-7: кросс-джобовый дедуп по теме — другое напоминание с тем же
+            # expected_response (напр. второе про воду) уже спросило об этом сегодня.
+            try:
+                if queries.has_topic_message_today(
+                    client_id, expected, today_local, exclude_occurrence_id=occ["id"]
+                ):
+                    logger.info(
+                        f"scheduler: повтор пропущен (тема уже отправлена сегодня) "
+                        f"occ={occ['id']} expected={expected}"
+                    )
+                    continue
+            except Exception as e:
+                logger.warning(f"scheduler: проверка дедупа темы не удалась occ={occ.get('id')}: {e}")
+
             title = (reminder.get("title") or "").strip()
             try:
                 await bot.send_message(
@@ -597,7 +639,7 @@ async def run_reminder_followups() -> None:
                 logger.warning(f"scheduler: повтор напоминания не отправлен occ={occ.get('id')}: {e}")
                 continue
             next_at = (now + timedelta(hours=profile["followup_hours"])).isoformat()
-            queries.bump_occurrence_followup(occ["id"], next_at)
+            queries.bump_occurrence_followup(occ["id"], next_at, notified_date=today_local)
             logger.info(f"scheduler: повтор напоминания отправлен occ={occ['id']}")
 
 

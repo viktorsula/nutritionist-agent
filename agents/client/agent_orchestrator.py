@@ -28,6 +28,8 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import pytz
+
 from prompts import load_prompt
 from agents.core.agent_engine import run_agent
 from utils.format import tables_to_text
@@ -165,13 +167,18 @@ def _load_base_context(state: Dict[str, Any]) -> None:
         state["nutritionist_notes"] = client.get("nutritionist_notes")
         state["conversation_summary"] = client.get("conversation_summary") or ""
 
+        tz_name = client.get("timezone") or "UTC"
         history: List[Dict[str, str]] = []
         for conv in reversed(queries.get_conversations(client_id=client_id, limit=10)):
             text = conv.get("message_text") or conv.get("message") or ""
             if not text:
                 continue
             role = "user" if conv.get("role") == "client" else "assistant"
-            history.append({"role": role, "content": text})
+            # P1-8: без таймштампа модель различает «вчера»/«сегодня» только по порядку
+            # последних реплик — при разрыве в диалоге или нескольких сообщениях в день
+            # это статистически неизбежно путается (см. diagnostic_report.md, 7.4).
+            ts_label = _format_history_ts(conv.get("message_timestamp"), tz_name)
+            history.append({"role": role, "content": f"[{ts_label}] {text}" if ts_label else text})
         state["conversation_history"] = history
 
         try:
@@ -341,6 +348,9 @@ def _system_prompt(state: Dict[str, Any]) -> str:
             "используй инструменты для записи данных и ответов, не выдумывай факты."
         )
 
+    # Текущая дата/время клиента (P1-8) — якорь для «сегодня»/«вчера»/«завтра».
+    system += "\n\n" + _format_current_datetime(state)
+
     # Профиль клиента (P0-5/P1-2) — медицинские поля/цель/ЗОЖ/анкета. Тоже обязательная
     # опора, а не «по требованию» — см. _format_client_profile.
     profile_block = _format_client_profile(state)
@@ -397,6 +407,48 @@ def _plan_view(plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "water_ml_target": pick("water_ml_target"),  # если появится структурное поле
         "supplements": items,
     }
+
+
+_WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+
+
+def _format_history_ts(iso_ts: Optional[str], tz_name: str) -> Optional[str]:
+    """Компактный таймштамп реплики истории в таймзоне клиента (P1-8), либо None."""
+    if not iso_ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=pytz.UTC)
+        try:
+            tz = pytz.timezone(tz_name)
+        except Exception:
+            tz = pytz.UTC
+        return dt.astimezone(tz).strftime("%d.%m %H:%M")
+    except Exception:
+        return None
+
+
+def _format_current_datetime(state: Dict[str, Any]) -> str:
+    """
+    Текущая дата/время в таймзоне клиента (P1-8) — без этого якоря модель угадывает
+    «сегодня»/«вчера» чисто по порядку последних реплик истории, что при разрыве в
+    диалоге или нескольких сообщениях в день статистически неизбежно путается.
+    """
+    client = state.get("client") or {}
+    tz_name = client.get("timezone") or "UTC"
+    try:
+        tz = pytz.timezone(tz_name)
+    except Exception:
+        tz = pytz.UTC
+    now_local = datetime.now(pytz.UTC).astimezone(tz)
+    weekday = _WEEKDAY_RU[now_local.weekday()]
+    return (
+        "## Текущий момент\n"
+        f"Сейчас {now_local.strftime('%d.%m.%Y')} ({weekday}), {now_local.strftime('%H:%M')} "
+        f"по времени клиента ({tz_name}). Ориентируйся на эту дату/время, когда клиент говорит "
+        "«сегодня», «вчера», «завтра» — не угадывай по порядку реплик в истории."
+    )
 
 
 def _age_from_birth_date(birth_date: Optional[str]) -> Optional[int]:
