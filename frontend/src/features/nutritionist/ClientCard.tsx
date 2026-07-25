@@ -13,7 +13,7 @@ import {
   useLabResults,
   useNutritionDaily,
 } from "../client/queries";
-import { useClientEventsRecent, useClientRow, useQuestionnaireHistory } from "./queries";
+import { useAuditFindings, useClientEventsRecent, useClientRow, useQuestionnaireHistory } from "./queries";
 import { NotificationSettings } from "./NotificationSettings";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
@@ -86,6 +86,23 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
   const events = useClientEventsRecent(clientId);
   const questionnaireHistory = useQuestionnaireHistory(clientId);
   const [questionnaireVersionId, setQuestionnaireVersionId] = useState("");
+
+  // Находки проактивного аудита клиента (NEW-1) — только открытые, только при находке.
+  const auditFindings = useAuditFindings(clientId);
+  const [dismissingId, setDismissingId] = useState("");
+  const [auditErr, setAuditErr] = useState("");
+  async function dismissFinding(findingId: string) {
+    setDismissingId(findingId);
+    setAuditErr("");
+    try {
+      await api.dismissAuditFinding(clientId, findingId);
+      qc.invalidateQueries({ queryKey: ["audit_findings", clientId] });
+    } catch (e) {
+      setAuditErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDismissingId("");
+    }
+  }
 
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -223,6 +240,42 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           {badge(client?.payment_status ? t(`registry.payment_value.${client.payment_status}`, { defaultValue: client.payment_status }) : null)}
         </div>
       </div>
+
+      {(auditFindings.data?.length ?? 0) > 0 && (
+        <Card title={t("card.audit_findings")}>
+          {auditErr && <div className="mb-2 text-xs text-red-600">{auditErr}</div>}
+          <ul className="space-y-2 text-xs">
+            {auditFindings.data!.map((f) => (
+              <li
+                key={f.id}
+                className={`rounded border-l-4 px-2 py-1.5 ${
+                  f.severity === "medium"
+                    ? "border-l-amber-400 bg-amber-50"
+                    : "border-l-gray-300 bg-gray-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-gray-800">{f.title}</div>
+                    <div className="mt-0.5 text-gray-600">{f.description}</div>
+                    <div className="mt-1 text-[10px] text-gray-400">
+                      {new Date(f.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 text-gray-400 hover:text-brand disabled:opacity-50"
+                    onClick={() => dismissFinding(f.id)}
+                    disabled={dismissingId === f.id}
+                  >
+                    {t("card.audit_dismiss")}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card title={t("card.events")}>
         <label className="mb-2 flex items-center gap-2 text-xs text-gray-600">

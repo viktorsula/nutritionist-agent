@@ -1626,6 +1626,67 @@ def get_clients_for_weekly_report() -> List[Dict[str, Any]]:
     return _extract_data(response) or []
 
 
+def get_clients_for_audit(statuses: List[str]) -> List[Dict[str, Any]]:
+    """
+    Клиенты, подходящие под проактивный аудит (NEW-1) — по списку допустимых
+    client_status. Список задаёт вызывающий (api/scheduler.py::AUDIT_ELIGIBLE_STATUSES),
+    здесь — просто выборка, чтобы критерии аудита не были завязаны на список клиентов
+    еженедельного отчёта (get_clients_for_weekly_report) — они меняются независимо.
+    """
+    if not statuses:
+        return []
+    supabase = _service_client()
+    response = (
+        supabase.table("clients")
+        .select("id, name, client_status, nutritionist_notes")
+        .in_("client_status", statuses)
+        .order("name", desc=False)
+        .execute()
+    )
+    return _extract_data(response) or []
+
+
+def insert_audit_finding(
+    client_id: str, title: str, description: str, severity: str = "medium",
+) -> Optional[Dict[str, Any]]:
+    """Записать находку проактивного аудита клиента (NEW-1) — только когда что-то найдено."""
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_audit_findings").insert({
+            "client_id": client_id,
+            "title": title,
+            "description": description,
+            "severity": severity,
+        })
+    )
+
+
+def get_audit_findings(client_id: str, status: str = "open") -> List[Dict[str, Any]]:
+    """Находки аудита клиента (по умолчанию только открытые), свежие сверху."""
+    supabase = _service_client()
+    query = supabase.table("client_audit_findings").select("*").eq("client_id", client_id)
+    if status:
+        query = query.eq("status", status)
+    response = query.order("created_at", desc=True).execute()
+    return _extract_data(response) or []
+
+
+def dismiss_audit_finding(finding_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """Отметить находку аудита как рассмотренную (не удаляем — история сохраняется)."""
+    from datetime import datetime
+
+    supabase = _service_client()
+    return _execute_one(
+        supabase.table("client_audit_findings")
+        .update({
+            "status": "dismissed",
+            "dismissed_at": datetime.utcnow().isoformat(),
+            "dismissed_by": user_id,
+        })
+        .eq("id", finding_id)
+    )
+
+
 def get_clients_with_inactive_payment() -> List[Dict[str, Any]]:
     """
     Получить клиентов с неактивной оплатой для напоминания нутрициологу.

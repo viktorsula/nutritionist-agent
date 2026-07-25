@@ -521,5 +521,87 @@ class TestRunWeeklyReport(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_called()
 
 
+class TestClientAuditDue(unittest.TestCase):
+    def _utc(self, y, mo, d, h, mi):
+        return datetime(y, mo, d, h, mi, tzinfo=pytz.UTC)
+
+    def test_due_monday_10am_dubai(self):
+        # 2026-07-06 — понедельник. 10:00 Asia/Dubai (UTC+4) = 06:00 UTC.
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        due, run_key = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 6, 6, 0))
+        self.assertTrue(due)
+        self.assertEqual(run_key, "2026-W28-0")
+
+    def test_due_thursday_10am_dubai(self):
+        # 2026-07-09 — четверг, тот же час.
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        due, run_key = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 9, 6, 0))
+        self.assertTrue(due)
+        self.assertEqual(run_key, "2026-W28-3")
+
+    def test_not_due_wrong_weekday(self):
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        # вторник — не входит в [0, 3]
+        due, _ = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 7, 6, 0))
+        self.assertFalse(due)
+
+    def test_not_due_wrong_minute(self):
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        due, _ = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 6, 6, 1))
+        self.assertFalse(due)
+
+    def test_run_key_distinguishes_monday_and_thursday_same_week(self):
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        _, mon_key = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 6, 6, 0))
+        _, thu_key = S._client_audit_due(cfg, now_utc=self._utc(2026, 7, 9, 6, 0))
+        self.assertNotEqual(mon_key, thu_key)
+
+
+class TestRunClientAudit(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        S._client_audit_guard.clear()
+
+    async def _run(self, *, due=True, enabled=True, clients=None, findings_per_client=0):
+        clients = clients if clients is not None else [{"id": "c1"}, {"id": "c2"}]
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        cfg["enabled"] = enabled
+        with patch("api.scheduler._client_audit_config", return_value=cfg), \
+             patch("api.scheduler._client_audit_due", return_value=(due, "2026-W28-0")), \
+             patch("database.queries.get_clients_for_audit", return_value=clients) as list_mock, \
+             patch("agents.nutritionist.audit_agent.run_audit_for_client",
+                   return_value=findings_per_client) as audit_mock:
+            await S.run_client_audit()
+        return list_mock, audit_mock
+
+    async def test_runs_audit_for_each_eligible_client(self):
+        list_mock, audit_mock = await self._run()
+        list_mock.assert_called_once_with(S.AUDIT_ELIGIBLE_STATUSES)
+        self.assertEqual(audit_mock.call_count, 2)
+
+    async def test_dedups_by_run_key(self):
+        await self._run()
+        _, audit_mock2 = await self._run()
+        audit_mock2.assert_not_called()
+
+    async def test_skips_when_not_due(self):
+        _, audit_mock = await self._run(due=False)
+        audit_mock.assert_not_called()
+
+    async def test_skips_when_disabled(self):
+        _, audit_mock = await self._run(enabled=False)
+        audit_mock.assert_not_called()
+
+    async def test_one_client_failure_does_not_stop_others(self):
+        cfg = dict(S.DEFAULT_CLIENT_AUDIT)
+        with patch("api.scheduler._client_audit_config", return_value=cfg), \
+             patch("api.scheduler._client_audit_due", return_value=(True, "2026-W28-0")), \
+             patch("database.queries.get_clients_for_audit",
+                   return_value=[{"id": "c1"}, {"id": "c2"}]), \
+             patch("agents.nutritionist.audit_agent.run_audit_for_client",
+                   side_effect=[RuntimeError("boom"), 1]) as audit_mock:
+            await S.run_client_audit()
+        self.assertEqual(audit_mock.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1050,6 +1050,34 @@ def set_controlled_metrics_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/clients/{client_id}/audit-findings")
+def list_audit_findings(
+    client_id: str,
+    status_filter: str = "open",
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Находки проактивного аудита клиента (NEW-1) — по умолчанию только открытые
+    (status_filter='open'; передайте '' чтобы получить все, включая dismissed).
+    """
+    from database import queries
+
+    return {"findings": queries.get_audit_findings(client_id, status=status_filter)}
+
+
+@app.post("/clients/{client_id}/audit-findings/{finding_id}/dismiss")
+def dismiss_audit_finding_endpoint(
+    client_id: str,
+    finding_id: str,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, bool]:
+    """Отметить находку аудита как рассмотренную (не удаляется — история сохраняется)."""
+    from database import queries
+
+    queries.dismiss_audit_finding(finding_id, user["user_id"])
+    return {"ok": True}
+
+
 @app.post("/clients/{client_id}/telegram-link")
 def create_telegram_link(
     client_id: str,

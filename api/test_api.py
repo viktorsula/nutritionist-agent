@@ -420,6 +420,40 @@ class TestApi(unittest.TestCase):
         self.assertEqual(saved[1]["category"], "custom")    # пульс
         self.assertEqual(audit.call_args.kwargs["action"], "set_controlled_metrics")
 
+    # --- /clients/{id}/audit-findings (NEW-1, проактивный аудит клиента) ---
+    def test_audit_findings_list_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.get("/clients/c-1/audit-findings")
+        self.assertEqual(r.status_code, 403)
+
+    def test_audit_findings_list_defaults_to_open(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_audit_findings", return_value=[{"id": "f1"}]) as m:
+            r = self.client.get("/clients/c-1/audit-findings")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["findings"], [{"id": "f1"}])
+        m.assert_called_once_with("c-1", status="open")
+
+    def test_audit_findings_list_all_with_empty_status(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.get_audit_findings", return_value=[]) as m:
+            r = self.client.get("/clients/c-1/audit-findings?status_filter=")
+        self.assertEqual(r.status_code, 200)
+        m.assert_called_once_with("c-1", status="")
+
+    def test_audit_findings_dismiss_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.post("/clients/c-1/audit-findings/f-1/dismiss")
+        self.assertEqual(r.status_code, 403)
+
+    def test_audit_findings_dismiss_ok(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        with patch("database.queries.dismiss_audit_finding") as m:
+            r = self.client.post("/clients/c-1/audit-findings/f-1/dismiss")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["ok"])
+        m.assert_called_once_with("f-1", "u-2")
+
     # --- /clients (приглашение клиента, роль nutritionist) ---
     def test_create_client_rejects_client_role(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
