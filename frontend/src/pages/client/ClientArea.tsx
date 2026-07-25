@@ -8,11 +8,13 @@ import { Questionnaire } from "../../features/questionnaire/Questionnaire";
 import { ClientShell } from "./ClientShell";
 
 /**
- * Точка входа кабинета клиента. Два блокирующих гейта, по порядку:
- * 1. Согласие на обработку данных (LEGAL-1, миграция 018) — пока нет согласия с текущей
- *    версией текста (client_consents.consent_version !== актуальная версия) — показываем
- *    ConsentGate. Версия меняется — согласие запрашивается заново.
- * 2. Анкета онбординга — пока не заполнена (client_profiles.onboarding_completed_at IS NULL).
+ * Точка входа кабинета клиента. Гейты (LEGAL-1, миграция 018):
+ * - Первичный онбординг (анкета ещё не заполнена) — согласие встроено ПОСЛЕДНИМ шагом
+ *   того же визарда (см. Questionnaire.tsx needsConsent/consentText): по требованию
+ *   владельца согласие и анкета идут одним потоком, юридически это корректно — обработка
+ *   данных начинается при сохранении анкеты (submitQuestionnaire), а не при вводе в поля.
+ * - Уже онбордившийся клиент, но версия текста согласия сменилась (нутрициолог отредактировал
+ *   consent_text) — отдельный короткий экран ConsentGate, БЕЗ повторного заполнения анкеты.
  */
 export function ClientArea() {
   const { t } = useTranslation();
@@ -60,13 +62,25 @@ export function ClientArea() {
   }
 
   const needsConsent = consentStatus.data?.consent_version !== consentText.data?.version;
+  const completed = !!onboarding.data?.onboarding_completed_at;
+
+  if (!completed) {
+    return (
+      <Questionnaire
+        clientId={clientId}
+        needsConsent={needsConsent}
+        consentText={consentText.data ?? null}
+        onDone={() => {
+          onboarding.refetch();
+          consentStatus.refetch();
+        }}
+      />
+    );
+  }
+
   if (needsConsent) {
     return <ConsentGate onDone={() => consentStatus.refetch()} />;
   }
 
-  const completed = !!onboarding.data?.onboarding_completed_at;
-  if (!completed) {
-    return <Questionnaire clientId={clientId} onDone={() => onboarding.refetch()} />;
-  }
   return <ClientShell />;
 }
