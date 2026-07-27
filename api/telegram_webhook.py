@@ -5,8 +5,11 @@ Telegram webhook — интеграция PTB-приложения в FastAPI (�
 инициализируем PTB Application и (если задан URL) ставим webhook; входящие
 апдейты приходят в маршрут /telegram/webhook и отдаются application.process_update.
 
-Безопасность: Telegram шлёт заголовок X-Telegram-Bot-Api-Secret-Token, если webhook
-поставлен с secret_token — сверяем его с TELEGRAM_WEBHOOK_SECRET.
+Безопасность (P2-12): Telegram шлёт заголовок X-Telegram-Bot-Api-Secret-Token, если webhook
+поставлен с secret_token — сверяем его с TELEGRAM_WEBHOOK_SECRET. Проверка ОБЯЗАТЕЛЬНА:
+раньше при незаданном секрете webhook_secret_ok возвращал True, то есть маршрут принимал
+POST от кого угодно — можно было слать поддельные апдейты от имени любого клиента. Теперь
+незаданный секрет = закрытый маршрут (fail closed), а не открытый.
 
 ИНЕРТНОСТЬ: без TELEGRAM_BOT_TOKEN ничего не запускается (маршрут отдаёт 503), чтобы
 не влиять на текущий прод. Ошибки старта не роняют API (бот опционален).
@@ -14,9 +17,10 @@ Telegram webhook — интеграция PTB-приложения в FastAPI (�
 ENV:
 - TELEGRAM_BOT_TOKEN     — токен бота (без него интеграция выключена);
 - TELEGRAM_WEBHOOK_URL   — полный публичный URL маршрута (если задан — webhook ставится автоматически);
-- TELEGRAM_WEBHOOK_SECRET — секрет для проверки заголовка (рекомендуется).
+- TELEGRAM_WEBHOOK_SECRET — секрет для проверки заголовка. ОБЯЗАТЕЛЕН при включённом боте.
 """
 
+import hmac
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -45,6 +49,15 @@ async def startup_telegram() -> None:
 
         webhook_url = os.environ.get("TELEGRAM_WEBHOOK_URL")
         secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+        # P2-12: без секрета маршрут теперь отклоняет ВСЕ апдейты (fail closed). Кричим
+        # об этом на старте, чтобы ошибка конфигурации была видна сразу в логах деплоя,
+        # а не выглядела как «бот молча перестал отвечать».
+        if not secret:
+            logger.error(
+                "Telegram webhook: TELEGRAM_WEBHOOK_SECRET НЕ ЗАДАН — все входящие апдейты "
+                "будут отклоняться (403). Бот не будет отвечать, пока секрет не задан. "
+                "Сгенерировать: openssl rand -hex 16"
+            )
         if webhook_url:
             await application.bot.set_webhook(
                 url=webhook_url,
@@ -88,11 +101,27 @@ async def process_webhook_update(data: Dict[str, Any]) -> bool:
 
 
 def webhook_secret_ok(header_value: Optional[str]) -> bool:
-    """Сверяет секрет из заголовка. Если секрет не задан в env — не проверяем."""
+    """
+    Сверяет секрет из заголовка X-Telegram-Bot-Api-Secret-Token (P2-12).
+
+    Fail closed: если TELEGRAM_WEBHOOK_SECRET не задан, доверять входящему нечему —
+    отклоняем. Раньше здесь стоял `return True`, из-за чего при незаданном секрете
+    маршрут принимал POST от любого источника (подделка сообщений от имени клиента).
+
+    Сравнение через compare_digest — время сравнения не зависит от совпавшего префикса.
+    Сравниваем в БАЙТАХ: str-вариант compare_digest падает с TypeError на не-ASCII, то
+    есть подделанный заголовок с кириллицей уронил бы обработчик в 500 вместо 403.
+    """
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
     if not secret:
-        return True
-    return header_value == secret
+        logger.error(
+            "Telegram webhook: запрос отклонён — TELEGRAM_WEBHOOK_SECRET не задан. "
+            "Задайте секрет в окружении (openssl rand -hex 16) и переставьте webhook."
+        )
+        return False
+    if not header_value:
+        return False
+    return hmac.compare_digest(header_value.encode("utf-8"), secret.encode("utf-8"))
 
 
 def is_configured() -> bool:
