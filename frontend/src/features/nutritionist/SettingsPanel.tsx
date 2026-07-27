@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CatalogEditor } from "./settings/CatalogEditor";
 import { JsonSetting } from "./settings/JsonSetting";
+import { CoveragePanel } from "./CoveragePanel";
 import { TrustedSources } from "./settings/TrustedSources";
 import { PromptEditor } from "./settings/PromptEditor";
 import { KnowledgeBase } from "./settings/KnowledgeBase";
@@ -41,6 +42,10 @@ export function SettingsPanel() {
       <Section title={t("settings.sources.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.sources.hint")}</p>
         <TrustedSources />
+      </Section>
+
+      <Section title={t("settings.coverage.title")}>
+        <CoveragePanel />
       </Section>
 
       <Section title={t("settings.rag.title")}>

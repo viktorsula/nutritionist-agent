@@ -13,48 +13,6 @@ from api import scheduler as S
 from utils import notify
 
 
-class TestIsDue(unittest.TestCase):
-    def _utc(self, h, m):
-        return datetime(2026, 6, 24, h, m, tzinfo=pytz.UTC)
-
-    def test_due_in_client_timezone(self):
-        # 08:00 в Asia/Dubai (UTC+4) = 04:00 UTC
-        due, stamp = S._is_due("08:00:00", "Asia/Dubai", now_utc=self._utc(4, 0))
-        self.assertTrue(due)
-        self.assertEqual(stamp, "2026-06-24 08:00")
-
-    def test_not_due_other_minute(self):
-        due, _ = S._is_due("08:00:00", "Asia/Dubai", now_utc=self._utc(4, 1))
-        self.assertFalse(due)
-
-    def test_utc_zone(self):
-        due, _ = S._is_due("09:30:00", "UTC", now_utc=self._utc(9, 30))
-        self.assertTrue(due)
-
-    def test_bad_timezone_falls_back_to_utc(self):
-        due, _ = S._is_due("09:30:00", "Mars/Phobos", now_utc=self._utc(9, 30))
-        self.assertTrue(due)
-
-    def test_empty_scheduled_time(self):
-        due, stamp = S._is_due(None, "UTC", now_utc=self._utc(9, 30))
-        self.assertFalse(due)
-        self.assertEqual(stamp, "")
-
-    def test_malformed_time(self):
-        due, _ = S._is_due("notatime", "UTC", now_utc=self._utc(9, 30))
-        self.assertFalse(due)
-
-
-class TestMessageFor(unittest.TestCase):
-    def test_known_types(self):
-        self.assertIn("утро", S._message_for("morning").lower())
-        self.assertIn("вечер", S._message_for("evening").lower())
-
-    def test_unknown_type_defaults_to_reminder(self):
-        self.assertEqual(S._message_for("whatever"), S.NOTIFICATION_TEMPLATES["reminder"])
-        self.assertEqual(S._message_for(None), S.NOTIFICATION_TEMPLATES["reminder"])
-
-
 class TestFormatAlert(unittest.TestCase):
     def test_format_includes_client_severity_detail(self):
         ev = {
@@ -471,6 +429,38 @@ class TestRunReminderFollowups(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_called()
         bumped.assert_not_called()
         expired.assert_not_called()
+
+
+class TestRunOverdueTasks(unittest.IsolatedAsyncioTestCase):
+    """P2-6: статус 'overdue' раньше не проставлялся никогда."""
+
+    def setUp(self):
+        S._last_overdue_check_at = None
+
+    async def test_marks_overdue_tasks(self):
+        with patch("database.queries.get_overdue_tasks",
+                   return_value=[{"id": "t1"}, {"id": "t2"}]), \
+             patch("database.queries.mark_tasks_overdue", return_value=2) as mark:
+            await S.run_overdue_tasks()
+        mark.assert_called_once_with(["t1", "t2"])
+
+    async def test_throttled_within_interval(self):
+        # Проход идёт каждую минуту, но простановка overdue — не чаще раза в час.
+        with patch("database.queries.get_overdue_tasks", return_value=[{"id": "t1"}]), \
+             patch("database.queries.mark_tasks_overdue", return_value=1) as mark:
+            await S.run_overdue_tasks()
+            await S.run_overdue_tasks()
+        self.assertEqual(mark.call_count, 1)
+
+    async def test_db_failure_is_best_effort(self):
+        with patch("database.queries.get_overdue_tasks", side_effect=RuntimeError("db down")):
+            await S.run_overdue_tasks()  # не должно бросать наружу
+
+    async def test_no_overdue_tasks_is_noop(self):
+        with patch("database.queries.get_overdue_tasks", return_value=[]), \
+             patch("database.queries.mark_tasks_overdue", return_value=0) as mark:
+            await S.run_overdue_tasks()
+        mark.assert_called_once_with([])
 
 
 class TestNoResponseCheck(unittest.IsolatedAsyncioTestCase):

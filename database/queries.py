@@ -13,7 +13,6 @@ from .models import (
     Conversation,
     DocumentMetadata,
     KnowledgeBaseChunk,
-    NotificationSchedule,
     NutritionPlan,
     SystemSetting,
     Task,
@@ -903,44 +902,6 @@ def get_nutrition_daily(client_id: str, days: int = 14) -> List[Dict[str, Any]]:
     return [daily[d] for d in sorted(daily)]
 
 
-def get_notification_schedule(client_id: str) -> List[Dict[str, Any]]:
-    """Получить расписание уведомлений клиента."""
-    supabase = _service_client()
-    response = (
-        supabase.table("notification_schedule")
-        .select("*")
-        .eq("client_id", client_id)
-        .execute()
-    )
-    return _extract_data(response) or []
-
-
-def update_notification_schedule(
-    client_id: str,
-    notification_type: str,
-    is_active: Optional[bool] = None,
-    scheduled_time: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Обновить расписание уведомлений (вкл/откл, изменить время)."""
-    supabase = _service_client()
-
-    updates = {}
-    if is_active is not None:
-        updates["is_active"] = is_active
-    if scheduled_time is not None:
-        updates["scheduled_time"] = scheduled_time
-
-    if not updates:
-        return None
-
-    return _execute_one(
-        supabase.table("notification_schedule")
-        .update(updates)
-        .eq("client_id", client_id)
-        .eq("notification_type", notification_type)
-    )
-
-
 def update_system_setting(key: str, value: Any, updated_by: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Обновить системную настройку."""
     supabase = _service_client()
@@ -1198,6 +1159,23 @@ def get_overdue_tasks(client_id: Optional[str] = None) -> List[Dict[str, Any]]:
 
     response = query.execute()
     return _extract_data(response) or []
+
+
+def mark_tasks_overdue(task_ids: List[str]) -> int:
+    """
+    Перевести задачи в статус 'overdue' (P2-6). Возвращает число обновлённых.
+
+    До этого статус 'overdue' существовал в CHECK-констрейнте, но не проставлялся никогда:
+    get_overdue_tasks() вычислял просрочку на лету и никем не вызывался, поэтому и клиент,
+    и нутрициолог видели просроченные задачи как обычные 'pending'.
+    """
+    if not task_ids:
+        return 0
+    supabase = _service_client()
+    rows = _extract_data(
+        supabase.table("tasks").update({"status": "overdue"}).in_("id", task_ids).execute()
+    )
+    return len(rows or [])
 
 
 # =============================================
@@ -1629,60 +1607,6 @@ def write_audit_log(
 # =============================================
 # ФУНКЦИИ ДЛЯ N8N (АВТОМАТИЗАЦИЯ)
 # =============================================
-
-
-def get_notifications_due_now(notification_type: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Получить клиентов, которым пора отправить уведомление (с учётом timezone).
-    n8n вызывает каждые 5 минут.
-
-    Логика:
-    1. Берём текущее время UTC
-    2. Для каждого клиента конвертируем в его timezone
-    3. Проверяем совпадение с scheduled_time
-    4. Фильтруем: is_active=true, access_status=active, payment_status=active
-    """
-    supabase = _service_client()
-
-    # Получаем все активные расписания с информацией о клиенте
-    query = (
-        supabase.table("notification_schedule")
-        .select("*, clients!inner(id, name, telegram_id, timezone, access_status, payment_status)")
-        .eq("is_active", True)
-        .eq("clients.access_status", "active")
-        .in_("clients.payment_status", ["trial", "active"])
-    )
-
-    if notification_type:
-        query = query.eq("notification_type", notification_type)
-
-    response = query.execute()
-    schedules = _extract_data(response) or []
-
-    # Фильтрация по времени происходит в n8n с помощью timezone conversion
-    # Здесь возвращаем все активные расписания
-    return schedules
-
-
-def create_notification_schedule(
-    client_id: str,
-    notification_type: str,
-    scheduled_time: str,
-    timezone: str = "Asia/Dubai",
-    is_active: bool = True,
-) -> Optional[Dict[str, Any]]:
-    """Создать расписание уведомлений для клиента."""
-    supabase = _service_client()
-    data = {
-        "client_id": client_id,
-        "notification_type": notification_type,
-        "scheduled_time": scheduled_time,
-        "timezone": timezone,
-        "is_active": is_active,
-    }
-    return _extract_data(
-        supabase.table("notification_schedule").insert(data).execute()
-    )
 
 
 def get_clients_for_weekly_report() -> List[Dict[str, Any]]:

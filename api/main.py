@@ -1011,6 +1011,26 @@ def list_controlled_metrics_endpoint(
     return {"metrics": queries.get_controlled_metrics(client_id)}
 
 
+@app.get("/clients/{client_id}/metric-values")
+def list_metric_values_endpoint(
+    client_id: str,
+    limit: int = 200,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Значения контролируемых показателей клиента — сон и произвольные (пульс, стресс…),
+    из client_metrics (P2-7).
+
+    Раньше их read-пути наружу не было вообще: нутрициолог настраивал «контролировать
+    пульс», клиент присылал значения, они писались в БД — и не показывались нигде.
+    Физические замеры (вес/талия/…) сюда не попадают: они лежат в measurements и уже
+    выводятся графиками.
+    """
+    from database import queries
+
+    return {"values": queries.get_client_metrics(client_id, limit=limit)}
+
+
 @app.put("/clients/{client_id}/controlled-metrics")
 def set_controlled_metrics_endpoint(
     client_id: str,

@@ -148,6 +148,44 @@ def test_flag_plan_exception_logs_event_without_changing_plan():
     assert "нутрициолог" in result.lower()
 
 
+def test_complete_task_closes_own_task():
+    # P2-6: complete_task существовал в queries, но не вызывался ниоткуда — задачи
+    # копились в 'pending' навсегда, даже когда клиент их выполнил.
+    state = {"client_id": "cid", "channel": "telegram"}
+    with patch("database.queries.get_pending_tasks", return_value=[{"id": "t1"}]), \
+         patch("database.queries.complete_task") as done:
+        handlers = ao._build_handlers(state)
+        result = handlers["complete_task"]({"task_id": "t1", "note": "сделала зарядку"})
+    done.assert_called_once_with("t1", {"note": "сделала зарядку", "channel": "telegram"})
+    assert "выполненной" in result
+
+
+def test_complete_task_refuses_foreign_task_id():
+    # Инструмент замкнут на текущего клиента: чужой id не должен закрываться.
+    state = {"client_id": "cid", "channel": "telegram"}
+    with patch("database.queries.get_pending_tasks", return_value=[{"id": "t1"}]), \
+         patch("database.queries.complete_task") as done:
+        handlers = ao._build_handlers(state)
+        result = handlers["complete_task"]({"task_id": "чужая-задача"})
+    done.assert_not_called()
+    assert "не записал" in result
+
+
+def test_complete_task_requires_task_id():
+    state = {"client_id": "cid"}
+    with patch("database.queries.complete_task") as done:
+        handlers = ao._build_handlers(state)
+        result = handlers["complete_task"]({})
+    done.assert_not_called()
+    assert "не записал" in result
+
+
+def test_complete_task_registered_as_tool():
+    names = {t["name"] for t in ao._tool_schemas()}
+    assert "complete_task" in names
+    assert "complete_task" in ao._build_handlers({"client_id": "cid"})
+
+
 def test_flag_plan_exception_registered_as_tool():
     names = {t["name"] for t in ao._tool_schemas()}
     assert "flag_plan_exception" in names
