@@ -4,11 +4,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 import { Button } from "../../components/ui/Button";
 import { useClientPlans } from "./queries";
+import { splitListInput } from "../../lib/listInput";
 
 const today = () => new Date().toISOString().slice(0, 10);
-const splitList = (s: string) =>
-  s.split(",").map((x) => x.trim()).filter(Boolean);
-
 /** Редактор планов питания: история версий + создание нового активного плана. */
 export function PlanEditor({ clientId }: { clientId: string }) {
   const { t } = useTranslation();
@@ -63,9 +61,9 @@ export function PlanEditor({ clientId }: { clientId: string }) {
         plan_json: {
           description: description.trim() || null,
           target_calories: calories.trim() ? Number(calories) : null,
-          restrictions: splitList(restrictions),
+          restrictions: splitListInput(restrictions),
         },
-        supplements_json: { items: splitList(supplements) },
+        supplements_json: { items: splitListInput(supplements) },
       });
       if (ins.error) throw ins.error;
 
@@ -167,12 +165,16 @@ export function PlanEditor({ clientId }: { clientId: string }) {
               onChange={(e) => setCalories(e.target.value)}
             />
           </div>
-          <input
-            className={`${input} w-full`}
-            placeholder={t("plan.restrictions")}
-            value={restrictions}
-            onChange={(e) => setRestrictions(e.target.value)}
-          />
+          <div>
+            <textarea
+              className={`${input} w-full`}
+              rows={3}
+              placeholder={t("plan.restrictions")}
+              value={restrictions}
+              onChange={(e) => setRestrictions(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-gray-500">{t("plan.restrictions_hint")}</p>
+          </div>
           <input
             className={`${input} w-full`}
             placeholder={t("plan.supplements")}

@@ -149,9 +149,10 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 019_client_delete_restrict.sql | 24 июля 2026 | ✅ | LEGAL-3 — все FK `client_id → clients(id) ON DELETE CASCADE` переведены в `ON DELETE RESTRICT` (динамически, через `pg_constraint`); физическое удаление клиента с данными теперь невозможно на уровне БД, «удаление» в интерфейсе остаётся архивированием (`client_status='archived'`) (владелец подтвердил накатку) |
 | 020_client_audit_findings.sql | 25 июля 2026 | ✅ | NEW-1 — таблица `client_audit_findings` (RLS: только нутрициолог) для находок проактивного аудита клиента (2×/нед, только при находке, severity ≤ medium, не в Telegram) |
 | 021_reminder_topic_dedup.sql | — | ⏳ | P1-7 — `reminder_occurrences.last_notified_date` (DATE, бэкофилл из `due_date`) — основа кросс-джобового дедупа «одно сообщение по теме (`expected_response`) в день», чтобы `run_reminders`/`run_reminder_followups` не слали независимо по 2-3 сообщения об одном и том же (напр. вода) |
+| 022_intolerances.sql | — | ⏳ | P1-13 (шаг 1) — `client_profiles.intolerances TEXT[]`: аллергия и непереносимость разделены. Медицински это разные состояния (абсолютное vs дозозависимое), и пока они в одном поле, проверка продуктов не может дать верный ответ. Данные существующих клиентов НЕ переносятся автоматически — остаются в `allergies` (более строгая категория, это безопасно), нутрициолог переносит вручную |
 
-Миграции 001–020 подтверждены применёнными на проде (владелец подтвердил накатку каждой).
-021 создана 25 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату.
+Миграции 001–021 подтверждены применёнными на проде (владелец подтвердил накатку каждой).
+022 создана 27 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату.
 При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
 
 ---
@@ -210,6 +211,8 @@ UNION ALL SELECT '020 client_audit_findings table',
        to_regclass('public.client_audit_findings') IS NOT NULL
 UNION ALL SELECT '021 reminder_occurrences.last_notified_date',
        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminder_occurrences' AND column_name='last_notified_date')
+UNION ALL SELECT '022 client_profiles.intolerances',
+       EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='client_profiles' AND column_name='intolerances')
 ORDER BY migration;
 ```
 

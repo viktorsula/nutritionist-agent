@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { api } from "../../lib/api";
 import { safeStorageName } from "../client/documents";
 import { IMPROVE } from "./schema";
+import { splitListInput } from "../../lib/listInput";
 
 export type Answers = Record<string, unknown>;
 export type Lang = "ru" | "en";
@@ -12,14 +13,6 @@ function num(v: unknown): number | null {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-function splitList(v: unknown): string[] {
-  if (typeof v !== "string" || !v.trim()) return [];
-  return v
-    .split(/[\n,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 /** yesno_text хранится как {answer: boolean, details: string}. */
@@ -86,9 +79,14 @@ export async function submitQuestionnaire(
     target_weight: num(answers.target_weight),
     activity_level: (answers.sport_level as string) || null,
     allergies: yesnoDetails(answers.allergies)
-      ? splitList(yesnoDetails(answers.allergies))
+      ? splitListInput(yesnoDetails(answers.allergies))
       : [],
-    chronic_conditions: splitList(answers.chronic_conditions),
+    // Отдельно от аллергий (миграция 022): непереносимость дозозависима и зависит от
+    // вида продукта — трактовать её как абсолютный запрет неверно.
+    intolerances: yesnoDetails(answers.intolerances)
+      ? splitListInput(yesnoDetails(answers.intolerances))
+      : [],
+    chronic_conditions: splitListInput(answers.chronic_conditions),
     goals: composeGoals(answers, lang),
     questionnaire_json: answers,
     onboarding_completed_at: new Date().toISOString(),

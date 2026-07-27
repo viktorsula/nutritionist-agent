@@ -39,74 +39,107 @@ from database.queries import (
 # ПРОВЕРКА АЛЛЕРГИЙ
 # ════════════════════════════════════════════════════════════
 
+def _match_items(ingredients: List[str], watch_list: List[str]) -> List[str]:
+    """
+    Подстрочное совпадение продукта со списком (аллергены/непереносимости).
+
+    ⚠️ Ограничение известно и открыто как P1-13: матчинг ТЕКСТОВЫЙ, а не смысловой —
+    «кешью» не совпадёт с «орехи», «булгур» не совпадёт с «глютен». Смысловая проверка
+    (шаг 2 P1-13) строится отдельно; здесь оставлен быстрый детерминированный слой,
+    который ловит буквальные совпадения и работает без обращения к модели.
+    """
+    found: List[str] = []
+    for ingredient in ingredients:
+        item = (ingredient or "").lower()
+        if not item:
+            continue
+        for entry in watch_list:
+            e = (entry or "").lower().strip()
+            if e and (e in item or item in e):
+                found.append(entry)
+                break
+    return sorted(set(found))
+
+
 def check_allergies(client_id: str, ingredients: List[str]) -> Dict[str, Any]:
     """
-    Проверка ингредиентов на аллергены клиента
+    Проверка ингредиентов на аллергены И непереносимости клиента (P1-13, шаг 1).
 
-    Args:
-        client_id: UUID клиента
-        ingredients: список ингредиентов для проверки
+    Почему это два РАЗНЫХ списка, а не один (было до миграции 022):
+    - аллергия — иммунный ответ, запрет абсолютный и дозонезависимый, опасны следовые
+      количества → severity 'critical';
+    - непереносимость — дозозависима и зависит от вида продукта (при лактазной
+      недостаточности козий сыр часто допустим, коровье молоко — нет) → severity
+      'medium', это сигнал нутрициологу на оценку, а не однозначный запрет.
+    Пока оба состояния лежали в одном поле, отличить «нельзя вообще» от «зависит»
+    было невозможно в принципе — данных для этого не существовало.
 
     Returns:
         {
-            "has_allergen": bool,
+            "has_allergen": bool,          # True только для НАСТОЯЩИХ аллергенов
             "allergens_found": List[str],
-            "severity": "critical",
+            "intolerances_found": List[str],
+            "severity": "critical" | "medium" | "none" | "error",
             "message": str
         }
     """
+    empty = {
+        "has_allergen": False,
+        "allergens_found": [],
+        "intolerances_found": [],
+        "severity": "none",
+        "message": "",
+    }
     if not ingredients:
-        return {
-            "has_allergen": False,
-            "allergens_found": [],
-            "severity": "none",
-            "message": ""
-        }
+        return dict(empty)
 
     try:
-        profile = get_client_profile(client_id)
+        profile = get_client_profile(client_id) or {}
+        allergens = profile.get("allergies") or []
+        intolerances = profile.get("intolerances") or []
+        if not allergens and not intolerances:
+            return dict(empty)
 
-        if not profile or not profile.get('allergies'):
+        found_allergens = _match_items(ingredients, allergens)
+        found_intolerances = _match_items(ingredients, intolerances)
+
+        if found_allergens:
+            # Аллерген перекрывает всё остальное: это самый тяжёлый случай.
+            return {
+                "has_allergen": True,
+                "allergens_found": found_allergens,
+                "intolerances_found": found_intolerances,
+                "severity": "critical",
+                "message": (
+                    f"⚠️ ВНИМАНИЕ! Обнаружен аллерген: {', '.join(found_allergens)}. "
+                    "У вас аллергия на эти продукты!"
+                ),
+            }
+
+        if found_intolerances:
             return {
                 "has_allergen": False,
                 "allergens_found": [],
-                "severity": "none",
-                "message": ""
+                "intolerances_found": found_intolerances,
+                "severity": "medium",
+                "message": (
+                    f"Отмечена непереносимость: {', '.join(found_intolerances)}. "
+                    "Переносимость зависит от вида продукта и количества — "
+                    "нутрициолог посмотрит и скажет точно."
+                ),
             }
 
-        # Список аллергенов клиента (lowercase для сравнения)
-        client_allergies = [a.lower() for a in profile['allergies']]
-
-        # Проверяем каждый ингредиент
-        found_allergens = []
-        for ingredient in ingredients:
-            ingredient_lower = ingredient.lower()
-            for allergen in client_allergies:
-                if allergen in ingredient_lower or ingredient_lower in allergen:
-                    found_allergens.append(allergen)
-
-        if found_allergens:
-            return {
-                "has_allergen": True,
-                "allergens_found": list(set(found_allergens)),  # уникальные
-                "severity": "critical",
-                "message": f"⚠️ ВНИМАНИЕ! Обнаружен аллерген: {', '.join(found_allergens)}. У вас аллергия на эти продукты!"
-            }
-
-        return {
-            "has_allergen": False,
-            "allergens_found": [],
-            "severity": "none",
-            "message": ""
-        }
+        return dict(empty)
 
     except Exception as e:
-        # В случае ошибки — безопасность превыше всего
+        # Сбой проверки — НЕ повод сказать «аллергенов нет»: возвращаем явную ошибку,
+        # чтобы вызывающий видел разницу между «проверено, чисто» и «проверить не смогли».
         return {
             "has_allergen": False,
             "allergens_found": [],
+            "intolerances_found": [],
             "severity": "error",
-            "message": f"Ошибка при проверке аллергий: {str(e)}"
+            "message": f"Ошибка при проверке аллергий: {str(e)}",
         }
 
 
