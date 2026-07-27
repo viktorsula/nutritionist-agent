@@ -21,6 +21,7 @@ export interface ClientProfile {
   birth_date: string | null;
   gender: string | null;
   allergies: string[] | null;
+  intolerances: string[] | null;
   chronic_conditions: string[] | null;
   restrictions: string[] | null;
   activity_level: string | null;
@@ -71,7 +72,7 @@ export function useClientProfile(clientId: string) {
       const { data, error } = await supabase
         .from("client_profiles")
         .select(
-          "goals,weight,height,target_weight,birth_date,gender,allergies,chronic_conditions,restrictions,activity_level,tracked_lab_indicators,questionnaire_json",
+          "goals,weight,height,target_weight,birth_date,gender,allergies,intolerances,chronic_conditions,restrictions,activity_level,tracked_lab_indicators,questionnaire_json",
         )
         .eq("client_id", clientId)
         .maybeSingle();

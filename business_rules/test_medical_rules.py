@@ -57,6 +57,65 @@ class TestCheckFoodForbidden(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestCheckAllergiesVsIntolerances(unittest.TestCase):
+    """P1-13 шаг 1: аллергия и непереносимость — разные состояния, разная severity."""
+
+    def _profile(self, allergies=None, intolerances=None):
+        return {"allergies": allergies or [], "intolerances": intolerances or []}
+
+    def test_allergen_is_critical(self):
+        with patch("business_rules.medical_rules.get_client_profile",
+                   return_value=self._profile(allergies=["орехи"])):
+            r = medical_rules.check_allergies("cid", ["орехи кешью"])
+        self.assertTrue(r["has_allergen"])
+        self.assertEqual(r["severity"], "critical")
+        self.assertIn("орехи", r["allergens_found"])
+
+    def test_intolerance_is_medium_and_not_flagged_as_allergen(self):
+        # Ключевое: непереносимость НЕ абсолютный запрет — has_allergen остаётся False,
+        # иначе система запретила бы то, что решает нутрициолог.
+        with patch("business_rules.medical_rules.get_client_profile",
+                   return_value=self._profile(intolerances=["лактоза"])):
+            r = medical_rules.check_allergies("cid", ["лактоза"])
+        self.assertFalse(r["has_allergen"])
+        self.assertEqual(r["severity"], "medium")
+        self.assertIn("лактоза", r["intolerances_found"])
+
+    def test_allergen_takes_priority_over_intolerance(self):
+        with patch("business_rules.medical_rules.get_client_profile",
+                   return_value=self._profile(allergies=["орехи"], intolerances=["лактоза"])):
+            r = medical_rules.check_allergies("cid", ["орехи", "лактоза"])
+        self.assertEqual(r["severity"], "critical")
+        self.assertIn("орехи", r["allergens_found"])
+        self.assertIn("лактоза", r["intolerances_found"])  # не теряется
+
+    def test_clean_meal_returns_none_severity(self):
+        with patch("business_rules.medical_rules.get_client_profile",
+                   return_value=self._profile(allergies=["орехи"], intolerances=["лактоза"])):
+            r = medical_rules.check_allergies("cid", ["курица", "рис"])
+        self.assertFalse(r["has_allergen"])
+        self.assertEqual(r["severity"], "none")
+
+    def test_empty_profile_is_safe(self):
+        with patch("business_rules.medical_rules.get_client_profile", return_value={}):
+            r = medical_rules.check_allergies("cid", ["что угодно"])
+        self.assertEqual(r["severity"], "none")
+
+    def test_db_failure_reports_error_not_clean(self):
+        # Сбой проверки не должен выглядеть как «проверено, аллергенов нет».
+        with patch("business_rules.medical_rules.get_client_profile",
+                   side_effect=RuntimeError("db down")):
+            r = medical_rules.check_allergies("cid", ["орехи"])
+        self.assertEqual(r["severity"], "error")
+        self.assertFalse(r["has_allergen"])
+
+    def test_no_ingredients_short_circuits(self):
+        with patch("business_rules.medical_rules.get_client_profile") as prof:
+            r = medical_rules.check_allergies("cid", [])
+        prof.assert_not_called()
+        self.assertEqual(r["severity"], "none")
+
+
 class TestGetAlertThresholds(unittest.TestCase):
     def test_reads_alert_thresholds_setting(self):
         with patch("business_rules.medical_rules.get_setting",

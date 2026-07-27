@@ -365,6 +365,7 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
               />
               <Row label={t("card.activity")} value={p?.activity_level} />
               <Row label={t("card.allergies")} value={list(p?.allergies)} />
+              <Row label={t("card.intolerances")} value={list(p?.intolerances)} />
               <Row label={t("card.chronic")} value={list(p?.chronic_conditions)} />
               <Row label={t("card.restrictions")} value={list(p?.restrictions)} />
             </div>
