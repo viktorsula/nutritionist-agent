@@ -571,5 +571,46 @@ class TestConfigureLogging(unittest.TestCase):
             _configure_logging()
 
 
+class TestWebhookSecret(unittest.TestCase):
+    """P2-12: проверка секрета вебхука обязательна (fail closed)."""
+
+    def test_rejects_when_secret_not_configured(self):
+        # Раньше здесь был `return True` — маршрут принимал POST от кого угодно.
+        import os
+        from api.telegram_webhook import webhook_secret_ok
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
+            self.assertFalse(webhook_secret_ok("что-угодно"))
+            self.assertFalse(webhook_secret_ok(None))
+
+    def test_accepts_matching_secret(self):
+        import os
+        from api.telegram_webhook import webhook_secret_ok
+
+        with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "s3cret"}, clear=False):
+            self.assertTrue(webhook_secret_ok("s3cret"))
+
+    def test_rejects_wrong_or_missing_header(self):
+        import os
+        from api.telegram_webhook import webhook_secret_ok
+
+        with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "s3cret"}, clear=False):
+            self.assertFalse(webhook_secret_ok("другой"))
+            self.assertFalse(webhook_secret_ok(None))
+            self.assertFalse(webhook_secret_ok(""))
+            # префикс верного секрета не должен проходить
+            self.assertFalse(webhook_secret_ok("s3c"))
+
+    def test_endpoint_returns_403_without_secret_configured(self):
+        import os
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
+            client = TestClient(app)
+            resp = client.post("/telegram/webhook", json={"update_id": 1})
+        self.assertEqual(resp.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
