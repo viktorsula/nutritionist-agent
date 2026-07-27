@@ -1,0 +1,59 @@
+# CI: прогон тестов на каждый PR и push в main (P2-16).
+#
+# Зачем: до этого 590 тестов и tsc/vitest гонялись только вручную — регрессия могла
+# приехать в main незамеченной. Два независимых job'а (бэкенд/фронт) — падение одного
+# сразу показывает, где сломалось, и не маскирует второе.
+#
+# Секреты НЕ нужны: тесты замоканы (Supabase/LLM не вызываются по-настоящему).
+# Если появится тест, требующий ключей, — он должен пропускаться без них, а не падать.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Бэкенд (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Та же версия, что в Dockerfile (python:3.11-slim) — иначе CI зелёный,
+          # а прод падает на несовместимости.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Установить зависимости
+        run: pip install -r requirements.txt pytest
+
+      - name: Тесты
+        run: python -m pytest -q
+
+  frontend:
+    name: Фронт (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Проверка типов
+        run: npm run typecheck
+
+      - name: Тесты
+        run: npm test
