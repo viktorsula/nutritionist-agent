@@ -18,6 +18,7 @@ from .handlers import (
     handle_photo_message,
     handle_voice_message,
     handle_document_message,
+    handle_unsupported_message,
     error_handler
 )
 
@@ -58,6 +59,12 @@ def build_application(token: str = None) -> Application:
     )
     application.add_handler(
         MessageHandler(filters.Document.ALL, handle_document_message)
+    )
+    # Catch-all (P2-3) — ТОЛЬКО последним: ловит то, что не разобрали обработчики выше
+    # (стикер/видео/кружок/геолокация/контакт/опрос). Раньше такие сообщения молча
+    # терялись, и для клиента это выглядело как «бот не отвечает».
+    application.add_handler(
+        MessageHandler(filters.ALL & ~filters.COMMAND, handle_unsupported_message)
     )
 
     # Глобальный обработчик ошибок

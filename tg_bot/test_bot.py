@@ -18,7 +18,12 @@ from telegram.ext import ContextTypes
 
 # Импортируем наши модули
 from tg_bot.commands import start_command, help_command, status_command
-from tg_bot.handlers import handle_text_message, handle_photo_message, handle_voice_message
+from tg_bot.handlers import (
+    handle_text_message,
+    handle_photo_message,
+    handle_voice_message,
+    handle_unsupported_message,
+)
 
 
 class TestTelegramCommands(unittest.IsolatedAsyncioTestCase):
@@ -354,6 +359,62 @@ class TestTelegramHandlers(unittest.IsolatedAsyncioTestCase):
 
         self.message.reply_text.assert_called_once()
         self.assertIn("Доступ ограничен", self.message.reply_text.call_args[0][0])
+
+
+class TestUnsupportedMessage(unittest.IsolatedAsyncioTestCase):
+    """P2-3: неподдерживаемые типы больше не теряются молча."""
+
+    def setUp(self):
+        self.user = Mock(spec=User)
+        self.user.id = 123456789
+        self.user.username = "test_user"
+
+        self.message = Mock(spec=Message)
+        self.message.reply_text = AsyncMock()
+        # Ни один из известных типов не выставлен — имитируем «что-то ещё».
+        for name in ("sticker", "video", "video_note", "animation", "location",
+                     "contact", "poll", "venue", "dice", "game"):
+            setattr(self.message, name, None)
+
+        self.update = Mock(spec=Update)
+        self.update.effective_user = self.user
+        self.update.message = self.message
+        self.context = Mock(spec=ContextTypes.DEFAULT_TYPE)
+
+    async def test_replies_instead_of_silence(self):
+        self.message.sticker = object()
+
+        await handle_unsupported_message(self.update, self.context)
+
+        self.message.reply_text.assert_called_once()
+        reply = self.message.reply_text.call_args[0][0]
+        # Клиент должен понять, что делать дальше, а не гадать, почему тишина.
+        self.assertIn("формат", reply.lower())
+        self.assertIn("фото", reply.lower())
+
+    async def test_handles_message_without_known_type(self):
+        # Неизвестный тип не должен ронять обработчик — отвечаем тем же текстом.
+        await handle_unsupported_message(self.update, self.context)
+        self.message.reply_text.assert_called_once()
+
+    async def test_no_message_is_noop(self):
+        self.update.message = None
+        await handle_unsupported_message(self.update, self.context)
+        self.message.reply_text.assert_not_called()
+
+    def test_registered_last_in_application(self):
+        # Порядок критичен: catch-all обязан идти ПОСЛЕ специализированных обработчиков,
+        # иначе он перехватит текст/фото/голос и агент перестанет их получать.
+        import tg_bot.bot as bot_module
+
+        with patch.object(bot_module, "Application") as app_cls:
+            app = Mock()
+            app.add_handler = Mock()
+            app_cls.builder.return_value.token.return_value.build.return_value = app
+            bot_module.build_application("dummy-token")
+
+        callbacks = [c.args[0].callback for c in app.add_handler.call_args_list]
+        self.assertIs(callbacks[-1], handle_unsupported_message)
 
 
 class TestTurnBuffer(unittest.IsolatedAsyncioTestCase):

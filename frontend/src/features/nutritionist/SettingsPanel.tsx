@@ -43,6 +43,11 @@ export function SettingsPanel() {
         <TrustedSources />
       </Section>
 
+      <Section title={t("settings.rag.title")}>
+        <p className="mb-2 text-xs text-gray-500">{t("settings.rag.hint")}</p>
+        <JsonSetting settingKey="rag_config" hint='{"similarity_threshold": 0.75}' />
+      </Section>
+
       <Section title={t("settings.consent.title")}>
         <p className="mb-2 text-xs text-gray-500">{t("settings.consent.hint")}</p>
         <JsonSetting
