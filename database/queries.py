@@ -1612,7 +1612,7 @@ def write_audit_log(
 def get_clients_for_weekly_report() -> List[Dict[str, Any]]:
     """
     Получить список active клиентов для еженедельного отчёта нутрициологу.
-    n8n: каждый понедельник в 09:00.
+    Планировщик: run_weekly_report (api/scheduler.py), Пн 09:00 в TZ владельца.
     """
     supabase = _service_client()
     response = (
@@ -1689,7 +1689,7 @@ def dismiss_audit_finding(finding_id: str, user_id: str) -> Optional[Dict[str, A
 def get_clients_with_inactive_payment() -> List[Dict[str, Any]]:
     """
     Получить клиентов с неактивной оплатой для напоминания нутрициологу.
-    n8n: ежедневно в 10:00.
+    Планировщика для этого сейчас нет — функция доступна агенту/кабинету по запросу.
     """
     supabase = _service_client()
     response = (
@@ -1706,7 +1706,7 @@ def get_clients_with_inactive_payment() -> List[Dict[str, Any]]:
 def get_critical_alerts(hours: int = 24) -> List[Dict[str, Any]]:
     """
     Получить критичные алерты за последние N часов.
-    n8n: проверка каждый час или по webhook от business_rules.
+    Планировщик: run_nutritionist_alerts (api/scheduler.py) шлёт свежие алерты в Telegram.
     """
     supabase = _service_client()
     from datetime import datetime, timedelta
@@ -1732,7 +1732,7 @@ def trigger_alert_webhook(
     payload: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Записать алерт и вернуть данные для отправки в n8n webhook.
+    Записать алерт и вернуть данные для отправки нутрициологу.
     business_rules вызывают эту функцию при критичных событиях.
     """
     # Записываем событие
