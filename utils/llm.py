@@ -27,7 +27,7 @@ import os
 import json
 import time
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 
 try:
     import httpx  # для ListModels провайдеров (есть в зависимостях supabase)
@@ -222,10 +222,12 @@ TASK_FALLBACK_CHAINS = {
         {'provider': 'groq', 'model': 'llama-3.3-70b-versatile'},
         {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
     ],
-    'vision': [
-        # vision умеют Claude и Gemini; Groq — нет, поэтому в резерве только Claude.
-        {'provider': 'claude', 'model': 'claude-sonnet-4-6'},
-    ],
+    # vision НЕ резервируется здесь (P2-15): фото-путь идёт мимо call_llm — utils/vision.py
+    # обращается к google.generativeai напрямую, поэтому цепочка отсюда никогда не читалась
+    # и создавала ложное впечатление, будто резерв есть. Выбор МОДЕЛИ для vision настраивается
+    # и работает (llm_config['vision']['model'] → resolve_vision_model), резерва же нет:
+    # при сбое Gemini расшифровка фото деградирует штатно (оркестратор попросит уточнить).
+    'vision': [],
     # Оркестратору нужен надёжный клиентский tool-calling — сейчас это только Claude.
     # Резерва в рамках LLM НЕТ: при недоступности оркестратор откатывается на граф
     # (agent_orchestrator ловит LLMUnavailableError и делегирует старому пути).
@@ -867,7 +869,7 @@ def _call_groq(
                 'output_tokens': response.usage.completion_tokens,
                 'total_tokens': response.usage.total_tokens
             },
-            'finish_reason': response.choices[0].finish_reason
+            'finish_reason': normalize_finish_reason(response.choices[0].finish_reason)
         }
 
     except Exception as e:
@@ -931,7 +933,7 @@ def _call_openai_compatible(
                 'output_tokens': getattr(usage, 'completion_tokens', 0) if usage else 0,
                 'total_tokens': getattr(usage, 'total_tokens', 0) if usage else 0,
             },
-            'finish_reason': response.choices[0].finish_reason,
+            'finish_reason': normalize_finish_reason(response.choices[0].finish_reason),
         }
     except Exception as e:
         logger.error(f"OpenAI-compatible ({provider_name}) API error: {e}")
@@ -1120,7 +1122,7 @@ def _call_claude(
             'model': config['model'],
             'provider': 'claude',
             'usage': usage,
-            'finish_reason': response.stop_reason,
+            'finish_reason': normalize_finish_reason(response.stop_reason),
         }
         if tool_calls_trace:
             result['tool_calls'] = tool_calls_trace
@@ -1129,6 +1131,74 @@ def _call_claude(
     except Exception as e:
         logger.error(f"Claude API error: {e}")
         raise
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# УНИФИКАЦИЯ finish_reason (P2-15)
+# ────────────────────────────────────────────────────────────────────────────
+# Каждый провайдер называет причину остановки по-своему: OpenAI/Groq — 'stop'/'length',
+# Anthropic — 'end_turn'/'max_tokens', Gemini — 'STOP'/'MAX_TOKENS'. Вызывающий код не мог
+# надёжно понять «ответ оборван по лимиту» — а это важно: обрезанный JSON или обрезанный
+# совет клиенту выглядят как валидный результат. Приводим к общему словарю.
+#
+# Значения: 'stop' — договорил; 'length' — упёрся в лимит токенов; 'tool_use' — просит
+# инструмент; 'filter' — отфильтровано провайдером; 'other' — всё прочее/неизвестное.
+_FINISH_REASON_MAP = {
+    # OpenAI / Groq
+    "stop": "stop",
+    "length": "length",
+    "tool_calls": "tool_use",
+    "content_filter": "filter",
+    # Anthropic
+    "end_turn": "stop",
+    "max_tokens": "length",
+    "stop_sequence": "stop",
+    "tool_use": "tool_use",
+    "refusal": "filter",
+    # Gemini (enum .name)
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "filter",
+    "RECITATION": "filter",
+    "PROHIBITED_CONTENT": "filter",
+    "BLOCKLIST": "filter",
+}
+
+
+def normalize_finish_reason(raw: Any) -> str:
+    """Причина остановки в общем словаре (см. _FINISH_REASON_MAP). Неизвестное → 'other'."""
+    if raw is None:
+        return "other"
+    return _FINISH_REASON_MAP.get(str(raw), "other")
+
+
+def _gemini_payload(messages: List[Dict[str, str]]) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+    """
+    Готовит сообщения под Gemini: (system_instruction, contents).
+
+    P2-15: раньше system и user оба маппились в роль 'user', и типичный набор
+    [system, user] превращался в два 'user' подряд. Gemini требует СТРОГОГО чередования
+    user/model и на таком входе отвечает 400 — то есть резервная цепочка ломалась ровно
+    тогда, когда была нужна (основная модель уже упала). Теперь:
+      • system-сообщения уходят в system_instruction (штатное место для них);
+      • подряд идущие сообщения одной роли склеиваются, чтобы чередование не нарушалось.
+    """
+    system_parts = [
+        _content_to_text(m["content"]) for m in messages if m.get("role") == "system"
+    ]
+    contents: List[Dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            continue
+        role = "model" if msg.get("role") == "assistant" else "user"
+        text = _content_to_text(msg.get("content"))
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"][0] = f"{contents[-1]['parts'][0]}\n\n{text}"
+        else:
+            contents.append({"role": role, "parts": [text]})
+
+    system_instruction = "\n\n".join(p for p in system_parts if p) or None
+    return system_instruction, contents
 
 
 def _call_gemini(
@@ -1158,17 +1228,14 @@ def _call_gemini(
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(config['model'])
 
-        # Конвертация формата сообщений для Gemini
-        # Gemini использует 'user' и 'model' (не 'assistant')
-        gemini_messages = []
-        for msg in messages:
-            role = 'user' if msg['role'] in ['user', 'system'] else 'model'
-            gemini_messages.append({
-                'role': role,
-                'parts': [_content_to_text(msg['content'])]
-            })
+        # P2-15: system уходит отдельным параметром, роли чередуются корректно.
+        system_instruction, gemini_messages = _gemini_payload(messages)
+        model = (
+            genai.GenerativeModel(config['model'], system_instruction=system_instruction)
+            if system_instruction
+            else genai.GenerativeModel(config['model'])
+        )
 
         # Вызов API
         response = model.generate_content(
@@ -1195,7 +1262,7 @@ def _call_gemini(
                 'output_tokens': response.usage_metadata.candidates_token_count,
                 'total_tokens': response.usage_metadata.total_token_count
             },
-            'finish_reason': response.candidates[0].finish_reason.name
+            'finish_reason': normalize_finish_reason(response.candidates[0].finish_reason.name)
         }
 
     except Exception as e:
