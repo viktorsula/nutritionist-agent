@@ -81,6 +81,12 @@ function eventLine(e: { event_type: string; payload_json: Record<string, unknown
     }
     case "questionnaire_updated":
       return (p.message as string) || "Клиент обновил анкету онбординга";
+    case "food_question": {
+      const items = (p.items as string[] | undefined) ?? [];
+      const reasons = (p.reasons as (string | null)[] | undefined) ?? [];
+      const detail = items.map((it, i) => (reasons[i] ? `${it} — ${reasons[i]}` : it)).join("; ");
+      return ["Вопрос по продукту", detail].filter(Boolean).join(": ");
+    }
     case "plan_exception_claimed": {
       const item = (p.item as string) || "";
       const claim = (p.client_claim as string) || "";
