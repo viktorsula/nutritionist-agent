@@ -86,7 +86,9 @@ def test_client_tool_loop_executes_and_returns_text():
     assert calls == [{"kcal": 500}]
     # финальный текст — из второго ответа
     assert out["content"] == "Записал обед."
-    assert out["finish_reason"] == "end_turn"
+    # P2-15: finish_reason приводится к общему словарю (Anthropic 'end_turn' → 'stop'),
+    # чтобы вызывающий код одинаково понимал причину остановки у любого провайдера.
+    assert out["finish_reason"] == "stop"
     # трейс инструментов
     assert out["tool_calls"] == [{"name": "log_meal", "input": {"kcal": 500}, "is_error": False}]
     # usage накоплен по обеим итерациям
