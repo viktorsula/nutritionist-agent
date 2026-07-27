@@ -1,6 +1,5 @@
 # Бэкенд проекта = FastAPI (api/main.py). Веб-интерфейс — отдельный React-SPA
 # (frontend/, деплоится статикой), в этот образ НЕ входит.
-# Streamlit (app.py, web/) — legacy, в образе не запускается.
 FROM python:3.11-slim
 
 WORKDIR /app

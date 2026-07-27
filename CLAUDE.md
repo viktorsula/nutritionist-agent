@@ -15,7 +15,7 @@ Render: nutritionist-agent-gvxp.onrender.com
 - Python 3.11
 - LangGraph (оркестрация агентов)
 - Supabase (база данных, Auth, Storage, pgvector)
-- Streamlit (веб-интерфейс)
+- React SPA (Vite + TypeScript) — веб-интерфейс; FastAPI — бэкенд
 - Telegram Bot / python-telegram-bot (основной канал клиента)
 - Groq llama-3.3-70b (диалог, бесплатно)
 - Claude Sonnet (аналитика, ~$3/M токенов)
@@ -25,7 +25,7 @@ Render: nutritionist-agent-gvxp.onrender.com
 - LangFuse (мониторинг и трейсинг)
 
 ## Архитектура
-Telegram / Streamlit
+Telegram / React SPA
 ↓
 router.py
 ↓
@@ -125,7 +125,8 @@ nutritionist-agent/
 ├── .env / .env.example
 ├── requirements.txt
 ├── Dockerfile
-├── app.py                    ← Streamlit (точка входа веб)
+├── api/                      ← FastAPI (точка входа бэкенда: api/main.py)
+├── frontend/                 ← React SPA (кабинеты нутрициолога и клиента)
 ├── database/
 │   ├── client.py             ← подключение к Supabase
 │   ├── models.py             ← dataclasses
