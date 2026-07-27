@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { CatalogEditor } from "./settings/CatalogEditor";
 import { JsonSetting } from "./settings/JsonSetting";
 import { CoveragePanel } from "./CoveragePanel";
+import { AuditLogPanel } from "./AuditLogPanel";
 import { TrustedSources } from "./settings/TrustedSources";
 import { PromptEditor } from "./settings/PromptEditor";
 import { KnowledgeBase } from "./settings/KnowledgeBase";
@@ -67,6 +68,10 @@ export function SettingsPanel() {
           settingKey="client_audit"
           hint='{"enabled": true, "weekdays": [0, 3], "hour": 10, "minute": 0, "timezone": "Asia/Dubai"}'
         />
+      </Section>
+
+      <Section title={t("settings.auditLog.title")}>
+        <AuditLogPanel />
       </Section>
 
       <Section title={t("settings.knowledge.title")}>

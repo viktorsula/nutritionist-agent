@@ -288,6 +288,50 @@ class TestApi(unittest.TestCase):
         self.assertAlmostEqual(body["orchestrator_rate"]["client"], 0.667, places=2)
         self.assertIsNone(body["orchestrator_rate"]["nutritionist"])  # ходов нет
 
+    # --- /nutritionist/audit-logs (просмотр журнала аудита, P2-8) ---
+    def test_audit_logs_rejects_client_role(self):
+        app.dependency_overrides[get_current_user] = lambda: CLIENT_USER
+        r = self.client.get("/nutritionist/audit-logs")
+        self.assertEqual(r.status_code, 403)
+
+    def test_audit_logs_returns_logs_with_client_names(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        rows = [
+            {"id": "1", "actor_type": "nutritionist", "actor_id": "u-2",
+             "action": "change_status", "entity_type": "client", "entity_id": "c-1",
+             "old_value": None, "new_value": {"client_status": "active"},
+             "timestamp": "2026-07-27T10:00:00"},
+            {"id": "2", "actor_type": "client", "actor_id": "c-1",
+             "action": "accept_consent", "entity_type": "consent", "entity_id": "c-1",
+             "old_value": None, "new_value": {"version": "1.1"},
+             "timestamp": "2026-07-27T09:00:00"},
+        ]
+        with patch("database.queries.get_audit_logs", return_value=rows) as g, \
+             patch("database.queries.get_clients_by_ids", return_value=[{"id": "c-1", "name": "Анна"}]) as names:
+            r = self.client.get(
+                "/nutritionist/audit-logs?entity_type=client&limit=500"
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(g.call_args.kwargs["limit"], 200)  # ограничено сверху
+        body = r.json()["logs"]
+        self.assertEqual(body[0]["entity_name"], "Анна")  # entity_type=client
+        self.assertEqual(body[1]["actor_name"], "Анна")  # actor_type=client
+        names.assert_called_once()
+        self.assertEqual(set(names.call_args.args[0]), {"c-1"})
+
+    def test_audit_logs_no_clients_skips_name_lookup(self):
+        app.dependency_overrides[get_current_user] = lambda: NUTRI_USER
+        rows = [
+            {"id": "1", "actor_type": "nutritionist", "actor_id": "u-2",
+             "action": "update_setting", "entity_type": "settings", "entity_id": "llm_config",
+             "old_value": None, "new_value": None, "timestamp": "2026-07-27T10:00:00"},
+        ]
+        with patch("database.queries.get_audit_logs", return_value=rows), \
+             patch("database.queries.get_clients_by_ids") as names:
+            r = self.client.get("/nutritionist/audit-logs")
+        self.assertEqual(r.status_code, 200)
+        names.assert_called_once_with([])
+
     # --- /nutrition/daily (графики питания, C1) ---
     def test_nutrition_daily_client_uses_token_client_id(self):
         app.dependency_overrides[get_current_user] = lambda: CLIENT_USER

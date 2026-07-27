@@ -150,9 +150,10 @@ ALTER TABLE users DROP CONSTRAINT users_role_check;
 | 020_client_audit_findings.sql | 25 июля 2026 | ✅ | NEW-1 — таблица `client_audit_findings` (RLS: только нутрициолог) для находок проактивного аудита клиента (2×/нед, только при находке, severity ≤ medium, не в Telegram) |
 | 021_reminder_topic_dedup.sql | — | ⏳ | P1-7 — `reminder_occurrences.last_notified_date` (DATE, бэкофилл из `due_date`) — основа кросс-джобового дедупа «одно сообщение по теме (`expected_response`) в день», чтобы `run_reminders`/`run_reminder_followups` не слали независимо по 2-3 сообщения об одном и том же (напр. вода) |
 | 022_intolerances.sql | — | ⏳ | P1-13 (шаг 1) — `client_profiles.intolerances TEXT[]`: аллергия и непереносимость разделены. Медицински это разные состояния (абсолютное vs дозозависимое), и пока они в одном поле, проверка продуктов не может дать верный ответ. Данные существующих клиентов НЕ переносятся автоматически — остаются в `allergies` (более строгая категория, это безопасно), нутрициолог переносит вручную |
+| 023_audit_knowledge_base.sql | — | ⏳ | P2-8 — найден при подготовке просмотра `audit_logs`: `entity_type='knowledge_base'` (используется загрузкой/удалением документов базы знаний) не входил в CHECK-констрейнт. На проде это давало 500 на успешно выполненной операции — сам документ сохранялся/удалялся, но `write_audit_log` падал необработанным исключением. **Срочная** (блокирует загрузку базы знаний, запланированную владельцем на эту неделю) |
 
-Миграции 001–021 подтверждены применёнными на проде (владелец подтвердил накатку каждой).
-022 создана 27 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату.
+Миграции 001–022 подтверждены применёнными на проде (владелец подтвердил накатку каждой).
+023 создана 27 июля 2026, ⏳ ожидает накатки владельцем — после накатки отметить ✅ и дописать дату. **Накатить перед следующей загрузкой документа в базу знаний.**
 При добавлении новой миграции — сразу дописать строку и после накатки прогнать verify-SQL.
 
 ---
@@ -213,6 +214,9 @@ UNION ALL SELECT '021 reminder_occurrences.last_notified_date',
        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reminder_occurrences' AND column_name='last_notified_date')
 UNION ALL SELECT '022 client_profiles.intolerances',
        EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='client_profiles' AND column_name='intolerances')
+UNION ALL SELECT '023 audit_logs allows knowledge_base',
+       EXISTS(SELECT 1 FROM pg_constraint WHERE conname='audit_logs_entity_type_check'
+              AND pg_get_constraintdef(oid) LIKE '%''knowledge_base''%')
 ORDER BY migration;
 ```
 

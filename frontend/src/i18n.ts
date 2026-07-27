@@ -199,6 +199,23 @@ const resources = {
                 "дни недели (0=Пн…6=Вс), по умолчанию Пн+Чт. Находки — в карточке клиента, " +
                 "только при находке.",
         },
+        auditLog: {
+          title: "Журнал аудита",
+          hint: "Все действия нутрициолога, клиента и системы: смена статуса, настройки, " +
+                "напоминания, согласие, база знаний и т.д. Свежие сверху.",
+          all_entities: "Все типы объектов",
+          all_actors: "Все роли",
+          when: "Когда",
+          who: "Кто",
+          action: "Действие",
+          entity: "Объект",
+          details: "Детали",
+          was: "было",
+          empty: "Записей пока нет.",
+          error: "Не удалось загрузить журнал",
+          load_more: "Загрузить ещё",
+          loading_more: "Загружаю…",
+        },
         llm: {
           title: "LLM-модели",
           hint: "JSON-конфигурация моделей по task_type (llm_config).",
@@ -838,6 +855,23 @@ const resources = {
           hint: "Schedule for the background notes/plan/dynamics review (client_audit). " +
                 "weekdays — day-of-week list (0=Mon…6=Sun), default Mon+Thu. Findings show up " +
                 "on the client card, only when something is actually found.",
+        },
+        auditLog: {
+          title: "Audit log",
+          hint: "Every action by the nutritionist, client, and system: status changes, " +
+                "settings, reminders, consent, knowledge base, etc. Newest first.",
+          all_entities: "All object types",
+          all_actors: "All roles",
+          when: "When",
+          who: "Who",
+          action: "Action",
+          entity: "Object",
+          details: "Details",
+          was: "was",
+          empty: "No records yet.",
+          error: "Failed to load the audit log",
+          load_more: "Load more",
+          loading_more: "Loading…",
         },
         llm: {
           title: "LLM models",

@@ -2,7 +2,7 @@
 -- СХЕМА БАЗЫ ДАННЫХ — АГЕНТ НУТРИЦИОЛОГА v1.6
 -- Дата: 27 июля 2026
 -- =============================================
--- Это КОНСОЛИДИРОВАННОЕ состояние схемы: базовая версия v1.3 + все миграции 001–022
+-- Это КОНСОЛИДИРОВАННОЕ состояние схемы: базовая версия v1.3 + все миграции 001–023
 -- (docs/migrations/). Файл описательный — на живой БД миграции уже применены, повторно
 -- выполнять его целиком НЕ нужно; он нужен, чтобы видеть актуальную структуру целиком.
 -- Реестр применённых миграций и verify-SQL для проверки дрейфа — docs/migrations/README.md.
@@ -245,7 +245,11 @@ CREATE TABLE audit_logs (
     action TEXT NOT NULL,
     -- Примеры: 'update_allergy', 'change_plan', 'freeze_access',
     --          'update_threshold', 'assign_task', 'change_status'
-    entity_type TEXT NOT NULL CHECK (entity_type IN ('client', 'plan', 'task', 'schedule', 'settings', 'profile')),
+    -- Констрейнт обновлялся миграциями 013 (+reminder), 018 (+consent), 023 (+knowledge_base).
+    entity_type TEXT NOT NULL CHECK (entity_type IN (
+        'client', 'plan', 'task', 'schedule', 'settings', 'profile',
+        'reminder', 'consent', 'knowledge_base'
+    )),
     entity_id UUID,
     old_value JSONB,
     new_value JSONB,
@@ -564,7 +568,7 @@ COMMENT ON TABLE client_audit_findings IS 'Находки проактивног
 -- ЗАВЕРШЕНИЕ
 -- =============================================
 
--- Консолидированная схема v1.6 (база v1.3 + миграции 001–022)
+-- Консолидированная схема v1.6 (база v1.3 + миграции 001–023)
 -- 23 таблицы + 1 VIEW + 2 триггера
 --
 -- Важное по защите данных (LEGAL-3, миграция 019): ВСЕ внешние ключи на clients(id)
