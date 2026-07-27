@@ -32,6 +32,7 @@ _EVENT_LABEL = {
     "meal_not_reported": "Приём пищи не отмечен",
     "reminder_unanswered": "Напоминание без ответа",
     "plan_exception_claimed": "Клиент заявил об исключении из плана",
+    "food_question": "Вопрос по продукту (нужна ваша оценка)",
 }
 
 
@@ -72,6 +73,17 @@ def format_alert(event: Dict[str, Any]) -> str:
             str(payload[k]) for k in ("title", "expected") if payload.get(k)
         )
     # plan_exception_claimed (P1-10): свой payload item/client_claim, не message/reason.
+    # food_question (P1-13): свой payload items/reasons.
+    food_detail = ""
+    if event_type == "food_question":
+        items = payload.get("items") or []
+        reasons = list(payload.get("reasons") or [])
+        reasons += [None] * (len(items) - len(reasons))  # причин может быть меньше названий
+        food_detail = "; ".join(
+            f"{item} — {reason}" if reason else str(item)
+            for item, reason in zip(items, reasons)
+        )
+
     exception_detail = ""
     if event_type == "plan_exception_claimed":
         exception_detail = " — ".join(
@@ -84,6 +96,7 @@ def format_alert(event: Dict[str, Any]) -> str:
         or alerts_detail
         or reminder_detail
         or exception_detail
+        or food_detail
         or ""
     ).strip()
 

@@ -837,6 +837,26 @@ def _tool_schemas(trusted_sources: Optional[List[Dict[str, str]]] = None) -> Lis
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         },
         {
+            "name": "check_food_for_client",
+            "description": "ОБЯЗАТЕЛЬНО вызови ПЕРЕД тем, как предложить клиенту блюдо, "
+                           "рецепт, продукт или рацион на день — до того, как назовёшь их в "
+                           "ответе. Проверяет продукты против аллергий, непереносимостей, "
+                           "ограничений плана и базы знаний нутрициолога. Возвращает по "
+                           "каждому продукту вердикт и что делать дальше. Если подбираешь "
+                           "замену — проверь и её тоже, отдельным вызовом.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "продукты/блюда, которые собираешься предложить",
+                    },
+                },
+                "required": ["items"],
+            },
+        },
+        {
             "name": "complete_task",
             "description": "Отметить задачу клиента выполненной (P2-6). Вызывай, когда клиент "
                            "сообщает, что сделал назначенное нутрициологом («сделала зарядку», "
@@ -1013,6 +1033,65 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         return build_context_from_chunks(chunks) or "по базе знаний ничего релевантного не найдено"
 
+    def check_food_for_client(inp: Dict[str, Any]) -> str:
+        """
+        Проверка продуктов ПЕРЕД тем, как предложить их клиенту (P1-13, шаг 2).
+
+        Асимметрия по решению владельца: на исходящих `unclear` блокирует наравне с
+        `violates` — пропустить запрещённое в совете хуже, чем лишний раз уточнить.
+        Вопрос нутрициологу ставится ЗАПИСЬЮ (событие), а не пушем: так это работает и
+        в режиме «поддержка», где реалтайм-уведомления ей отключены.
+        """
+        from business_rules.food_check import check_food
+
+        items = [str(x).strip() for x in (inp.get("items") or []) if str(x).strip()]
+        if not items:
+            return "нечего проверять: не понял, какие продукты"
+
+        try:
+            result = check_food(state["client_id"], items, direction="outgoing")
+        except Exception as e:
+            logger.warning(f"check_food_for_client: проверка не удалась: {e}")
+            return ("проверить не удалось — не предлагай эти продукты; скажи клиенту, "
+                    "что уточнишь у нутрициолога")
+
+        if not result.get("checked"):
+            return "у клиента нет ограничений — можно предлагать"
+
+        parts: List[str] = []
+        for v in result.get("violations", []):
+            parts.append(f"НЕЛЬЗЯ «{v['item']}»: {v.get('reason') or 'нарушает назначения'}")
+        for v in result.get("unclear", []):
+            parts.append(f"НЕЯСНО «{v['item']}»: {v.get('reason') or 'недостаточно данных'}")
+
+        if not parts:
+            return "можно предлагать: ограничения не нарушены"
+
+        # Фиксируем вопрос нутрициологу по неясным пунктам — чтобы он не потерялся.
+        if result.get("unclear"):
+            from database import queries
+
+            try:
+                queries.log_client_event(
+                    client_id=state["client_id"],
+                    event_type="food_question",
+                    severity="low",
+                    payload={
+                        "items": [v["item"] for v in result["unclear"]],
+                        "reasons": [v.get("reason") for v in result["unclear"]],
+                        "channel": state.get("channel"),
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"check_food_for_client: вопрос не записан: {e}")
+
+        return (
+            "; ".join(parts)
+            + " — эти продукты НЕ предлагай. Подбери безопасную замену и проверь её этим же "
+              "инструментом. Клиенту скажи честно, что уточнишь у нутрициолога, и предложи "
+              "замену. Вопрос нутрициологу уже записан."
+        )
+
     def complete_task(inp: Dict[str, Any]) -> str:
         # P2-6: до этого complete_task() существовал в queries, но не вызывался ниоткуда —
         # задачи копились в 'pending' навсегда, даже когда клиент их выполнил.
@@ -1068,6 +1147,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         "log_sleep": log_sleep,
         "get_client_data": get_client_data,
         "search_knowledge": search_knowledge,
+        "check_food_for_client": check_food_for_client,
         "complete_task": complete_task,
         "flag_plan_exception": flag_plan_exception,
     }

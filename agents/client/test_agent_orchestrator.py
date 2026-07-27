@@ -148,6 +148,63 @@ def test_flag_plan_exception_logs_event_without_changing_plan():
     assert "нутрициолог" in result.lower()
 
 
+def test_check_food_blocks_and_records_question_on_unclear():
+    # P1-13 шаг 2: на исходящих «неясно» блокирует наравне с «нарушает», а вопрос
+    # нутрициологу ставится ЗАПИСЬЮ (работает и в режиме «поддержка», где пуши отключены).
+    state = {"client_id": "cid", "channel": "telegram"}
+    verdict = {"checked": True, "verdicts": [], "violations": [],
+               "unclear": [{"item": "плов", "reason": "состав неизвестен"}], "blocked": True}
+    with patch("business_rules.food_check.check_food", return_value=verdict), \
+         patch("database.queries.log_client_event") as log_event:
+        handlers = ao._build_handlers(state)
+        result = handlers["check_food_for_client"]({"items": ["плов"]})
+
+    assert "НЕЯСНО" in result
+    assert "не предлагай" in result.lower()
+    log_event.assert_called_once()
+    assert log_event.call_args.kwargs["event_type"] == "food_question"
+    assert log_event.call_args.kwargs["payload"]["items"] == ["плов"]
+
+
+def test_check_food_allows_when_clean():
+    state = {"client_id": "cid"}
+    verdict = {"checked": True, "verdicts": [], "violations": [], "unclear": [], "blocked": False}
+    with patch("business_rules.food_check.check_food", return_value=verdict), \
+         patch("database.queries.log_client_event") as log_event:
+        handlers = ao._build_handlers(state)
+        result = handlers["check_food_for_client"]({"items": ["курица"]})
+    assert "можно предлагать" in result
+    log_event.assert_not_called()
+
+
+def test_check_food_violation_does_not_create_question():
+    # Нарушение — это не вопрос: ответ известен, продукт просто нельзя.
+    state = {"client_id": "cid"}
+    verdict = {"checked": True, "verdicts": [],
+               "violations": [{"item": "кешью", "reason": "орех"}], "unclear": [], "blocked": True}
+    with patch("business_rules.food_check.check_food", return_value=verdict), \
+         patch("database.queries.log_client_event") as log_event:
+        handlers = ao._build_handlers(state)
+        result = handlers["check_food_for_client"]({"items": ["кешью"]})
+    assert "НЕЛЬЗЯ" in result
+    log_event.assert_not_called()
+
+
+def test_check_food_failure_does_not_greenlight():
+    # Сбой проверки не должен читаться моделью как «можно предлагать».
+    state = {"client_id": "cid"}
+    with patch("business_rules.food_check.check_food", side_effect=RuntimeError("down")):
+        handlers = ao._build_handlers(state)
+        result = handlers["check_food_for_client"]({"items": ["плов"]})
+    assert "не предлагай" in result.lower()
+
+
+def test_check_food_registered_as_tool():
+    names = {t["name"] for t in ao._tool_schemas()}
+    assert "check_food_for_client" in names
+    assert "check_food_for_client" in ao._build_handlers({"client_id": "cid"})
+
+
 def test_complete_task_closes_own_task():
     # P2-6: complete_task существовал в queries, но не вызывался ниоткуда — задачи
     # копились в 'pending' навсегда, даже когда клиент их выполнил.

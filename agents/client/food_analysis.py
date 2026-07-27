@@ -97,10 +97,63 @@ def analyze_against_plan(
             if a.get('type') in ('food_forbidden', 'food_incompatible'):
                 alerts.append(a)
 
+        # Смысловая проверка (P1-13, шаг 2). Подстрочные проверки выше ловят только
+        # буквальные совпадения: «булгур» не содержит слова «глютен», «кешью» — слова
+        # «орехи». Эта проверка смотрит на суть, с опорой на назначения нутрициолога и
+        # его базу знаний. Направление 'incoming': клиент уже съел, отменить нельзя —
+        # задача просигналить нутрициологу, а не пугать клиента.
+        alerts.extend(_semantic_food_alerts(client_id, ingredients))
+
     except Exception as e:
         logger.error(f"analyze_against_plan error: {e}", exc_info=True)
 
     return alerts
+
+
+def _semantic_food_alerts(client_id: str, ingredients: List[str]) -> List[Dict[str, Any]]:
+    """
+    Алерты по итогам смысловой проверки съеденного (P1-13).
+
+    `violates` → high: нарушение назначений, нутрициолог должен узнать.
+    `unclear`  → low: система не смогла ответить уверенно (состав блюда неизвестен,
+      формулировка ограничения неоднозначна, нужна врачебная оценка). Это НЕ нарушение,
+      но и не «чисто» — нутрициолог видит вопрос у себя, а клиента не тревожим.
+    """
+    from business_rules.food_check import check_food
+
+    out: List[Dict[str, Any]] = []
+    try:
+        result = check_food(client_id, ingredients, direction="incoming")
+    except Exception as e:
+        logger.warning(f"semantic food check failed: {e}")
+        return out
+
+    if not result.get("checked"):
+        return out
+
+    if result.get("violations"):
+        details = "; ".join(
+            f"{v['item']} — {v['reason']}" for v in result["violations"] if v.get("item")
+        )
+        out.append({
+            "type": "food_violation",
+            "severity": "high",
+            "message": f"Нарушение назначений: {details}",
+            "details": {"verdicts": result["violations"]},
+        })
+
+    if result.get("unclear"):
+        details = "; ".join(
+            f"{v['item']} — {v['reason']}" for v in result["unclear"] if v.get("item")
+        )
+        out.append({
+            "type": "food_unclear",
+            "severity": "low",
+            "message": f"Требует вашей оценки: {details}",
+            "details": {"verdicts": result["unclear"]},
+        })
+
+    return out
 
 
 def determine_food_routing(alerts: List[Dict[str, Any]], mode: str) -> Dict[str, Any]:

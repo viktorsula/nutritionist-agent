@@ -122,6 +122,16 @@ DEFAULT_TASK_MODEL_MAPPING = {
         'max_tokens': 500,
         'description': 'Тёплый текст пакета напоминаний клиенту'
     },
+    'food_check': {
+        # Проверка продуктов против назначений клиента (P1-13, шаг 2). На обкатке — Groq
+        # (бесплатно, быстро); в рабочем режиме владелец переводит на Claude через кабинет,
+        # без правки кода. temperature низкая: задача классификационная, не творческая.
+        'provider': 'groq',
+        'model': 'llama-3.3-70b-versatile',
+        'temperature': 0.1,
+        'max_tokens': 1200,
+        'description': 'Смысловая проверка продуктов на аллергии/непереносимости/ограничения'
+    },
     'client_audit': {
         'provider': 'claude',
         'model': 'claude-sonnet-4-6',
@@ -224,6 +234,12 @@ TASK_FALLBACK_CHAINS = {
     'nutritionist_orchestrator': [],
     'reminder': [
         {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
+    ],
+    # Проверка продуктов: при недоступности основной модели пробуем другие. Если не вышло
+    # ни одной — food_check вернёт 'unclear' (не «чисто»), см. business_rules/food_check.py.
+    'food_check': [
+        {'provider': 'gemini', 'model': 'gemini-2.5-flash'},
+        {'provider': 'claude', 'model': 'claude-sonnet-4-6'},
     ],
 }
 

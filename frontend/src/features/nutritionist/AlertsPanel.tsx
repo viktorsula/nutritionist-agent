@@ -113,6 +113,13 @@ export function AlertsPanel() {
       const showExpected = expected && expected.toLowerCase() !== title.toLowerCase();
       return [title, showExpected ? expected : ""].filter(Boolean).join(" — ");
     }
+    if (a.event_type === "food_question") {
+      const items = (p.items as string[] | undefined) ?? [];
+      const reasons = (p.reasons as (string | null)[] | undefined) ?? [];
+      return items
+        .map((it, i) => (reasons[i] ? `${it} — ${reasons[i]}` : it))
+        .join("; ");
+    }
     if (a.event_type === "plan_exception_claimed") {
       return [p.item as string, p.client_claim as string].filter(Boolean).join(" — ");
     }
