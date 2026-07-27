@@ -263,6 +263,42 @@ async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_
     })
 
 
+async def handle_unsupported_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Catch-all для типов, которые агент не умеет обрабатывать (P2-3): стикер, видео,
+    видеосообщение («кружок»), геолокация, контакт, опрос и т.п.
+
+    Раньше такие апдейты не попадали ни в один MessageHandler и молча терялись: клиент
+    отправлял стикер и не получал ничего в ответ — выглядело как «бот сломался/не читает».
+    Регистрируется ПОСЛЕДНИМ, поэтому срабатывает только на то, что не разобрали
+    специализированные обработчики выше.
+    """
+    telegram_id = update.effective_user.id if update.effective_user else "unknown"
+    message = update.message
+    if message is None:
+        return
+
+    # Что именно прислали — для лога (чтобы видеть, какие типы реально нужны клиентам).
+    kind = next(
+        (
+            name
+            for name in (
+                "sticker", "video", "video_note", "animation", "location",
+                "contact", "poll", "venue", "dice", "game",
+            )
+            if getattr(message, name, None) is not None
+        ),
+        "unknown",
+    )
+    logger.info(f"Неподдерживаемый тип сообщения '{kind}' от telegram_id={telegram_id}")
+
+    await message.reply_text(
+        "Пока не умею работать с таким форматом 🙂\n\n"
+        "Напишите текстом, пришлите фото еды или бланка анализов, "
+        "голосовое сообщение или документ — это я разберу."
+    )
+
+
 async def _send_long_message(update: Update, text: str, max_length: int = 4000) -> None:
     """
     Отправка длинного сообщения (разбивка если > max_length)

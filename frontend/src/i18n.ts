@@ -166,6 +166,13 @@ const resources = {
           url_required: "Укажите URL",
           error: "Не удалось сохранить источники",
         },
+        rag: {
+          title: "Поиск по базе знаний",
+          hint: "similarity_threshold — минимальная близость (0..1), ниже которой найденный " +
+                "фрагмент считается нерелевантным и не попадает в контекст ассистента. " +
+                "По умолчанию 0.75. Ниже — больше материала, но и больше постороннего; " +
+                "выше — только точные совпадения.",
+        },
         consent: {
           title: "Текст согласия клиента",
           hint: "Текст блокирующего шага согласия перед анкетой онбординга (consent_text). " +
@@ -773,6 +780,13 @@ const resources = {
           remove: "Remove",
           url_required: "Enter a URL",
           error: "Failed to save sources",
+        },
+        rag: {
+          title: "Knowledge base search",
+          hint: "similarity_threshold — minimum closeness (0..1) below which a retrieved " +
+                "chunk is treated as irrelevant and kept out of the assistant's context. " +
+                "Default 0.75. Lower means more material but more noise; higher means " +
+                "only close matches.",
         },
         consent: {
           title: "Client consent text",
