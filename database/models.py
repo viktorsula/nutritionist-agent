@@ -111,17 +111,6 @@ class Task:
 
 
 @dataclass
-class NotificationSchedule:
-    id: Optional[UUID] = None
-    client_id: Optional[UUID] = None
-    notification_type: Optional[str] = None
-    scheduled_time: Optional[str] = None
-    timezone: Optional[str] = None
-    is_active: Optional[bool] = True
-    updated_at: Optional[datetime] = None
-
-
-@dataclass
 class AuditLog:
     id: Optional[UUID] = None
     actor_type: Optional[str] = None

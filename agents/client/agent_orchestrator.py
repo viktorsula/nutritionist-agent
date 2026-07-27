@@ -825,6 +825,23 @@ def _tool_schemas(trusted_sources: Optional[List[Dict[str, str]]] = None) -> Lis
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         },
         {
+            "name": "complete_task",
+            "description": "Отметить задачу клиента выполненной (P2-6). Вызывай, когда клиент "
+                           "сообщает, что сделал назначенное нутрициологом («сделала зарядку», "
+                           "«сдала анализы», «прочитала материал»). Список задач бери через "
+                           "get_client_data(scope='tasks') — там есть id и название. Если "
+                           "непонятно, о какой именно задаче речь, сначала уточни у клиента, "
+                           "а не закрывай наугад.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "id задачи из get_client_data(scope='tasks')"},
+                    "note": {"type": "string", "description": "что именно сказал клиент (необязательно)"},
+                },
+                "required": ["task_id"],
+            },
+        },
+        {
             "name": "flag_plan_exception",
             "description": "Клиент утверждает, что нутрициолог лично разрешил исключение из плана/"
                            "ограничений (напр. «сыр пармезан мне разрешили, там нет лактозы»). Вызови "
@@ -984,6 +1001,32 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         return build_context_from_chunks(chunks) or "по базе знаний ничего релевантного не найдено"
 
+    def complete_task(inp: Dict[str, Any]) -> str:
+        # P2-6: до этого complete_task() существовал в queries, но не вызывался ниоткуда —
+        # задачи копились в 'pending' навсегда, даже когда клиент их выполнил.
+        from database import queries
+
+        task_id = (inp.get("task_id") or "").strip()
+        if not task_id:
+            return "не записал: не понял, какую задачу закрыть"
+
+        # Замыкаем на текущего клиента: модель не должна закрыть чужую задачу по чужому id.
+        try:
+            own = {t.get("id") for t in (queries.get_pending_tasks(state["client_id"]) or [])}
+        except Exception as e:
+            logger.warning(f"complete_task: список задач не получен: {e}")
+            return "не удалось проверить задачу — скажи клиенту, что уточнишь позже"
+        if task_id not in own:
+            return "не записал: такой задачи нет среди активных у этого клиента"
+
+        note = (inp.get("note") or "").strip()
+        try:
+            queries.complete_task(task_id, {"note": note, "channel": state.get("channel")} if note else None)
+        except Exception as e:
+            logger.warning(f"complete_task: закрытие не удалось: {e}")
+            return "не удалось отметить задачу — скажи клиенту, что уточнишь позже"
+        return "задача отмечена выполненной"
+
     def flag_plan_exception(inp: Dict[str, Any]) -> str:
         # P1-10: только сигнал нутрициологу на проверку — план/ограничения НЕ меняются
         # здесь (единственный источник назначений — нутрициолог, см. CLAUDE.md).
@@ -1013,6 +1056,7 @@ def _build_handlers(state: Dict[str, Any]) -> Dict[str, Any]:
         "log_sleep": log_sleep,
         "get_client_data": get_client_data,
         "search_knowledge": search_knowledge,
+        "complete_task": complete_task,
         "flag_plan_exception": flag_plan_exception,
     }
 

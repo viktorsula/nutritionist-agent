@@ -166,6 +166,21 @@ const resources = {
           url_required: "Укажите URL",
           error: "Не удалось сохранить источники",
         },
+        coverage: {
+          title: "Покрытие оркестратором",
+          hint: "Доля ходов, которые обработал LLM-оркестратор (основной путь), и число " +
+                "откатов на старый граф. Откат означает, что оркестратор упал: ответ клиент " +
+                "получил, но запись данных могла не сработать — стоит посмотреть логи. " +
+                "Счётчики живут в памяти процесса и обнуляются при каждом деплое.",
+          role: "Ветка",
+          role_client: "Клиент",
+          role_nutritionist: "Нутрициолог",
+          rate: "Доля оркестратора",
+          fallbacks: "Откатов на граф",
+          empty: "Ходов пока не было (или процесс только что перезапущен).",
+          refresh: "Обновить",
+          error: "Не удалось получить статистику",
+        },
         rag: {
           title: "Поиск по базе знаний",
           hint: "similarity_threshold — минимальная близость (0..1), ниже которой найденный " +
@@ -457,6 +472,13 @@ const resources = {
         on_date: "в дату",
       },
       metrics: {
+        // Значения показателей (P2-7) — отдельные ключи: `empty` ниже уже занят
+        // редактором каталога и означает «показатели не настроены», а не «нет значений».
+        values_title: "Контролируемые показатели",
+        values_empty: "Значений пока нет. Появятся, когда клиент начнёт присылать показатели, которые вы поставили на контроль.",
+        values_latest: "последнее",
+        values_records: "{{n}} записей",
+        values_error: "Не удалось загрузить показатели",
         heading: "Контролируемые показатели",
         hint: "Показатели, которые вы контролируете у клиента. Их можно ждать в ответ на напоминание.",
         empty: "Показателей нет",
@@ -781,6 +803,21 @@ const resources = {
           url_required: "Enter a URL",
           error: "Failed to save sources",
         },
+        coverage: {
+          title: "Orchestrator coverage",
+          hint: "Share of turns handled by the LLM orchestrator (the main path) and the " +
+                "number of fallbacks to the legacy graph. A fallback means the orchestrator " +
+                "failed: the client still got a reply, but data logging may not have run — " +
+                "worth checking the logs. Counters live in process memory and reset on deploy.",
+          role: "Branch",
+          role_client: "Client",
+          role_nutritionist: "Nutritionist",
+          rate: "Orchestrator share",
+          fallbacks: "Graph fallbacks",
+          empty: "No turns yet (or the process was just restarted).",
+          refresh: "Refresh",
+          error: "Failed to load stats",
+        },
         rag: {
           title: "Knowledge base search",
           hint: "similarity_threshold — minimum closeness (0..1) below which a retrieved " +
@@ -1072,6 +1109,11 @@ const resources = {
         on_date: "on date",
       },
       metrics: {
+        values_title: "Tracked metrics",
+        values_empty: "No values yet. They appear once the client starts reporting the metrics you put under control.",
+        values_latest: "latest",
+        values_records: "{{n}} records",
+        values_error: "Failed to load metrics",
         heading: "Tracked metrics",
         hint: "Metrics you track for this client. A reminder can expect one of them as a reply.",
         empty: "No metrics",

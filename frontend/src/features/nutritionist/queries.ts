@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
-import { api, type Reminder, type ControlledMetric } from "../../lib/api";
+import { api, type Reminder, type ControlledMetric, type MetricValue } from "../../lib/api";
 
 export interface RegistryRow {
   id: string;
@@ -101,6 +101,16 @@ export function useControlledMetrics(clientId: string) {
     enabled: !!clientId,
     queryFn: async (): Promise<ControlledMetric[]> =>
       (await api.listControlledMetrics(clientId)).metrics,
+  });
+}
+
+/** Значения контролируемых показателей (сон/произвольные) — P2-7. */
+export function useMetricValues(clientId: string) {
+  return useQuery({
+    queryKey: ["metric_values", clientId],
+    enabled: !!clientId,
+    queryFn: async (): Promise<MetricValue[]> =>
+      (await api.listMetricValues(clientId)).values,
   });
 }
 

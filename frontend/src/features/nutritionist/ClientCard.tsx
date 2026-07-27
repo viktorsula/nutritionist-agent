@@ -14,6 +14,7 @@ import {
   useNutritionDaily,
 } from "../client/queries";
 import { useAuditFindings, useClientEventsRecent, useClientRow, useQuestionnaireHistory } from "./queries";
+import { MetricValues } from "./MetricValues";
 import { NotificationSettings } from "./NotificationSettings";
 import { PlanEditor } from "./PlanEditor";
 import { WellnessEditor } from "./WellnessEditor";
@@ -558,6 +559,10 @@ export function ClientCard({ clientId, onBack }: { clientId: string; onBack: () 
           </Card>
         </div>
       </div>
+
+      <Card title={t("metrics.values_title")}>
+        <MetricValues clientId={clientId} />
+      </Card>
 
       <Card title={t("card.weight_chart")}>
         <WeightChart

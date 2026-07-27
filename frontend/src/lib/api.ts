@@ -120,6 +120,18 @@ export interface ControlledMetric {
   category?: "physical" | "sleep" | "custom";
 }
 
+/** Значение контролируемого показателя (client_metrics: сон/произвольные). */
+export interface MetricValue {
+  id: string;
+  metric_key: string;
+  category?: string | null;
+  value_num?: number | null;
+  value_text?: string | null;
+  unit?: string | null;
+  meta?: Record<string, unknown> | null;
+  measured_at: string;
+}
+
 /** Находка проактивного аудита клиента (NEW-1). */
 export interface AuditFinding {
   id: string;
@@ -175,11 +187,32 @@ export const api = {
       { method: "PUT", body: JSON.stringify({ metrics }) },
     ),
 
+  /**
+   * Значения контролируемых показателей клиента — сон и произвольные (пульс, стресс…)
+   * из client_metrics (P2-7). Физические замеры сюда не входят: они в measurements
+   * и выводятся графиками.
+   */
+  listMetricValues: (clientId: string) =>
+    request<{ values: MetricValue[] }>(
+      `/clients/${encodeURIComponent(clientId)}/metric-values`,
+    ),
+
   /** Открытые находки проактивного аудита клиента (NEW-1). */
   listAuditFindings: (clientId: string) =>
     request<{ findings: AuditFinding[] }>(
       `/clients/${encodeURIComponent(clientId)}/audit-findings`,
     ),
+
+  /**
+   * Покрытие ходов LLM-оркестраторами (наблюдаемость, P2-14). Счётчики in-memory за
+   * время жизни процесса — сбрасываются на каждом деплое/рестарте, это ожидаемо.
+   */
+  coverage: () =>
+    request<{
+      counts: Record<string, number>;
+      orchestrator_rate: { client: number | null; nutritionist: number | null };
+      fallbacks: { client: number; nutritionist: number };
+    }>("/nutritionist/coverage"),
 
   /** Отметить находку аудита как рассмотренную. */
   dismissAuditFinding: (clientId: string, findingId: string) =>
