@@ -674,6 +674,48 @@ def knowledge_delete(
     return {"ok": True}
 
 
+@app.get("/nutritionist/audit-logs")
+def audit_logs_list(
+    entity_type: str | None = None,
+    actor_type: str | None = None,
+    action: str | None = None,
+    before: str | None = None,
+    limit: int = 50,
+    user: Dict[str, Any] = Depends(require_role("nutritionist")),
+) -> Dict[str, Any]:
+    """
+    Журнал аудита (P2-8): фильтры опциональны, свежие сверху, `before` — курсор для
+    подгрузки более старых записей. Имена клиентов подставляются отдельным запросом:
+    у audit_logs нет FK на clients/users (actor_id/entity_id — просто UUID), поэтому
+    PostgREST не может встроить join сам.
+    """
+    from database import queries
+
+    limit = max(1, min(limit, 200))
+    logs = queries.get_audit_logs(
+        entity_type=entity_type, actor_type=actor_type, action=action,
+        before=before, limit=limit,
+    )
+
+    client_ids = {
+        row["entity_id"] for row in logs
+        if row.get("entity_type") == "client" and row.get("entity_id")
+    }
+    client_ids |= {
+        row["actor_id"] for row in logs
+        if row.get("actor_type") == "client" and row.get("actor_id")
+    }
+    names = {c["id"]: c.get("name") for c in queries.get_clients_by_ids(list(client_ids))}
+
+    for row in logs:
+        if row.get("entity_type") == "client" and row.get("entity_id") in names:
+            row["entity_name"] = names[row["entity_id"]]
+        if row.get("actor_type") == "client" and row.get("actor_id") in names:
+            row["actor_name"] = names[row["actor_id"]]
+
+    return {"logs": logs}
+
+
 CLIENT_DOCS_BUCKET = "client-documents"
 
 

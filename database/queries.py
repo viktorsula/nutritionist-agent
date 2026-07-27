@@ -1604,6 +1604,44 @@ def write_audit_log(
     )
 
 
+def get_audit_logs(
+    entity_type: Optional[str] = None,
+    actor_type: Optional[str] = None,
+    action: Optional[str] = None,
+    before: Optional[str] = None,
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Журнал аудита для просмотра нутрициологом (P2-8): таблица пишется с самого начала
+    (write_audit_log из множества мест), но пути чтения не было — записи были видны
+    только прямым SQL-запросом к БД. Фильтры опциональны, свежие сверху; курсорная
+    пагинация по timestamp через `before` (для кнопки «Загрузить ещё»).
+    """
+    supabase = _service_client()
+    query = supabase.table("audit_logs").select("*")
+    if entity_type:
+        query = query.eq("entity_type", entity_type)
+    if actor_type:
+        query = query.eq("actor_type", actor_type)
+    if action:
+        query = query.eq("action", action)
+    if before:
+        query = query.lt("timestamp", before)
+    response = query.order("timestamp", desc=True).limit(limit).execute()
+    return _extract_data(response) or []
+
+
+def get_clients_by_ids(client_ids: List[str]) -> List[Dict[str, Any]]:
+    """Имена клиентов по списку id — для подстановки читаемых имён в журнал аудита."""
+    if not client_ids:
+        return []
+    supabase = _service_client()
+    response = (
+        supabase.table("clients").select("id, name").in_("id", client_ids).execute()
+    )
+    return _extract_data(response) or []
+
+
 # =============================================
 # ФУНКЦИИ ДЛЯ N8N (АВТОМАТИЗАЦИЯ)
 # =============================================

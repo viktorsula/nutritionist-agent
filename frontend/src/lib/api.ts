@@ -145,6 +145,21 @@ export interface AuditFinding {
   dismissed_by: string | null;
 }
 
+/** Запись журнала аудита (audit_logs) — все действия нутрициолога/клиента/системы. */
+export interface AuditLogEntry {
+  id: string;
+  actor_type: "nutritionist" | "client" | "agent" | "system";
+  actor_id: string | null;
+  actor_name?: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  entity_name?: string | null;
+  old_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  timestamp: string;
+}
+
 export const api = {
   /** Текущий пользователь (роль, client_id, статусы) — авторитетно из БД. */
   me: () => request<AppUser>("/me"),
@@ -213,6 +228,28 @@ export const api = {
       orchestrator_rate: { client: number | null; nutritionist: number | null };
       fallbacks: { client: number; nutritionist: number };
     }>("/nutritionist/coverage"),
+
+  /**
+   * Журнал аудита (P2-8): audit_logs пишется с самого начала, но раньше был виден
+   * только прямым SQL-запросом к БД. Фильтры опциональны; `before` — курсор
+   * (timestamp самой старой полученной записи) для подгрузки более старых записей.
+   */
+  listAuditLogs: (params?: {
+    entityType?: string;
+    actorType?: string;
+    action?: string;
+    before?: string;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.entityType) q.set("entity_type", params.entityType);
+    if (params?.actorType) q.set("actor_type", params.actorType);
+    if (params?.action) q.set("action", params.action);
+    if (params?.before) q.set("before", params.before);
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return request<{ logs: AuditLogEntry[] }>(`/nutritionist/audit-logs${qs ? `?${qs}` : ""}`);
+  },
 
   /** Отметить находку аудита как рассмотренную. */
   dismissAuditFinding: (clientId: string, findingId: string) =>
